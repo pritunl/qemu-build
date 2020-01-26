@@ -1,0 +1,11 @@
+--- qemu-sanity-check-1.1.5.old/qemu-sanity-check.in	2014-07-02 19:10:50.000000000 +0100
++++ qemu-sanity-check-1.1.5/qemu-sanity-check.in	2019-02-03 11:50:42.843269577 +0000
+@@ -141,7 +141,7 @@
+ i=0
+ argv[$((i++))]="$qemu"
+ argv[$((i++))]="-nographic"
+-argv[$((i++))]="-nodefconfig"
++argv[$((i++))]="-no-user-config"
+ argv[$((i++))]="-nodefaults"
+ argv[$((i++))]="-machine"
+ argv[$((i++))]="accel=$accel"

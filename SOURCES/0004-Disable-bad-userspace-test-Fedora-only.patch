@@ -1,0 +1,27 @@
+From 67b7df2b0076148448916ad70ca9d35fb4a5c669 Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Thu, 22 Aug 2013 16:42:00 +0100
+Subject: [PATCH 4/4] Disable bad userspace test (Fedora only).
+
+---
+ Makefile.am | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/Makefile.am b/Makefile.am
+index 5f22f79..ec549d4 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -67,8 +67,8 @@ TESTS = \
+ 	test-timeout \
+ 	test-bad-options \
+ 	test-bad-kernel \
+-	test-bad-qemu \
+-	test-bad-userspace
++	test-bad-qemu
++#	test-bad-userspace
+ 
+ # Tag HEAD with current version (maintainer only).
+ 
+-- 
+1.8.3.1
+
