@@ -1,8 +1,8 @@
-%global gitdate 20191002
-%global gitversion 4ac3a04c
+%global gitdate 20200212
+%global gitversion 7d204f39
 
 Name:		virglrenderer
-Version:	0.8.0
+Version:	0.8.2
 Release:	1.%{gitdate}git%{gitversion}%{?dist}
 
 Summary:	Virgl Rendering library.
@@ -69,6 +69,15 @@ driver to test virgl rendering without GL.
 %{_bindir}/virgl_test_server
 
 %changelog
+* Wed Feb 12 2020 Marc-André Lureau <marcandre.lureau@redhat.com> - 0.8.2-1.20200212git7d204f39
+- Upstream release 0.8.2
+
+* Fri Jan 31 2020 Fedora Release Engineering <releng@fedoraproject.org> - 0.8.1-2.20191220git66c57963
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_32_Mass_Rebuild
+
+* Fri Dec 20 2019 Marc-André Lureau <marcandre.lureau@redhat.com> - 0.8.1-1.20191220git66c57963
+- Upstream release 0.8.1
+
 * Thu Oct 03 2019 Marc-André Lureau <marcandre.lureau@redhat.com> - 0.8.0-1.20191002git4ac3a04c
 - Latest upstream git snapshot
 

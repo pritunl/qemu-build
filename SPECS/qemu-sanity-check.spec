@@ -6,7 +6,7 @@
 
 Name:            qemu-sanity-check
 Version:         1.1.5
-Release:         13%{?dist}
+Release:         14%{?dist}
 Summary:         Simple qemu and Linux kernel sanity checker
 License:         GPLv2+
 
@@ -118,6 +118,9 @@ make DESTDIR=$RPM_BUILD_ROOT install
 
 
 %changelog
+* Thu Jan 30 2020 Fedora Release Engineering <releng@fedoraproject.org> - 1.1.5-14
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_32_Mass_Rebuild
+
 * Fri Jul 26 2019 Richard W.M. Jones <rjones@redhat.com> - 1.1.5-13
 - Disable on i686 because no kernel package.
 

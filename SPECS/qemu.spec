@@ -139,7 +139,7 @@
 %{obsoletes_block_rbd}
 
 # Release candidate version tracking
-#%%global rcver rc5
+%global rcver rc2
 %if 0%{?rcver:1}
 %global rcrel .%{rcver}
 %global rcstr -%{rcver}
@@ -148,8 +148,8 @@
 
 Summary: QEMU is a FAST! processor emulator
 Name: qemu
-Version: 4.2.0
-Release: 2%{?rcrel}%{?dist}
+Version: 5.0.0
+Release: 0.3%{?rcrel}%{?dist}
 Epoch: 2
 License: GPLv2 and BSD and MIT and CC-BY
 URL: http://www.qemu.org/
@@ -217,7 +217,6 @@ BuildRequires: lzo-devel
 BuildRequires: ncurses-devel
 # used by 9pfs
 BuildRequires: libattr-devel
-BuildRequires: libcap-devel
 # used by qemu-bridge-helper and qemu-pr-helper
 BuildRequires: libcap-ng-devel
 # spice usb redirection support
@@ -243,8 +242,6 @@ BuildRequires: systemtap-sdt-devel
 BuildRequires: libjpeg-devel
 # For VNC PNG support
 BuildRequires: libpng-devel
-# For BlueZ device support
-BuildRequires: bluez-libs-devel
 # For Braille device support
 BuildRequires: brlapi-devel
 # For FDT device tree support
@@ -307,6 +304,14 @@ BuildRequires: perl-Test-Harness
 # Required for making python shebangs versioned
 BuildRequires: /usr/bin/pathfix.py
 BuildRequires: python3-devel
+%ifnarch %{arm}
+# qemu 5.0 liburing support. Library isn't built for arm
+BuildRequires: liburing-devel
+%endif
+# qemu 5.0 zstd compression support
+BuildRequires: libzstd-devel
+# `hostname` used by test suite
+BuildRequires: hostname
 
 BuildRequires: glibc-static pcre-static glib2-static zlib-static
 
@@ -333,6 +338,7 @@ Requires: %{name}-system-nios2 = %{epoch}:%{version}-%{release}
 Requires: %{name}-system-or1k = %{epoch}:%{version}-%{release}
 Requires: %{name}-system-ppc = %{epoch}:%{version}-%{release}
 Requires: %{name}-system-riscv = %{epoch}:%{version}-%{release}
+Requires: %{name}-system-rx = %{epoch}:%{version}-%{release}
 Requires: %{name}-system-s390x = %{epoch}:%{version}-%{release}
 Requires: %{name}-system-sh4 = %{epoch}:%{version}-%{release}
 Requires: %{name}-system-sparc = %{epoch}:%{version}-%{release}
@@ -759,6 +765,20 @@ Requires: %{name}-common = %{epoch}:%{version}-%{release}
 This package provides the QEMU system emulator for RISC-V systems.
 
 
+%package system-rx
+Summary: QEMU system emulator for RX
+Requires: %{name}-system-rx-core = %{epoch}:%{version}-%{release}
+%{requires_all_modules}
+%description system-rx
+This package provides the QEMU system emulator for RX systems.
+
+%package system-rx-core
+Summary: QEMU system emulator for RX
+Requires: %{name}-common = %{epoch}:%{version}-%{release}
+%description system-rx-core
+This package provides the QEMU system emulator for RX systems.
+
+
 %package system-s390x
 Summary: QEMU system emulator for S390
 Requires: %{name}-system-s390x-core = %{epoch}:%{version}-%{release}
@@ -940,8 +960,8 @@ run_configure_disable_everything() {
         --disable-attr \
         --disable-auth-pam \
         --disable-avx2 \
+        --disable-avx512f \
         --disable-blobs \
-        --disable-bluez \
         --disable-bochs \
         --disable-brlapi \
         --disable-bsd-user \
@@ -978,6 +998,7 @@ run_configure_disable_everything() {
         --disable-libusb \
         --disable-libxml2 \
         --disable-linux-aio \
+        --disable-linux-io-uring \
         --disable-linux-user \
         --disable-live-block-migration \
         --disable-lzfse \
@@ -1035,6 +1056,7 @@ run_configure_disable_everything() {
         --disable-xen \
         --disable-xen-pci-passthrough \
         --disable-xfsctl \
+        --disable-zstd \
         --without-default-devices \
         "$@"
 }
@@ -1281,7 +1303,8 @@ chmod +x %{buildroot}%{_libdir}/qemu/*.so
 %global archs_ignore_test_failures 0
 
 # Enable this temporarily if tests are broken
-%global temp_skip_check 0
+# An iotest is failing for i686
+%global temp_skip_check 1
 
 pushd build-dynamic
 %ifnarch %{archs_skip_tests}
@@ -1346,15 +1369,17 @@ getent passwd qemu >/dev/null || \
 %files common
 %dir %{qemudocdir}
 %doc %{qemudocdir}/Changelog
-%doc %{qemudocdir}/qemu-doc.html
-%doc %{qemudocdir}/qemu-doc.txt
 %doc %{qemudocdir}/qemu-ga-ref.html
 %doc %{qemudocdir}/qemu-ga-ref.txt
 %doc %{qemudocdir}/qemu-qmp-ref.html
 %doc %{qemudocdir}/qemu-qmp-ref.txt
 %doc %{qemudocdir}/README.rst
+%doc %{qemudocdir}/index.html
 %doc %{qemudocdir}/interop
 %doc %{qemudocdir}/specs
+%doc %{qemudocdir}/system
+%doc %{qemudocdir}/tools
+%doc %{qemudocdir}/user
 %license %{qemudocdir}/COPYING
 %license %{qemudocdir}/COPYING.LIB
 %license %{qemudocdir}/LICENSE
@@ -1390,9 +1415,11 @@ getent passwd qemu >/dev/null || \
 %{_datadir}/%{name}/pxe-vmxnet3.rom
 %{_datadir}/%{name}/efi-vmxnet3.rom
 %{_datadir}/%{name}/vhost-user/50-qemu-gpu.json
+%{_datadir}/%{name}/vhost-user/50-qemu-virtiofsd.json
 %{_mandir}/man1/qemu.1*
 %{_mandir}/man1/qemu-trace-stap.1*
 %{_mandir}/man1/virtfs-proxy-helper.1*
+%{_mandir}/man1/virtiofsd.1*
 %{_mandir}/man7/qemu-block-drivers.7*
 %{_mandir}/man7/qemu-cpu-models.7*
 %{_mandir}/man7/qemu-ga-ref.7*
@@ -1401,12 +1428,14 @@ getent passwd qemu >/dev/null || \
 %{_bindir}/qemu-edid
 %{_bindir}/qemu-keymap
 %{_bindir}/qemu-pr-helper
+%{_bindir}/qemu-storage-daemon
 %{_bindir}/qemu-trace-stap
 %{_bindir}/virtfs-proxy-helper
 %{_unitdir}/qemu-pr-helper.service
 %{_unitdir}/qemu-pr-helper.socket
 %attr(4755, root, root) %{_libexecdir}/qemu-bridge-helper
 %{_libexecdir}/vhost-user-gpu
+%{_libexecdir}/virtiofsd
 %config(noreplace) %{_sysconfdir}/sasl2/qemu.conf
 %dir %{_sysconfdir}/qemu
 %config(noreplace) %{_sysconfdir}/qemu/bridge.conf
@@ -1518,111 +1547,26 @@ getent passwd qemu >/dev/null || \
 %{_bindir}/qemu-xtensa
 %{_bindir}/qemu-xtensaeb
 
-%{_datadir}/systemtap/tapset/qemu-i386.stp
-%{_datadir}/systemtap/tapset/qemu-i386-log.stp
-%{_datadir}/systemtap/tapset/qemu-i386-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-x86_64.stp
-%{_datadir}/systemtap/tapset/qemu-x86_64-log.stp
-%{_datadir}/systemtap/tapset/qemu-x86_64-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-aarch64.stp
-%{_datadir}/systemtap/tapset/qemu-aarch64-log.stp
-%{_datadir}/systemtap/tapset/qemu-aarch64-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-aarch64_be.stp
-%{_datadir}/systemtap/tapset/qemu-aarch64_be-log.stp
-%{_datadir}/systemtap/tapset/qemu-aarch64_be-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-alpha.stp
-%{_datadir}/systemtap/tapset/qemu-alpha-log.stp
-%{_datadir}/systemtap/tapset/qemu-alpha-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-arm.stp
-%{_datadir}/systemtap/tapset/qemu-arm-log.stp
-%{_datadir}/systemtap/tapset/qemu-arm-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-armeb.stp
-%{_datadir}/systemtap/tapset/qemu-armeb-log.stp
-%{_datadir}/systemtap/tapset/qemu-armeb-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-cris.stp
-%{_datadir}/systemtap/tapset/qemu-cris-log.stp
-%{_datadir}/systemtap/tapset/qemu-cris-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-hppa.stp
-%{_datadir}/systemtap/tapset/qemu-hppa-log.stp
-%{_datadir}/systemtap/tapset/qemu-hppa-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-m68k.stp
-%{_datadir}/systemtap/tapset/qemu-m68k-log.stp
-%{_datadir}/systemtap/tapset/qemu-m68k-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-microblaze.stp
-%{_datadir}/systemtap/tapset/qemu-microblaze-log.stp
-%{_datadir}/systemtap/tapset/qemu-microblaze-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-microblazeel.stp
-%{_datadir}/systemtap/tapset/qemu-microblazeel-log.stp
-%{_datadir}/systemtap/tapset/qemu-microblazeel-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-mips.stp
-%{_datadir}/systemtap/tapset/qemu-mips-log.stp
-%{_datadir}/systemtap/tapset/qemu-mips-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-mipsel.stp
-%{_datadir}/systemtap/tapset/qemu-mipsel-log.stp
-%{_datadir}/systemtap/tapset/qemu-mipsel-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-mips64.stp
-%{_datadir}/systemtap/tapset/qemu-mips64-log.stp
-%{_datadir}/systemtap/tapset/qemu-mips64-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-mips64el.stp
-%{_datadir}/systemtap/tapset/qemu-mips64el-log.stp
-%{_datadir}/systemtap/tapset/qemu-mips64el-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-mipsn32.stp
-%{_datadir}/systemtap/tapset/qemu-mipsn32-log.stp
-%{_datadir}/systemtap/tapset/qemu-mipsn32-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-mipsn32el.stp
-%{_datadir}/systemtap/tapset/qemu-mipsn32el-log.stp
-%{_datadir}/systemtap/tapset/qemu-mipsn32el-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-nios2.stp
-%{_datadir}/systemtap/tapset/qemu-nios2-log.stp
-%{_datadir}/systemtap/tapset/qemu-nios2-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-or1k.stp
-%{_datadir}/systemtap/tapset/qemu-or1k-log.stp
-%{_datadir}/systemtap/tapset/qemu-or1k-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-ppc.stp
-%{_datadir}/systemtap/tapset/qemu-ppc-log.stp
-%{_datadir}/systemtap/tapset/qemu-ppc-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64-log.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64abi32.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64abi32-log.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64abi32-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64le.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64le-log.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64le-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-riscv32.stp
-%{_datadir}/systemtap/tapset/qemu-riscv32-log.stp
-%{_datadir}/systemtap/tapset/qemu-riscv32-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-riscv64.stp
-%{_datadir}/systemtap/tapset/qemu-riscv64-log.stp
-%{_datadir}/systemtap/tapset/qemu-riscv64-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-s390x.stp
-%{_datadir}/systemtap/tapset/qemu-s390x-log.stp
-%{_datadir}/systemtap/tapset/qemu-s390x-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-sh4.stp
-%{_datadir}/systemtap/tapset/qemu-sh4-log.stp
-%{_datadir}/systemtap/tapset/qemu-sh4-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-sh4eb.stp
-%{_datadir}/systemtap/tapset/qemu-sh4eb-log.stp
-%{_datadir}/systemtap/tapset/qemu-sh4eb-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-sparc.stp
-%{_datadir}/systemtap/tapset/qemu-sparc-log.stp
-%{_datadir}/systemtap/tapset/qemu-sparc-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-sparc32plus.stp
-%{_datadir}/systemtap/tapset/qemu-sparc32plus-log.stp
-%{_datadir}/systemtap/tapset/qemu-sparc32plus-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-sparc64.stp
-%{_datadir}/systemtap/tapset/qemu-sparc64-log.stp
-%{_datadir}/systemtap/tapset/qemu-sparc64-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-tilegx.stp
-%{_datadir}/systemtap/tapset/qemu-tilegx-log.stp
-%{_datadir}/systemtap/tapset/qemu-tilegx-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-xtensa.stp
-%{_datadir}/systemtap/tapset/qemu-xtensa-log.stp
-%{_datadir}/systemtap/tapset/qemu-xtensa-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-xtensaeb.stp
-%{_datadir}/systemtap/tapset/qemu-xtensaeb-log.stp
-%{_datadir}/systemtap/tapset/qemu-xtensaeb-simpletrace.stp
+%{_datadir}/systemtap/tapset/qemu-i386*.stp
+%{_datadir}/systemtap/tapset/qemu-x86_64*.stp
+%{_datadir}/systemtap/tapset/qemu-aarch64*.stp
+%{_datadir}/systemtap/tapset/qemu-alpha*.stp
+%{_datadir}/systemtap/tapset/qemu-arm*.stp
+%{_datadir}/systemtap/tapset/qemu-cris*.stp
+%{_datadir}/systemtap/tapset/qemu-hppa*.stp
+%{_datadir}/systemtap/tapset/qemu-m68k*.stp
+%{_datadir}/systemtap/tapset/qemu-microblaze*.stp
+%{_datadir}/systemtap/tapset/qemu-mips*.stp
+%{_datadir}/systemtap/tapset/qemu-nios2*.stp
+%{_datadir}/systemtap/tapset/qemu-or1k*.stp
+%{_datadir}/systemtap/tapset/qemu-ppc*.stp
+%{_datadir}/systemtap/tapset/qemu-riscv*.stp
+%{_datadir}/systemtap/tapset/qemu-s390x*.stp
+%{_datadir}/systemtap/tapset/qemu-sh4*.stp
+%{_datadir}/systemtap/tapset/qemu-sparc*.stp
+%{_datadir}/systemtap/tapset/qemu-tilegx*.stp
+%{_datadir}/systemtap/tapset/qemu-xtensa*.stp
+
 
 %files user-binfmt
 %{_exec_prefix}/lib/binfmt.d/qemu-*-dynamic.conf
@@ -1741,7 +1685,6 @@ getent passwd qemu >/dev/null || \
 %{_mandir}/man1/qemu-system-ppc64.1*
 %{_datadir}/%{name}/bamboo.dtb
 %{_datadir}/%{name}/canyonlands.dtb
-%{_datadir}/%{name}/ppc_rom.bin
 %{_datadir}/%{name}/qemu_vga.ndrv
 %{_datadir}/%{name}/skiboot.lid
 %{_datadir}/%{name}/u-boot.e500
@@ -1758,6 +1701,13 @@ getent passwd qemu >/dev/null || \
 %{_datadir}/%{name}/opensbi-riscv*.bin
 %{_datadir}/systemtap/tapset/qemu-system-riscv*.stp
 %{_mandir}/man1/qemu-system-riscv*.1*
+
+
+%files system-rx
+%files system-rx-core
+%{_bindir}/qemu-system-rx
+%{_datadir}/systemtap/tapset/qemu-system-rx*.stp
+%{_mandir}/man1/qemu-system-rx.1*
 
 
 %files system-s390x
@@ -1837,6 +1787,30 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
+* Thu Apr 09 2020 Cole Robinson <aintdiscole@gmail.com> - 5.0.0-0.3.rc2
+- Update to qemu 5.0.0 rc2
+
+* Wed Apr 08 2020 Adam Williamson <awilliam@redhat.com> - 2:5.0.0-0.2.rc0
+- Rebuild for new brltty
+
+* Wed Mar 25 2020 Cole Robinson <crobinso@redhat.com> - 2:5.0.0-0.1.rc0
+- Update to qemu-5.0.0-rc0
+
+* Tue Mar 17 2020 Fabiano Fidêncio <fidencio@redhat.com> - 2:4.2.0-7
+- Fix segfault with SR-IOV hot-{plug,unplug} (bz #1814017)
+
+* Tue Feb 25 2020 Cole Robinson <crobinso@redhat.com> - 2:4.2.0-6
+- Rebuild for libiscsi soname bump
+
+* Sat Feb 15 2020 Cole Robinson <crobinso@redhat.com> - 2:4.2.0-5
+- Fix ppc shutdown issue (bz #1784961)
+
+* Tue Jan 28 2020 Cole Robinson <crobinso@redhat.com> - 2:4.2.0-4
+- virtio-fs support
+
+* Sat Jan 25 2020 Richard W.M. Jones <rjones@redhat.com> - 4.2.0-3
+- Add miscellaneous fixes for RISC-V (RHBZ#1794902).
+
 * Thu Dec 19 2019 Mohan Boddu <mboddu@bhujji.com> - 4.2.0-2
 - Rebuild for xen 4.13
 
