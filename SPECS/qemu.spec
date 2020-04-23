@@ -147,14 +147,14 @@
 
 
 Summary: QEMU is a FAST! processor emulator
-Name: qemu
+Name: pritunl-qemu
 Version: 5.0.0
 Release: 0.3%{?rcrel}%{?dist}
 Epoch: 2
 License: GPLv2 and BSD and MIT and CC-BY
 URL: http://www.qemu.org/
 
-Source0: http://wiki.qemu-project.org/download/%{name}-%{version}%{?rcstr}.tar.xz
+Source0: http://wiki.qemu-project.org/download/qemu-%{version}%{?rcstr}.tar.xz
 
 # guest agent service
 Source10: qemu-guest-agent.service
@@ -1119,7 +1119,7 @@ popd
 %install
 
 %global _udevdir /lib/udev/rules.d
-%global qemudocdir %{_docdir}/%{name}
+%global qemudocdir %{_docdir}/qemu
 
 
 # Install rules to use the bridge helper with libvirt's virbr0
@@ -1223,28 +1223,28 @@ done
 # configure --firmwarepath, see qemu git 3d5eecab4
 
 # Provided by package openbios
-rm -rf %{buildroot}%{_datadir}/%{name}/openbios-ppc
-rm -rf %{buildroot}%{_datadir}/%{name}/openbios-sparc32
-rm -rf %{buildroot}%{_datadir}/%{name}/openbios-sparc64
+rm -rf %{buildroot}%{_datadir}/qemu/openbios-ppc
+rm -rf %{buildroot}%{_datadir}/qemu/openbios-sparc32
+rm -rf %{buildroot}%{_datadir}/qemu/openbios-sparc64
 # Provided by package SLOF
-rm -rf %{buildroot}%{_datadir}/%{name}/slof.bin
+rm -rf %{buildroot}%{_datadir}/qemu/slof.bin
 # Provided by package ipxe
-rm -rf %{buildroot}%{_datadir}/%{name}/pxe*rom
-rm -rf %{buildroot}%{_datadir}/%{name}/efi*rom
+rm -rf %{buildroot}%{_datadir}/qemu/pxe*rom
+rm -rf %{buildroot}%{_datadir}/qemu/efi*rom
 # Provided by package seavgabios
-rm -rf %{buildroot}%{_datadir}/%{name}/vgabios*bin
+rm -rf %{buildroot}%{_datadir}/qemu/vgabios*bin
 # Provided by package seabios
-rm -rf %{buildroot}%{_datadir}/%{name}/bios.bin
-rm -rf %{buildroot}%{_datadir}/%{name}/bios-256k.bin
+rm -rf %{buildroot}%{_datadir}/qemu/bios.bin
+rm -rf %{buildroot}%{_datadir}/qemu/bios-256k.bin
 # Provided by package sgabios
-rm -rf %{buildroot}%{_datadir}/%{name}/sgabios.bin
+rm -rf %{buildroot}%{_datadir}/qemu/sgabios.bin
 # Provided by package edk2
-rm -rf %{buildroot}%{_datadir}/%{name}/edk2*
-rm -rf %{buildroot}%{_datadir}/%{name}/firmware/*edk2*.json
+rm -rf %{buildroot}%{_datadir}/qemu/edk2*
+rm -rf %{buildroot}%{_datadir}/qemu/firmware/*edk2*.json
 
 pxe_link() {
-  ln -s ../ipxe/$2.rom %{buildroot}%{_datadir}/%{name}/pxe-$1.rom
-  ln -s ../ipxe.efi/$2.rom %{buildroot}%{_datadir}/%{name}/efi-$1.rom
+  ln -s ../ipxe/$2.rom %{buildroot}%{_datadir}/qemu/pxe-$1.rom
+  ln -s ../ipxe.efi/$2.rom %{buildroot}%{_datadir}/qemu/efi-$1.rom
 }
 
 pxe_link e1000 8086100e
@@ -1257,7 +1257,7 @@ pxe_link e1000e 808610d3
 pxe_link vmxnet3 15ad07b0
 
 rom_link() {
-    ln -s $1 %{buildroot}%{_datadir}/%{name}/$2
+    ln -s $1 %{buildroot}%{_datadir}/qemu/$2
 }
 
 rom_link ../seavgabios/vgabios-isavga.bin vgabios.bin
@@ -1383,39 +1383,39 @@ getent passwd qemu >/dev/null || \
 %license %{qemudocdir}/COPYING
 %license %{qemudocdir}/COPYING.LIB
 %license %{qemudocdir}/LICENSE
-%dir %{_datadir}/%{name}/
+%dir %{_datadir}/qemu/
 %{_datadir}/applications/qemu.desktop
 %{_datadir}/icons/hicolor/*/apps/*
-%exclude %{_datadir}/%{name}/qemu-nsis.bmp
-%{_datadir}/%{name}/keymaps/
-%{_datadir}/%{name}/trace-events-all
-%{_datadir}/%{name}/vgabios.bin
-%{_datadir}/%{name}/vgabios-cirrus.bin
-%{_datadir}/%{name}/vgabios-qxl.bin
-%{_datadir}/%{name}/vgabios-stdvga.bin
-%{_datadir}/%{name}/vgabios-vmware.bin
-%{_datadir}/%{name}/vgabios-virtio.bin
-%{_datadir}/%{name}/vgabios-ramfb.bin
-%{_datadir}/%{name}/vgabios-bochs-display.bin
-%{_datadir}/%{name}/vgabios-ati.bin
-%{_datadir}/%{name}/pxe-e1000.rom
-%{_datadir}/%{name}/efi-e1000.rom
-%{_datadir}/%{name}/pxe-e1000e.rom
-%{_datadir}/%{name}/efi-e1000e.rom
-%{_datadir}/%{name}/pxe-eepro100.rom
-%{_datadir}/%{name}/efi-eepro100.rom
-%{_datadir}/%{name}/pxe-ne2k_pci.rom
-%{_datadir}/%{name}/efi-ne2k_pci.rom
-%{_datadir}/%{name}/pxe-pcnet.rom
-%{_datadir}/%{name}/efi-pcnet.rom
-%{_datadir}/%{name}/pxe-rtl8139.rom
-%{_datadir}/%{name}/efi-rtl8139.rom
-%{_datadir}/%{name}/pxe-virtio.rom
-%{_datadir}/%{name}/efi-virtio.rom
-%{_datadir}/%{name}/pxe-vmxnet3.rom
-%{_datadir}/%{name}/efi-vmxnet3.rom
-%{_datadir}/%{name}/vhost-user/50-qemu-gpu.json
-%{_datadir}/%{name}/vhost-user/50-qemu-virtiofsd.json
+%exclude %{_datadir}/qemu/qemu-nsis.bmp
+%{_datadir}/qemu/keymaps/
+%{_datadir}/qemu/trace-events-all
+%{_datadir}/qemu/vgabios.bin
+%{_datadir}/qemu/vgabios-cirrus.bin
+%{_datadir}/qemu/vgabios-qxl.bin
+%{_datadir}/qemu/vgabios-stdvga.bin
+%{_datadir}/qemu/vgabios-vmware.bin
+%{_datadir}/qemu/vgabios-virtio.bin
+%{_datadir}/qemu/vgabios-ramfb.bin
+%{_datadir}/qemu/vgabios-bochs-display.bin
+%{_datadir}/qemu/vgabios-ati.bin
+%{_datadir}/qemu/pxe-e1000.rom
+%{_datadir}/qemu/efi-e1000.rom
+%{_datadir}/qemu/pxe-e1000e.rom
+%{_datadir}/qemu/efi-e1000e.rom
+%{_datadir}/qemu/pxe-eepro100.rom
+%{_datadir}/qemu/efi-eepro100.rom
+%{_datadir}/qemu/pxe-ne2k_pci.rom
+%{_datadir}/qemu/efi-ne2k_pci.rom
+%{_datadir}/qemu/pxe-pcnet.rom
+%{_datadir}/qemu/efi-pcnet.rom
+%{_datadir}/qemu/pxe-rtl8139.rom
+%{_datadir}/qemu/efi-rtl8139.rom
+%{_datadir}/qemu/pxe-virtio.rom
+%{_datadir}/qemu/efi-virtio.rom
+%{_datadir}/qemu/pxe-vmxnet3.rom
+%{_datadir}/qemu/efi-vmxnet3.rom
+%{_datadir}/qemu/vhost-user/50-qemu-gpu.json
+%{_datadir}/qemu/vhost-user/50-qemu-virtiofsd.json
 %{_mandir}/man1/qemu.1*
 %{_mandir}/man1/qemu-trace-stap.1*
 %{_mandir}/man1/virtfs-proxy-helper.1*
@@ -1593,7 +1593,7 @@ getent passwd qemu >/dev/null || \
 %{_bindir}/qemu-system-alpha
 %{_datadir}/systemtap/tapset/qemu-system-alpha*.stp
 %{_mandir}/man1/qemu-system-alpha.1*
-%{_datadir}/%{name}/palcode-clipper
+%{_datadir}/qemu/palcode-clipper
 
 
 %files system-arm
@@ -1615,7 +1615,7 @@ getent passwd qemu >/dev/null || \
 %{_bindir}/qemu-system-hppa
 %{_datadir}/systemtap/tapset/qemu-system-hppa*.stp
 %{_mandir}/man1/qemu-system-hppa.1*
-%{_datadir}/%{name}/hppa-firmware.img
+%{_datadir}/qemu/hppa-firmware.img
 
 
 %files system-lm32
@@ -1639,7 +1639,7 @@ getent passwd qemu >/dev/null || \
 %{_datadir}/systemtap/tapset/qemu-system-microblaze*.stp
 %{_mandir}/man1/qemu-system-microblaze.1*
 %{_mandir}/man1/qemu-system-microblazeel.1*
-%{_datadir}/%{name}/petalogix*.dtb
+%{_datadir}/qemu/petalogix*.dtb
 
 
 %files system-mips
@@ -1683,12 +1683,12 @@ getent passwd qemu >/dev/null || \
 %{_datadir}/systemtap/tapset/qemu-system-ppc*.stp
 %{_mandir}/man1/qemu-system-ppc.1*
 %{_mandir}/man1/qemu-system-ppc64.1*
-%{_datadir}/%{name}/bamboo.dtb
-%{_datadir}/%{name}/canyonlands.dtb
-%{_datadir}/%{name}/qemu_vga.ndrv
-%{_datadir}/%{name}/skiboot.lid
-%{_datadir}/%{name}/u-boot.e500
-%{_datadir}/%{name}/u-boot-sam460-20100605.bin
+%{_datadir}/qemu/bamboo.dtb
+%{_datadir}/qemu/canyonlands.dtb
+%{_datadir}/qemu/qemu_vga.ndrv
+%{_datadir}/qemu/skiboot.lid
+%{_datadir}/qemu/u-boot.e500
+%{_datadir}/qemu/u-boot-sam460-20100605.bin
 %ifarch %{power64}
 %{_sysconfdir}/security/limits.d/95-kvm-ppc64-memlock.conf
 %endif
@@ -1698,7 +1698,7 @@ getent passwd qemu >/dev/null || \
 %files system-riscv-core
 %{_bindir}/qemu-system-riscv32
 %{_bindir}/qemu-system-riscv64
-%{_datadir}/%{name}/opensbi-riscv*.bin
+%{_datadir}/qemu/opensbi-riscv*.bin
 %{_datadir}/systemtap/tapset/qemu-system-riscv*.stp
 %{_mandir}/man1/qemu-system-riscv*.1*
 
@@ -1715,8 +1715,8 @@ getent passwd qemu >/dev/null || \
 %{_bindir}/qemu-system-s390x
 %{_datadir}/systemtap/tapset/qemu-system-s390x*.stp
 %{_mandir}/man1/qemu-system-s390x.1*
-%{_datadir}/%{name}/s390-ccw.img
-%{_datadir}/%{name}/s390-netboot.img
+%{_datadir}/qemu/s390-ccw.img
+%{_datadir}/qemu/s390-netboot.img
 
 
 %files system-sh4
@@ -1735,8 +1735,8 @@ getent passwd qemu >/dev/null || \
 %{_datadir}/systemtap/tapset/qemu-system-sparc*.stp
 %{_mandir}/man1/qemu-system-sparc.1*
 %{_mandir}/man1/qemu-system-sparc64.1*
-%{_datadir}/%{name}/QEMU,tcx.bin
-%{_datadir}/%{name}/QEMU,cgthree.bin
+%{_datadir}/qemu/QEMU,tcx.bin
+%{_datadir}/qemu/QEMU,cgthree.bin
 
 
 %files system-tricore
@@ -1761,15 +1761,15 @@ getent passwd qemu >/dev/null || \
 %{_datadir}/systemtap/tapset/qemu-system-x86_64*.stp
 %{_mandir}/man1/qemu-system-i386.1*
 %{_mandir}/man1/qemu-system-x86_64.1*
-%{_datadir}/%{name}/bios.bin
-%{_datadir}/%{name}/bios-256k.bin
-%{_datadir}/%{name}/bios-microvm.bin
-%{_datadir}/%{name}/kvmvapic.bin
-%{_datadir}/%{name}/linuxboot.bin
-%{_datadir}/%{name}/linuxboot_dma.bin
-%{_datadir}/%{name}/multiboot.bin
-%{_datadir}/%{name}/pvh.bin
-%{_datadir}/%{name}/sgabios.bin
+%{_datadir}/qemu/bios.bin
+%{_datadir}/qemu/bios-256k.bin
+%{_datadir}/qemu/bios-microvm.bin
+%{_datadir}/qemu/kvmvapic.bin
+%{_datadir}/qemu/linuxboot.bin
+%{_datadir}/qemu/linuxboot_dma.bin
+%{_datadir}/qemu/multiboot.bin
+%{_datadir}/qemu/pvh.bin
+%{_datadir}/qemu/sgabios.bin
 %if 0%{?need_qemu_kvm}
 %{_bindir}/qemu-kvm
 %{_mandir}/man1/qemu-kvm.1*
