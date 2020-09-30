@@ -1,14 +1,13 @@
 Name:           libslirp
-Version:        4.0.0
-Release:        3%{?dist}
+Version:        4.3.1
+Release:        1%{?dist}
 Summary:        A general purpose TCP-IP emulator
 
 # check the SPDX tags in source files for details
 License:        BSD and MIT
 URL:            https://gitlab.freedesktop.org/slirp/%{name}
-Source0:        %{url}/-/archive/v%{version}/%{name}-v%{version}.tar.gz
+Source0:        %{url}/-/archive/v%{version}/%{name}-%{version}.tar.xz
 
-Patch0001:      0001-Fix-heap-overflow-in-ip_reass-on-big-packet-input.patch
 BuildRequires:  git-core
 BuildRequires:  meson
 BuildRequires:  gcc
@@ -29,7 +28,7 @@ developing applications that use %{name}.
 
 
 %prep
-%autosetup -S git_am -n %{name}-v%{version}
+%autosetup -S git_am
 
 %build
 %meson
@@ -42,7 +41,7 @@ developing applications that use %{name}.
 
 %files
 %license COPYRIGHT
-%doc README.md
+%doc README.md CHANGELOG.md
 %{_libdir}/%{name}.so.0*
 
 %files devel
@@ -53,6 +52,24 @@ developing applications that use %{name}.
 
 
 %changelog
+* Wed Jul 08 2020 Marc-André Lureau <marcandre.lureau@redhat.com> - 4.3.1-1
+- New v4.3.1 release
+
+* Thu Apr 23 2020 Marc-André Lureau <marcandre.lureau@redhat.com> - 4.3.0-1
+- New v4.3.0 release
+
+* Mon Apr 20 2020 Marc-André Lureau <marcandre.lureau@redhat.com> - 4.2.0-2
+- CVE-2020-1983 fix
+
+* Tue Mar 17 2020 Marc-André Lureau <marcandre.lureau@redhat.com> - 4.2.0-1
+- New v4.2.0 release
+
+* Wed Jan 29 2020 Fedora Release Engineering <releng@fedoraproject.org> - 4.1.0-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_32_Mass_Rebuild
+
+* Tue Dec 03 2019 Marc-André Lureau <marcandre.lureau@redhat.com> - 4.1.0-1
+- New v4.1.0 release
+
 * Fri Aug  2 2019 Marc-André Lureau <marcandre.lureau@redhat.com> - 4.0.0-3
 - Fix CVE-2019-14378, rhbz#1735654
 

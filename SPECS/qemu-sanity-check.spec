@@ -1,30 +1,32 @@
-# _hardened_build breaks building the static 'init' binary.
-# https://bugzilla.redhat.com/1204162
-%undefine _hardened_build
-
 %global debug_package %{nil}
 
+# Architectures where the tests should pass.
+#
+# 2020-09: Fails on power64 because qemu TCG does not support all the
+#   features required to boot Fedora.
+#
+# 2020-09: armv7 failed with:
+# ./qemu-sanity-check: cannot find a Linux kernel in /boot
+#
+# 2020-09: aarch64 hangs.
+%global test_arches %{s390x} x86_64
+
 Name:            qemu-sanity-check
-Version:         1.1.5
-Release:         14%{?dist}
+Version:         1.1.6
+Release:         1%{?dist}
 Summary:         Simple qemu and Linux kernel sanity checker
 License:         GPLv2+
 
-# https://bugzilla.redhat.com/show_bug.cgi?id=1733606
-ExcludeArch:     i686
+ExclusiveArch:   x86_64
 
 URL:             http://people.redhat.com/~rjones/qemu-sanity-check
 Source0:         http://people.redhat.com/~rjones/qemu-sanity-check/files/%{name}-%{version}.tar.gz
+Source1:         http://people.redhat.com/~rjones/qemu-sanity-check/files/%{name}-%{version}.tar.gz.sig
+# Keyring used to verify tarball signature.
+Source2:        libguestfs.keyring
 
-# Upstream patch to remove deprecated -nodefconfig option.
-Patch1:          0001-Replace-nodefconfig-with-no-user-config.patch
-
-# Non-upstream patch to disable test which fails on broken kernels
-# which don't respond to panic=1 option properly.
-Patch4:          0004-Disable-bad-userspace-test-Fedora-only.patch
-
-# Because the above patch touches configure.ac/Makefile.am:
-BuildRequires:   autoconf, automake
+# To verify the tarball signature.
+BuildRequires:  gnupg2
 
 BuildRequires:   gcc
 
@@ -35,23 +37,34 @@ BuildRequires:   /usr/bin/perldoc
 BuildRequires:   cpio
 BuildRequires:   glibc-static
 
-# BuildRequire these in order to let 'make check' run.  These are
-# not required unless you want to run the tests.  Note don't run the
-# tests on ARM since qemu isn't likely to work.
-
+# For testing.
 BuildRequires:   kernel
 
 # For complicated reasons, this is required so that
 # /bin/kernel-install puts the kernel directly into /boot, instead of
 # into a /boot/<machine-id> subdirectory (in Fedora >= 23).  Read the
 # kernel-install script to understand why.
-BuildRequires: grubby
+BuildRequires:   grubby
 
 %ifarch %{ix86} x86_64
 Requires:        qemu-system-x86
+%global qemu     %{_bindir}/qemu-system-x86_64
 %endif
 %ifarch armv7hl
 Requires:        qemu-system-arm
+%global qemu     %{_bindir}/qemu-system-arm
+%endif
+%ifarch aarch64
+Requires:        qemu-system-aarch64
+%global qemu     %{_bindir}/qemu-system-aarch64
+%endif
+%ifarch %{power64}
+Requires:        qemu-system-ppc
+%global qemu     %{_bindir}/qemu-system-ppc64
+%endif
+%ifarch %{s390x}
+Requires:        qemu-system-s390x
+%global qemu     %{_bindir}/qemu-system-s390x
 %endif
 
 Requires:        kernel
@@ -83,19 +96,19 @@ as %{name} except that this package does not depend on qemu or kernel.
 
 
 %prep
-%setup -q
-
-%patch1 -p1
-%patch4 -p1
-
-# Rerun autotools because the patches touch configure.ac and Makefile.am.
-autoreconf -i
+%autosetup -p1
 
 
 %build
 # NB: canonical_arch is a variable in the final script, so it
 # has to be escaped here.
-%configure --with-qemu-list="qemu-system-\$canonical_arch" || {
+%configure \
+%if 0%{?qemu:1}
+    --with-qemu-list="%{qemu}" \
+%else
+    --with-qemu-list="qemu-system-\$canonical_arch" \
+%endif
+|| {
   cat config.log
   exit 1
 }
@@ -118,6 +131,24 @@ make DESTDIR=$RPM_BUILD_ROOT install
 
 
 %changelog
+* Thu Sep 10 2020 Richard W.M. Jones <rjones@redhat.com> - 1.1.6-1
+- New upstream version 1.1.6.
+- Remove all patches.
+- Run the tests on some more arches.
+- Require qemu-system-<arch>.
+- Enable hardened build.
+- Enable signed tarball.
+
+* Wed Aug 19 2020 Merlin Mathesius <mmathesi@redhat.com> - 1.1.5-16
+- Use ExclusiveArch: %%{kernel_arches}
+
+* Sat Aug 01 2020 Fedora Release Engineering <releng@fedoraproject.org> - 1.1.5-16
+- Second attempt - Rebuilt for
+  https://fedoraproject.org/wiki/Fedora_33_Mass_Rebuild
+
+* Wed Jul 29 2020 Fedora Release Engineering <releng@fedoraproject.org> - 1.1.5-15
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_33_Mass_Rebuild
+
 * Thu Jan 30 2020 Fedora Release Engineering <releng@fedoraproject.org> - 1.1.5-14
 - Rebuilt for https://fedoraproject.org/wiki/Fedora_32_Mass_Rebuild
 

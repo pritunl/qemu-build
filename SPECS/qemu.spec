@@ -33,7 +33,7 @@
 
 # Matches numactl ExcludeArch
 %global have_numactl 1
-%ifarch s390 %{arm}
+%ifarch %{arm}
 %global have_numactl 0
 %endif
 
@@ -43,7 +43,7 @@
 #
 # https://bugzilla.redhat.com/show_bug.cgi?id=1332449
 %global have_iasl 1
-%ifnarch s390 s390x ppc ppc64
+%ifnarch s390x
 %global have_iasl 0
 %endif
 
@@ -64,13 +64,27 @@
 %global hostqemu arm-softmmu/qemu-system-arm
 %endif
 %ifarch aarch64
-%global hostqemu arm-softmmu/qemu-system-aarch64
+%global hostqemu aarch64-softmmu/qemu-system-aarch64
 %endif
 %ifarch %{ix86}
 %global hostqemu i386-softmmu/qemu-system-i386
 %endif
 %ifarch x86_64
 %global hostqemu x86_64-softmmu/qemu-system-x86_64
+%endif
+
+%global qemu_sanity_check 0
+%ifarch x %{?kernel_arches}
+%if 0%{?hostqemu:1}
+%global qemu_sanity_check 1
+%endif
+%endif
+
+# QEMU sanity check doesn't know how to pick machine type
+# which is needed on ARM as there is no defualt
+# https://bugzilla.redhat.com/show_bug.cgi?id=1875763
+%ifarch %{arm} aarch64
+%global qemu_sanity_check 0
 %endif
 
 # All modules should be listed here.
@@ -111,12 +125,17 @@
 %define requires_audio_alsa Requires: %{name}-audio-alsa = %{evr}
 %define requires_audio_oss Requires: %{name}-audio-oss = %{evr}
 %define requires_audio_pa Requires: %{name}-audio-pa = %{evr}
+%define requires_char_baum Requires: %{name}-char-baum = %{evr}
+%define requires_device_usb_redirect Requires: %{name}-device-usb-redirect = %{evr}
+%define requires_device_usb_smartcard Requires: %{name}-device-usb-smartcard = %{evr}
 %define requires_ui_curses Requires: %{name}-ui-curses = %{evr}
 
 %if %{have_spice}
 %define requires_ui_spice_app Requires: %{name}-ui-spice-app = %{evr}
+%define requires_device_display_qxl Requires: %{name}-device-display-qxl = %{evr}
 %else
 %define requires_ui_spice_app %{nil}
+%define requires_device_display_qxl %{nil}
 %endif
 
 %global requires_all_modules \
@@ -131,7 +150,11 @@
 %{requires_audio_oss} \
 %{requires_audio_pa} \
 %{requires_ui_curses} \
-%{requires_ui_spice_app}
+%{requires_ui_spice_app} \
+%{requires_char_baum} \
+%{requires_device_display_qxl} \
+%{requires_device_usb_redirect} \
+%{requires_device_usb_smartcard} \
 
 # Modules which can be conditionally built
 %global obsoletes_some_modules \
@@ -139,7 +162,7 @@
 %{obsoletes_block_rbd}
 
 # Release candidate version tracking
-%global rcver rc2
+# global rcver rc3
 %if 0%{?rcver:1}
 %global rcrel .%{rcver}
 %global rcstr -%{rcver}
@@ -148,13 +171,23 @@
 
 Summary: QEMU is a FAST! processor emulator
 Name: pritunl-qemu
-Version: 5.0.0
-Release: 0.3%{?rcrel}%{?dist}
+Version: 5.1.0
+Release: 5%{?rcrel}%{?dist}
 Epoch: 2
 License: GPLv2 and BSD and MIT and CC-BY
 URL: http://www.qemu.org/
 
 Source0: http://wiki.qemu-project.org/download/qemu-%{version}%{?rcstr}.tar.xz
+
+Patch1: 0001-linux-user-fix-implicit-conversion-from-enumeration-.patch
+Patch2: 0002-linux-user-Add-support-for-a-group-of-btrfs-ioctls-u.patch
+Patch3: 0003-linux-user-Add-support-for-a-group-of-btrfs-ioctls-u.patch
+Patch4: 0004-linux-user-Add-support-for-btrfs-ioctls-used-to-mani.patch
+Patch5: 0005-linux-user-Add-support-for-btrfs-ioctls-used-to-get-.patch
+Patch6: 0006-linux-user-Add-support-for-a-group-of-btrfs-inode-io.patch
+Patch7: 0007-linux-user-Add-support-for-two-btrfs-ioctls-used-for.patch
+Patch8: 0008-linux-user-Add-support-for-btrfs-ioctls-used-to-mana.patch
+Patch9: 0009-linux-user-Add-support-for-btrfs-ioctls-used-to-scru.patch
 
 # guest agent service
 Source10: qemu-guest-agent.service
@@ -174,12 +207,12 @@ Source20: kvm-x86.modprobe.conf
 Source21: 95-kvm-ppc64-memlock.conf
 
 
+BuildRequires: gcc
 # documentation deps
 BuildRequires: texinfo
 # For /usr/bin/pod2man
 BuildRequires: perl-podlators
-%ifnarch %{ix86}
-# For sanity test
+%if %{qemu_sanity_check}
 BuildRequires: qemu-sanity-check-nodeps
 BuildRequires: kernel
 %endif
@@ -312,22 +345,17 @@ BuildRequires: liburing-devel
 BuildRequires: libzstd-devel
 # `hostname` used by test suite
 BuildRequires: hostname
+# Used for nvdimm dax
+BuildRequires: daxctl-devel
 
 BuildRequires: glibc-static pcre-static glib2-static zlib-static
 
-%if 0%{?hostqemu:1}
-# For complicated reasons, this is required so that
-# /bin/kernel-install puts the kernel directly into /boot, instead of
-# into a /boot/<machine-id> subdirectory (in Fedora >= 23).  This is
-# so we can run qemu-sanity-check.  Read the kernel-install script to
-# understand why.
-BuildRequires: grubby
-%endif
 
 Requires: %{name}-user = %{epoch}:%{version}-%{release}
 Requires: %{name}-system-aarch64 = %{epoch}:%{version}-%{release}
 Requires: %{name}-system-alpha = %{epoch}:%{version}-%{release}
 Requires: %{name}-system-arm = %{epoch}:%{version}-%{release}
+Requires: %{name}-system-avr = %{epoch}:%{version}-%{release}
 Requires: %{name}-system-cris = %{epoch}:%{version}-%{release}
 Requires: %{name}-system-lm32 = %{epoch}:%{version}-%{release}
 Requires: %{name}-system-m68k = %{epoch}:%{version}-%{release}
@@ -505,6 +533,34 @@ This package provides the additional spice-app UI for QEMU.
 %endif
 
 
+%package  char-baum
+Summary: QEMU Baum chardev driver
+Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
+%description char-baum
+This package provides the Baum chardev driver for QEMU.
+
+
+%if %{have_spice}
+%package device-display-qxl
+Summary: QEMU QXL display device
+Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
+%description device-display-qxl
+This package provides the QXL display device for QEMU.
+%endif
+
+%package device-usb-redirect
+Summary: QEMU usbredir device
+Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
+%description device-usb-redirect
+This package provides the usbredir device for QEMU.
+
+%package device-usb-smartcard
+Summary: QEMU USB smartcard device
+Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
+%description device-usb-smartcard
+This package provides the USB smartcard device for QEMU.
+
+
 %if %{have_kvm}
 %package kvm
 Summary: QEMU metapackage for KVM support
@@ -604,6 +660,20 @@ Summary: QEMU system emulator for ARM
 Requires: %{name}-common = %{epoch}:%{version}-%{release}
 %description system-arm-core
 This package provides the QEMU system emulator for ARM boards.
+
+
+%package system-avr
+Summary: QEMU system emulator for AVR
+Requires: %{name}-system-avr-core = %{epoch}:%{version}-%{release}
+%{requires_all_modules}
+%description system-avr
+This package provides the QEMU system emulator for AVR systems.
+
+%package system-avr-core
+Summary: QEMU system emulator for AVR
+Requires: %{name}-common = %{epoch}:%{version}-%{release}
+%description system-avr-core
+This package provides the QEMU system emulator for AVR systems.
 
 
 %package system-cris
@@ -906,15 +976,11 @@ pathfix.py -pni "%{__python3} %{py3_shbang_opts}" scripts/qemu-trace-stap
 
 
 %build
-
-# drop -g flag to prevent memory exhaustion by linker
-%ifarch s390
-%global optflags %(echo %{optflags} | sed 's/-g//')
-sed -i.debug 's/"-g $CFLAGS"/"$CFLAGS"/g' configure
-%endif
+# Disable LTO since it caused lots of strange assert failures.
+%define _lto_cflags %{nil}
 
 # OOM killer breaks builds with parallel make on s390(x)
-%ifarch s390 s390x
+%ifarch s390x
 %global _smp_mflags %{nil}
 %endif
 
@@ -925,6 +991,10 @@ buildldflags="VL_LDFLAGS=-Wl,--build-id"
 # As of qemu 2.1, --enable-trace-backends supports multiple backends,
 # but there's a performance impact for non-dtrace so we don't use them
 tracebackends="dtrace"
+
+# 2020-08-17: tracing disabled, breaks modules on f33+
+# https://bugzilla.redhat.com/show_bug.cgi?id=1869339
+tracebackends="log"
 
 %if %{have_spice}
     %global spiceflag --enable-spice
@@ -990,7 +1060,9 @@ run_configure_disable_everything() {
         --disable-hvf \
         --disable-iconv \
         --disable-jemalloc \
+        --disable-keyring \
         --disable-kvm \
+        --disable-libdaxctl \
         --disable-libiscsi \
         --disable-libnfs \
         --disable-libpmem \
@@ -1019,6 +1091,7 @@ run_configure_disable_everything() {
         --disable-rbd \
         --disable-rdma \
         --disable-replication \
+        --disable-rng-none \
         --disable-sdl \
         --disable-sdl-image \
         --disable-seccomp \
@@ -1042,6 +1115,7 @@ run_configure_disable_everything() {
         --disable-vhost-net \
         --disable-vhost-scsi \
         --disable-vhost-user \
+        --disable-vhost-vdpa \
         --disable-vhost-vsock \
         --disable-virglrenderer \
         --disable-virtfs \
@@ -1051,7 +1125,6 @@ run_configure_disable_everything() {
         --disable-vnc-sasl \
         --disable-vte \
         --disable-vvfat \
-        --disable-vxhs \
         --disable-whpx \
         --disable-xen \
         --disable-xen-pci-passthrough \
@@ -1096,9 +1169,6 @@ run_configure \
     --enable-modules \
     --enable-mpath \
     %{spiceflag} \
-%ifarch s390 %{mips64}
-    --enable-tcg-interpreter \
-%endif
     --enable-slirp=system \
     --disable-sdl \
     --disable-gtk \
@@ -1168,8 +1238,8 @@ done
 for src in %{buildroot}%{_datadir}/systemtap/tapset/qemu-*.stp
 do
   dst=`echo $src | sed -e 's/.stp/-static.stp/'`
-  mv $src $dst
-  perl -i -p -e 's/(qemu-\w+)/$1-static/g; s/(qemu\.user\.\w+)/$1.static/g' $dst
+  #mv $src $dst
+  #perl -i -p -e 's/(qemu-\w+)/$1-static/g; s/(qemu\.user\.\w+)/$1.static/g' $dst
 done
 
 popd
@@ -1295,38 +1365,32 @@ chmod +x %{buildroot}%{_libdir}/qemu/*.so
 
 
 %check
-# Tests are hanging on s390 as of 2.3.0
-#   https://bugzilla.redhat.com/show_bug.cgi?id=1206057
-# Tests seem to be a recurring problem on s390, so I'd suggest just leaving
-# it disabled.
-%global archs_skip_tests s390
-%global archs_ignore_test_failures 0
-
+%global tests_skip 0
 # Enable this temporarily if tests are broken
-# An iotest is failing for i686
-%global temp_skip_check 1
+%global tests_nofail 0
+
+# 2020-08-31: tests passing, but s390x fails due to
+# spurious warning breaking an iotest case
+# https://lists.gnu.org/archive/html/qemu-devel/2020-08/msg03279.html
+%global tests_nofail 1
 
 pushd build-dynamic
-%ifnarch %{archs_skip_tests}
+%if !%{tests_skip}
+%if %{tests_nofail}
+ make check V=1 || :
+%else
+ make check V=1
+%endif
 
 # Check the binary runs (see eg RHBZ#998722).
 b="./x86_64-softmmu/qemu-system-x86_64"
 if [ -x "$b" ]; then "$b" -help; fi
 
-%ifarch %{archs_ignore_test_failures}
-make check V=1 || :
-%else
- %if %{temp_skip_check}
- make check V=1 || :
- %else
- make check V=1
- %endif
-%endif
-
-%if 0%{?hostqemu:1}
+%if %{qemu_sanity_check}
 # Sanity-check current kernel can boot on this qemu.
-# The results are advisory only.
-qemu-sanity-check --qemu=%{?hostqemu} ||:
+KERNEL=`find /lib/modules -name vmlinuz | head -1`
+echo "Trying to boot kernel $KERNEL with %{?hostqemu}"
+qemu-sanity-check --qemu=%{?hostqemu} --kernel=$KERNEL
 %endif
 
 %endif
@@ -1369,10 +1433,6 @@ getent passwd qemu >/dev/null || \
 %files common
 %dir %{qemudocdir}
 %doc %{qemudocdir}/Changelog
-%doc %{qemudocdir}/qemu-ga-ref.html
-%doc %{qemudocdir}/qemu-ga-ref.txt
-%doc %{qemudocdir}/qemu-qmp-ref.html
-%doc %{qemudocdir}/qemu-qmp-ref.txt
 %doc %{qemudocdir}/README.rst
 %doc %{qemudocdir}/index.html
 %doc %{qemudocdir}/interop
@@ -1417,24 +1477,24 @@ getent passwd qemu >/dev/null || \
 %{_datadir}/qemu/vhost-user/50-qemu-gpu.json
 %{_datadir}/qemu/vhost-user/50-qemu-virtiofsd.json
 %{_mandir}/man1/qemu.1*
-%{_mandir}/man1/qemu-trace-stap.1*
+#{_mandir}/man1/qemu-trace-stap.1*
 %{_mandir}/man1/virtfs-proxy-helper.1*
 %{_mandir}/man1/virtiofsd.1*
 %{_mandir}/man7/qemu-block-drivers.7*
 %{_mandir}/man7/qemu-cpu-models.7*
-%{_mandir}/man7/qemu-ga-ref.7*
 %{_mandir}/man7/qemu-qmp-ref.7*
+%{_mandir}/man7/qemu-ga-ref.7*
 %{_bindir}/elf2dmp
 %{_bindir}/qemu-edid
 %{_bindir}/qemu-keymap
-%{_bindir}/qemu-pr-helper
 %{_bindir}/qemu-storage-daemon
-%{_bindir}/qemu-trace-stap
-%{_bindir}/virtfs-proxy-helper
+#{_bindir}/qemu-trace-stap
 %{_unitdir}/qemu-pr-helper.service
 %{_unitdir}/qemu-pr-helper.socket
 %attr(4755, root, root) %{_libexecdir}/qemu-bridge-helper
+%{_libexecdir}/qemu-pr-helper
 %{_libexecdir}/vhost-user-gpu
+%{_libexecdir}/virtfs-proxy-helper
 %{_libexecdir}/virtiofsd
 %config(noreplace) %{_sysconfdir}/sasl2/qemu.conf
 %dir %{_sysconfdir}/qemu
@@ -1495,6 +1555,18 @@ getent passwd qemu >/dev/null || \
 %{_libdir}/qemu/ui-spice-app.so
 %endif
 
+%files char-baum
+%{_libdir}/qemu/chardev-baum.so
+
+%if %{have_spice}
+%files device-display-qxl
+%{_libdir}/qemu/hw-display-qxl.so
+%endif
+%files device-usb-redirect
+%{_libdir}/qemu/hw-usb-redirect.so
+%files device-usb-smartcard
+%{_libdir}/qemu/hw-usb-smartcard.so
+
 
 %files -n ivshmem-tools
 %{_bindir}/ivshmem-client
@@ -1547,25 +1619,25 @@ getent passwd qemu >/dev/null || \
 %{_bindir}/qemu-xtensa
 %{_bindir}/qemu-xtensaeb
 
-%{_datadir}/systemtap/tapset/qemu-i386*.stp
-%{_datadir}/systemtap/tapset/qemu-x86_64*.stp
-%{_datadir}/systemtap/tapset/qemu-aarch64*.stp
-%{_datadir}/systemtap/tapset/qemu-alpha*.stp
-%{_datadir}/systemtap/tapset/qemu-arm*.stp
-%{_datadir}/systemtap/tapset/qemu-cris*.stp
-%{_datadir}/systemtap/tapset/qemu-hppa*.stp
-%{_datadir}/systemtap/tapset/qemu-m68k*.stp
-%{_datadir}/systemtap/tapset/qemu-microblaze*.stp
-%{_datadir}/systemtap/tapset/qemu-mips*.stp
-%{_datadir}/systemtap/tapset/qemu-nios2*.stp
-%{_datadir}/systemtap/tapset/qemu-or1k*.stp
-%{_datadir}/systemtap/tapset/qemu-ppc*.stp
-%{_datadir}/systemtap/tapset/qemu-riscv*.stp
-%{_datadir}/systemtap/tapset/qemu-s390x*.stp
-%{_datadir}/systemtap/tapset/qemu-sh4*.stp
-%{_datadir}/systemtap/tapset/qemu-sparc*.stp
-%{_datadir}/systemtap/tapset/qemu-tilegx*.stp
-%{_datadir}/systemtap/tapset/qemu-xtensa*.stp
+#{_datadir}/systemtap/tapset/qemu-i386*.stp
+#{_datadir}/systemtap/tapset/qemu-x86_64*.stp
+#{_datadir}/systemtap/tapset/qemu-aarch64*.stp
+#{_datadir}/systemtap/tapset/qemu-alpha*.stp
+#{_datadir}/systemtap/tapset/qemu-arm*.stp
+#{_datadir}/systemtap/tapset/qemu-cris*.stp
+#{_datadir}/systemtap/tapset/qemu-hppa*.stp
+#{_datadir}/systemtap/tapset/qemu-m68k*.stp
+#{_datadir}/systemtap/tapset/qemu-microblaze*.stp
+#{_datadir}/systemtap/tapset/qemu-mips*.stp
+#{_datadir}/systemtap/tapset/qemu-nios2*.stp
+#{_datadir}/systemtap/tapset/qemu-or1k*.stp
+#{_datadir}/systemtap/tapset/qemu-ppc*.stp
+#{_datadir}/systemtap/tapset/qemu-riscv*.stp
+#{_datadir}/systemtap/tapset/qemu-s390x*.stp
+#{_datadir}/systemtap/tapset/qemu-sh4*.stp
+#{_datadir}/systemtap/tapset/qemu-sparc*.stp
+#{_datadir}/systemtap/tapset/qemu-tilegx*.stp
+#{_datadir}/systemtap/tapset/qemu-xtensa*.stp
 
 
 %files user-binfmt
@@ -1577,21 +1649,21 @@ getent passwd qemu >/dev/null || \
 # in the qemu-user filelists
 %{_exec_prefix}/lib/binfmt.d/qemu-*-static.conf
 %{_bindir}/qemu-*-static
-%{_datadir}/systemtap/tapset/qemu-*-static.stp
+#{_datadir}/systemtap/tapset/qemu-*-static.stp
 %endif
 
 
 %files system-aarch64
 %files system-aarch64-core
 %{_bindir}/qemu-system-aarch64
-%{_datadir}/systemtap/tapset/qemu-system-aarch64*.stp
+#{_datadir}/systemtap/tapset/qemu-system-aarch64*.stp
 %{_mandir}/man1/qemu-system-aarch64.1*
 
 
 %files system-alpha
 %files system-alpha-core
 %{_bindir}/qemu-system-alpha
-%{_datadir}/systemtap/tapset/qemu-system-alpha*.stp
+#{_datadir}/systemtap/tapset/qemu-system-alpha*.stp
 %{_mandir}/man1/qemu-system-alpha.1*
 %{_datadir}/qemu/palcode-clipper
 
@@ -1599,21 +1671,28 @@ getent passwd qemu >/dev/null || \
 %files system-arm
 %files system-arm-core
 %{_bindir}/qemu-system-arm
-%{_datadir}/systemtap/tapset/qemu-system-arm*.stp
+#{_datadir}/systemtap/tapset/qemu-system-arm*.stp
 %{_mandir}/man1/qemu-system-arm.1*
+
+
+%files system-avr
+%files system-avr-core
+%{_bindir}/qemu-system-avr
+#{_datadir}/systemtap/tapset/qemu-system-avr*.stp
+%{_mandir}/man1/qemu-system-avr.1*
 
 
 %files system-cris
 %files system-cris-core
 %{_bindir}/qemu-system-cris
-%{_datadir}/systemtap/tapset/qemu-system-cris*.stp
+#{_datadir}/systemtap/tapset/qemu-system-cris*.stp
 %{_mandir}/man1/qemu-system-cris.1*
 
 
 %files system-hppa
 %files system-hppa-core
 %{_bindir}/qemu-system-hppa
-%{_datadir}/systemtap/tapset/qemu-system-hppa*.stp
+#{_datadir}/systemtap/tapset/qemu-system-hppa*.stp
 %{_mandir}/man1/qemu-system-hppa.1*
 %{_datadir}/qemu/hppa-firmware.img
 
@@ -1621,14 +1700,14 @@ getent passwd qemu >/dev/null || \
 %files system-lm32
 %files system-lm32-core
 %{_bindir}/qemu-system-lm32
-%{_datadir}/systemtap/tapset/qemu-system-lm32*.stp
+#{_datadir}/systemtap/tapset/qemu-system-lm32*.stp
 %{_mandir}/man1/qemu-system-lm32.1*
 
 
 %files system-m68k
 %files system-m68k-core
 %{_bindir}/qemu-system-m68k
-%{_datadir}/systemtap/tapset/qemu-system-m68k*.stp
+#{_datadir}/systemtap/tapset/qemu-system-m68k*.stp
 %{_mandir}/man1/qemu-system-m68k.1*
 
 
@@ -1636,7 +1715,7 @@ getent passwd qemu >/dev/null || \
 %files system-microblaze-core
 %{_bindir}/qemu-system-microblaze
 %{_bindir}/qemu-system-microblazeel
-%{_datadir}/systemtap/tapset/qemu-system-microblaze*.stp
+#{_datadir}/systemtap/tapset/qemu-system-microblaze*.stp
 %{_mandir}/man1/qemu-system-microblaze.1*
 %{_mandir}/man1/qemu-system-microblazeel.1*
 %{_datadir}/qemu/petalogix*.dtb
@@ -1648,7 +1727,7 @@ getent passwd qemu >/dev/null || \
 %{_bindir}/qemu-system-mipsel
 %{_bindir}/qemu-system-mips64
 %{_bindir}/qemu-system-mips64el
-%{_datadir}/systemtap/tapset/qemu-system-mips*.stp
+#{_datadir}/systemtap/tapset/qemu-system-mips*.stp
 %{_mandir}/man1/qemu-system-mips.1*
 %{_mandir}/man1/qemu-system-mipsel.1*
 %{_mandir}/man1/qemu-system-mips64el.1*
@@ -1658,21 +1737,21 @@ getent passwd qemu >/dev/null || \
 %files system-moxie
 %files system-moxie-core
 %{_bindir}/qemu-system-moxie
-%{_datadir}/systemtap/tapset/qemu-system-moxie*.stp
+#{_datadir}/systemtap/tapset/qemu-system-moxie*.stp
 %{_mandir}/man1/qemu-system-moxie.1*
 
 
 %files system-nios2
 %files system-nios2-core
 %{_bindir}/qemu-system-nios2
-%{_datadir}/systemtap/tapset/qemu-system-nios2*.stp
+#{_datadir}/systemtap/tapset/qemu-system-nios2*.stp
 %{_mandir}/man1/qemu-system-nios2.1*
 
 
 %files system-or1k
 %files system-or1k-core
 %{_bindir}/qemu-system-or1k
-%{_datadir}/systemtap/tapset/qemu-system-or1k*.stp
+#{_datadir}/systemtap/tapset/qemu-system-or1k*.stp
 %{_mandir}/man1/qemu-system-or1k.1*
 
 
@@ -1680,7 +1759,7 @@ getent passwd qemu >/dev/null || \
 %files system-ppc-core
 %{_bindir}/qemu-system-ppc
 %{_bindir}/qemu-system-ppc64
-%{_datadir}/systemtap/tapset/qemu-system-ppc*.stp
+#{_datadir}/systemtap/tapset/qemu-system-ppc*.stp
 %{_mandir}/man1/qemu-system-ppc.1*
 %{_mandir}/man1/qemu-system-ppc64.1*
 %{_datadir}/qemu/bamboo.dtb
@@ -1699,21 +1778,21 @@ getent passwd qemu >/dev/null || \
 %{_bindir}/qemu-system-riscv32
 %{_bindir}/qemu-system-riscv64
 %{_datadir}/qemu/opensbi-riscv*.bin
-%{_datadir}/systemtap/tapset/qemu-system-riscv*.stp
+#{_datadir}/systemtap/tapset/qemu-system-riscv*.stp
 %{_mandir}/man1/qemu-system-riscv*.1*
 
 
 %files system-rx
 %files system-rx-core
 %{_bindir}/qemu-system-rx
-%{_datadir}/systemtap/tapset/qemu-system-rx*.stp
+#{_datadir}/systemtap/tapset/qemu-system-rx*.stp
 %{_mandir}/man1/qemu-system-rx.1*
 
 
 %files system-s390x
 %files system-s390x-core
 %{_bindir}/qemu-system-s390x
-%{_datadir}/systemtap/tapset/qemu-system-s390x*.stp
+#{_datadir}/systemtap/tapset/qemu-system-s390x*.stp
 %{_mandir}/man1/qemu-system-s390x.1*
 %{_datadir}/qemu/s390-ccw.img
 %{_datadir}/qemu/s390-netboot.img
@@ -1723,7 +1802,7 @@ getent passwd qemu >/dev/null || \
 %files system-sh4-core
 %{_bindir}/qemu-system-sh4
 %{_bindir}/qemu-system-sh4eb
-%{_datadir}/systemtap/tapset/qemu-system-sh4*.stp
+#{_datadir}/systemtap/tapset/qemu-system-sh4*.stp
 %{_mandir}/man1/qemu-system-sh4.1*
 %{_mandir}/man1/qemu-system-sh4eb.1*
 
@@ -1732,7 +1811,7 @@ getent passwd qemu >/dev/null || \
 %files system-sparc-core
 %{_bindir}/qemu-system-sparc
 %{_bindir}/qemu-system-sparc64
-%{_datadir}/systemtap/tapset/qemu-system-sparc*.stp
+#{_datadir}/systemtap/tapset/qemu-system-sparc*.stp
 %{_mandir}/man1/qemu-system-sparc.1*
 %{_mandir}/man1/qemu-system-sparc64.1*
 %{_datadir}/qemu/QEMU,tcx.bin
@@ -1742,14 +1821,14 @@ getent passwd qemu >/dev/null || \
 %files system-tricore
 %files system-tricore-core
 %{_bindir}/qemu-system-tricore
-%{_datadir}/systemtap/tapset/qemu-system-tricore*.stp
+#{_datadir}/systemtap/tapset/qemu-system-tricore*.stp
 %{_mandir}/man1/qemu-system-tricore.1*
 
 
 %files system-unicore32
 %files system-unicore32-core
 %{_bindir}/qemu-system-unicore32
-%{_datadir}/systemtap/tapset/qemu-system-unicore32*.stp
+#{_datadir}/systemtap/tapset/qemu-system-unicore32*.stp
 %{_mandir}/man1/qemu-system-unicore32.1*
 
 
@@ -1757,8 +1836,8 @@ getent passwd qemu >/dev/null || \
 %files system-x86-core
 %{_bindir}/qemu-system-i386
 %{_bindir}/qemu-system-x86_64
-%{_datadir}/systemtap/tapset/qemu-system-i386*.stp
-%{_datadir}/systemtap/tapset/qemu-system-x86_64*.stp
+#{_datadir}/systemtap/tapset/qemu-system-i386*.stp
+#{_datadir}/systemtap/tapset/qemu-system-x86_64*.stp
 %{_mandir}/man1/qemu-system-i386.1*
 %{_mandir}/man1/qemu-system-x86_64.1*
 %{_datadir}/qemu/bios.bin
@@ -1781,12 +1860,67 @@ getent passwd qemu >/dev/null || \
 %files system-xtensa-core
 %{_bindir}/qemu-system-xtensa
 %{_bindir}/qemu-system-xtensaeb
-%{_datadir}/systemtap/tapset/qemu-system-xtensa*.stp
+#{_datadir}/systemtap/tapset/qemu-system-xtensa*.stp
 %{_mandir}/man1/qemu-system-xtensa.1*
 %{_mandir}/man1/qemu-system-xtensaeb.1*
 
 
 %changelog
+* Fri Sep  4 2020 Daniel P. Berrangé <berrange@redhat.com> - 5.1.0-5
+- Drop conditions for ppc, ppc64, mips64 and s390 arches
+- Fix host qemu binary path for aarch64
+- Re-enable kernel BR for QEMU sanity check
+- Fix conditionals for enabling QEMU sanity check
+- Check whether emulator works before doing sanity check
+- Provide explicit kernel path for QEMU sanity check
+- Make QEMU sanity check a build blocker
+
+* Thu Sep  3 2020 Daniel P. Berrangé <berrange@redhat.com> - 5.1.0-4
+- Add btrfs ioctls to linux-user (rhbz #1872918)
+
+* Tue Aug 18 2020 Tom Stellard <tstellar@redhat.com> - 5.1.0-3
+- Add BuildRequires: gcc
+- https://fedoraproject.org/wiki/Packaging:C_and_C%2B%2B#BuildRequires_and_Requires
+
+* Mon Aug 17 2020 Cole Robinson <aintdiscole@gmail.com> - 5.1.0-2
+- Disable dtrace generation to fix use of modules (bz 1869339)
+
+* Tue Aug 11 2020 Cole Robinson <crobinso@redhat.com> - 5.1.0-1
+- Update to version 5.1.0
+
+* Fri Aug 07 2020 Cole Robinson <crobinso@redhat.com> - 5.1.0-0.3.rc3
+- Update to version 5.1.0-rc3
+
+* Thu Aug 06 2020 Merlin Mathesius <mmathesi@redhat.com> - 5.1.0-0.2.rc2
+- Use new %%{kernel_arches} macro to determine when a full kernel is available
+
+* Wed Aug 05 2020 Cole Robinson <aintdiscole@gmail.com> - 5.1.0-0.2.rc2
+- Pull in new modules by default, like we do for others
+
+* Tue Aug 04 2020 Cole Robinson <aintdiscole@gmail.com> - 5.1.0-0.1.rc2
+- Update to qemu 5.1.0 rc2
+
+* Fri Jul 31 2020 Daniel P. Berrangé <berrange@redhat.com> - 5.0.0-6
+- Remove obsolete Fedora conditionals (PR#9)
+
+* Thu Jul 30 2020 Richard W.M. Jones <rjones@redhat.com> - 5.0.0-5
+- Disable LTO as it caused many strange assert failures.
+
+* Wed Jul 29 2020 Richard W.M. Jones <rjones@redhat.com> - 5.0.0-4
+- Backport Dan's upstream patch to fix insecure cert in test suite.
+
+* Mon Jul 27 2020 Kevin Fenzi <kevin@scrye.com> - 5.0.0-3
+- Rebuild for new xen
+
+* Wed May 13 2020 Cole Robinson <crobinso@redhat.com> - 5.0.0-2
+- Fix iouring hang (bz #1823751)
+
+* Wed May 06 2020 Cole Robinson <crobinso@redhat.com> - 5.0.0-1
+- Update to version 5.0.0
+
+* Thu Apr 16 2020 Cole Robinson <aintdiscole@gmail.com> - 5.0.0-0.3.rc3
+- Update to qemu 5.0.0 rc3
+
 * Thu Apr 09 2020 Cole Robinson <aintdiscole@gmail.com> - 5.0.0-0.3.rc2
 - Update to qemu 5.0.0 rc2
 
