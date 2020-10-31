@@ -564,7 +564,7 @@ This package provides the USB smartcard device for QEMU.
 %if %{have_kvm}
 %package kvm
 Summary: QEMU metapackage for KVM support
-Requires: qemu-%{kvm_package} = %{epoch}:%{version}-%{release}
+Requires: %{name}-%{kvm_package} = %{epoch}:%{version}-%{release}
 %description kvm
 This is a meta-package that provides a qemu-system-<arch> package for native
 architectures where kvm can be enabled. For example, in an x86 system, this
@@ -573,7 +573,7 @@ will install qemu-system-x86
 
 %package kvm-core
 Summary: QEMU metapackage for KVM support
-Requires: qemu-%{kvm_package}-core = %{epoch}:%{version}-%{release}
+Requires: %{name}-%{kvm_package}-core = %{epoch}:%{version}-%{release}
 %description kvm-core
 This is a meta-package that provides a qemu-system-<arch>-core package
 for native architectures where kvm can be enabled. For example, in an
