@@ -16,7 +16,10 @@ rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/33/Every
 rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
     123.123.123.123:/home/cloud/rpmbuild/SOURCES/ /home/cloud/git/qemu-build/SOURCES/
 rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
-123.123.123.123:/home/cloud/rpmbuild/SPECS/ /home/cloud/git/qemu-build/SPECS/
+    123.123.123.123:/home/cloud/rpmbuild/SPECS/ /home/cloud/git/qemu-build/SPECS/
+
+rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
+    /home/cloud/git/qemu-build/ 123.123.123.123:/home/cloud/rpmbuild/
 
 cd ~/rpmbuild/SPECS/
 
