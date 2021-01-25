@@ -26,8 +26,8 @@ cd ~/rpmbuild/SPECS/
 sudo yum-builddep -y ~/rpmbuild/SPECS/libepoxy.spec
 rpmbuild -ba libepoxy.spec
 
-sudo yum -y install ~/rpmbuild/RPMS/x86_64/libepoxy-1.5.4-3.el8.x86_64.rpm
-sudo yum -y install ~/rpmbuild/RPMS/x86_64/libepoxy-devel-1.5.4-3.el8.x86_64.rpm
+sudo yum -y install ~/rpmbuild/RPMS/x86_64/libepoxy-1.5.5-1.el8.x86_64.rpm
+sudo yum -y install ~/rpmbuild/RPMS/x86_64/libepoxy-devel-1.5.5-1.el8.x86_64.rpm
 
 sudo yum-builddep -y ~/rpmbuild/SPECS/virglrenderer.spec
 rpmbuild -ba virglrenderer.spec
@@ -38,8 +38,8 @@ sudo yum -y install ~/rpmbuild/RPMS/x86_64/virglrenderer-devel-0.8.2-2.20200212g
 sudo yum-builddep -y ~/rpmbuild/SPECS/liburing.spec
 rpmbuild -ba liburing.spec
 
-sudo yum -y install ~/rpmbuild/RPMS/x86_64/liburing-0.7-2.el8.x86_64.rpm
-sudo yum -y install ~/rpmbuild/RPMS/x86_64/liburing-devel-0.7-2.el8.x86_64.rpm
+sudo yum -y install ~/rpmbuild/RPMS/x86_64/liburing-0.7-3.el8.x86_64.rpm
+sudo yum -y install ~/rpmbuild/RPMS/x86_64/liburing-devel-0.7-3.el8.x86_64.rpm
 
 sudo yum-builddep -y ~/rpmbuild/SPECS/qemu-sanity-check.spec
 rpmbuild -ba qemu-sanity-check.spec
@@ -58,6 +58,9 @@ rpmbuild -ba libslirp.spec
 
 sudo yum-builddep -y ~/rpmbuild/SPECS/libnfs.spec
 rpmbuild -ba libnfs.spec
+
+sudo yum-builddep -y ~/rpmbuild/SPECS/seabios.spec
+rpmbuild -ba seabios.spec
 
 ########################################
 # repo
