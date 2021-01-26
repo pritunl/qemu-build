@@ -1,12 +1,13 @@
 Name:           libslirp
 Version:        4.3.1
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        A general purpose TCP-IP emulator
 
 # check the SPDX tags in source files for details
 License:        BSD and MIT
 URL:            https://gitlab.freedesktop.org/slirp/%{name}
 Source0:        %{url}/-/archive/v%{version}/%{name}-%{version}.tar.xz
+Patch0001:      0001-slirp-check-pkt_len-before-reading-protocol-header.patch
 
 BuildRequires:  git-core
 BuildRequires:  meson
@@ -52,6 +53,10 @@ developing applications that use %{name}.
 
 
 %changelog
+* Fri Nov 27 20:10:28 +04 2020 Marc-André Lureau <marcandre.lureau@redhat.com> - 4.3.1-2
+- Fix CVE-2020-29129 CVE-2020-29130 out-of-bounds access while processing ARP/NCSI packets
+  rhbz#1902232
+
 * Wed Jul 08 2020 Marc-André Lureau <marcandre.lureau@redhat.com> - 4.3.1-1
 - New v4.3.1 release
 
