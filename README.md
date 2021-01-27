@@ -1,6 +1,6 @@
-########################################
 # build
-########################################
+
+```bash
 rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/33/Everything/SRPMS/Packages/l/libepoxy-1.5.5-1.fc33.src.rpm
 
 rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/33/Everything/SRPMS/Packages/l/liburing-0.7-3.fc33.src.rpm
@@ -65,9 +65,13 @@ rpmbuild -ba seabios.spec
 sudo yum-builddep -y ~/rpmbuild/SPECS/dtc.spec
 rpmbuild -ba dtc.spec
 
-########################################
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/33/Everything/x86_64/Packages/e/edk2-ovmf-20200801stable-3.fc33.noarch.rpm
+mv edk2-ovmf-20200801stable-3.fc33.noarch.rpm ~/repo/edk2-ovmf-20200801stable-3.fc33.noarch.rpm
+```
+
 # repo
-########################################
+
+```bash
 rm -rf ~/repo
 mkdir ~/repo
 cp rpmbuild/RPMS/noarch/* ~/repo
@@ -78,3 +82,4 @@ rm ~/repo/qemu-sanity-check-*
 rpm --resign ~/repo/*.rpm
 createrepo ~/repo
 mc mirror --remove --overwrite --md5 ~/repo repo/kvm
+```
