@@ -1,12 +1,13 @@
 Name: liburing
 Version: 0.7
-Release: 3%{?dist}
+Release: 4%{?dist}
 Summary: Linux-native io_uring I/O access library
 License: (GPLv2 with exceptions and LGPLv2+) or MIT
 Source0: https://brick.kernel.dk/snaps/%{name}-%{version}.tar.gz
 Source1: https://brick.kernel.dk/snaps/%{name}-%{version}.tar.gz.asc
 URL: https://git.kernel.dk/cgit/liburing/
 BuildRequires: gcc
+BuildRequires: make
 
 %description
 Provides native async IO for the Linux kernel, in a fast and efficient
@@ -46,6 +47,9 @@ for the Linux-native io_uring.
 %{_mandir}/man2/*
 
 %changelog
+* Tue Jan 26 2021 Fedora Release Engineering <releng@fedoraproject.org> - 0.7-4
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_34_Mass_Rebuild
+
 * Mon Oct 19 2020 Davide Cavalca <dcavalca@fb.com> - 0.7-3
 - Drop exclude for armv7hl as it's no longer necessary
 

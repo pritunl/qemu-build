@@ -4,7 +4,7 @@
 
 Name:           seabios
 Version:        1.14.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Open-source legacy BIOS implementation
 
 License:        LGPLv3
@@ -31,6 +31,7 @@ Source21:       config.vga-bochs-display
 Source22:       config.vga-ati
 Source23:       config.seabios-microvm
 
+BuildRequires: make
 BuildRequires: gcc
 BuildRequires: python3 iasl
 %if 0%{?cross:1}
@@ -159,6 +160,9 @@ install -m 0644 binaries/vgabios*.bin $RPM_BUILD_ROOT%{_datadir}/seavgabios
 
 
 %changelog
+* Wed Jan 27 2021 Fedora Release Engineering <releng@fedoraproject.org> - 1.14.0-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_34_Mass_Rebuild
+
 * Tue Nov 24 2020 Cole Robinson <aintdiscole@gmail.com> - 1.14.0-1
 - Update to 1.14.0
 

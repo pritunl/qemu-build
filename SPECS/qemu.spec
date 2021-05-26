@@ -55,6 +55,8 @@
 %global have_pmem 1
 %endif
 
+%global have_jack 0
+
 
 # Matches edk2.spec ExclusiveArch
 %global have_edk2 0
@@ -98,6 +100,8 @@
 %endif
 %global with_block_gluster 1
 
+%define with_block_nfs 1
+
 %ifarch %{arm}
 %define with_rdma 0
 %else
@@ -116,7 +120,13 @@
 %define obsoletes_block_gluster Obsoletes: %{name}-block-gluster < %{evr}
 %endif
 %define requires_block_iscsi Requires: %{name}-block-iscsi = %{evr}
+%if %{with_block_nfs}
 %define requires_block_nfs Requires: %{name}-block-nfs = %{evr}
+%define obsoletes_block_nfs %{nil}
+%else
+%define requires_block_nfs %{nil}
+%define obsoletes_block_nfs Obsoletes: %{name}-block-nfs < %{evr}
+%endif
 %if %{with_block_rbd}
 %define requires_block_rbd Requires: %{name}-block-rbd = %{evr}
 %define obsoletes_block_rbd %{nil}
@@ -136,7 +146,14 @@
 %define requires_ui_opengl Requires: %{name}-ui-opengl = %{evr}
 %define requires_device_display_virtio_gpu Requires: %{name}-device-display-virtio-gpu = %{evr}
 %define requires_device_display_virtio_gpu_pci Requires: %{name}-device-display-virtio-gpu-pci = %{evr}
+%define requires_device_display_virtio_gpu_ccw Requires: %{name}-device-display-virtio-gpu-ccw = %{evr}
 %define requires_device_display_virtio_vga Requires: %{name}-device-display-virtio-vga = %{evr}
+
+%if %{have_jack}
+%define requires_audio_jack Requires: %{name}-audio-jack = %{evr}
+%else
+%define requires_audio_jack %{nil}
+%endif
 
 %if %{have_spice}
 %define requires_ui_spice_app Requires: %{name}-ui-spice-app = %{evr}
@@ -163,6 +180,7 @@
 %{requires_audio_alsa} \
 %{requires_audio_oss} \
 %{requires_audio_pa} \
+%{requires_audio_jack} \
 %{requires_audio_spice} \
 %{requires_ui_curses} \
 %{requires_ui_egl_headless} \
@@ -181,10 +199,11 @@
 # Modules which can be conditionally built
 %global obsoletes_some_modules \
 %{obsoletes_block_gluster} \
+%{obsoletes_block_rbd} \
 %{obsoletes_block_rbd}
 
 # Release candidate version tracking
-#global rcver rc4
+# global rcver rc4
 %if 0%{?rcver:1}
 %global rcrel .%{rcver}
 %global rcstr -%{rcver}
@@ -193,8 +212,8 @@
 
 Summary: QEMU is a FAST! processor emulator
 Name: pritunl-qemu
-Version: 5.2.0
-Release: 4%{?rcrel}%{?dist}
+Version: 6.0.0
+Release: 1%{?rcrel}%{?dist}
 Epoch: 2
 License: GPLv2 and BSD and MIT and CC-BY
 URL: http://www.qemu.org/
@@ -208,14 +227,13 @@ Source17: qemu-ga.sysconfig
 Source11: 99-qemu-guest-agent.rules
 # /etc/qemu/bridge.conf
 Source12: bridge.conf
-# qemu-kvm back compat wrapper installed as /usr/bin/qemu-kvm
-Source13: qemu-kvm.sh
 # /etc/modprobe.d/kvm.conf, for x86
 Source20: kvm-x86.modprobe.conf
 # /etc/security/limits.d/95-kvm-ppc64-memlock.conf
 Source21: 95-kvm-ppc64-memlock.conf
 
 
+BuildRequires: make
 BuildRequires: meson
 BuildRequires: gcc
 # documentation deps
@@ -353,6 +371,12 @@ BuildRequires: hostname
 BuildRequires: daxctl-devel
 # used by some linux user impls
 BuildRequires: libdrm-devel
+# fuse block device
+BuildRequires: fuse-devel
+%if %{have_jack}
+# jack audio driver
+BuildRequires: jack-audio-connection-kit-devel
+%endif
 
 %if %{user_static}
 BuildRequires: glibc-static pcre-static glib2-static zlib-static
@@ -473,6 +497,7 @@ This package provides the additional iSCSI block driver for QEMU.
 Install this package if you want to access iSCSI volumes.
 
 
+%if %{with_block_nfs}
 %package  block-nfs
 Summary: QEMU NFS block driver
 Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
@@ -481,6 +506,7 @@ Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
 This package provides the additional NFS block driver for QEMU.
 
 Install this package if you want to access remote NFS storage.
+%endif
 
 
 %if %{with_block_rbd}
@@ -522,6 +548,14 @@ Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
 %description audio-pa
 This package provides the additional PulseAudi audio driver for QEMU.
 
+%if %{have_jack}
+%package  audio-jack
+Summary: QEMU Jack audio driver
+Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
+%description audio-jack
+This package provides the additional Jack audio driver for QEMU.
+%endif
+
 
 %package  ui-curses
 Summary: QEMU curses UI driver
@@ -560,6 +594,11 @@ Summary: QEMU virtio-gpu-pci display device
 Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
 %description device-display-virtio-gpu-pci
 This package provides the virtio-gpu-pci display device for QEMU.
+%package device-display-virtio-gpu-ccw
+Summary: QEMU virtio-gpu-ccw display device
+Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
+%description device-display-virtio-gpu-ccw
+This package provides the virtio-gpu-ccw display device for QEMU.
 %package device-display-virtio-vga
 Summary: QEMU virtio-vga display device
 Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
@@ -1016,7 +1055,7 @@ tracebackends="dtrace"
 
 run_configure() {
     # Base configure call with standard shared options
-    ../configure \
+    CC=%{__cc} CXX=%{__cxx} ../configure \
         --prefix=%{_prefix} \
         --libdir=%{_libdir} \
         --sysconfdir=%{_sysconfdir} \
@@ -1037,110 +1076,19 @@ run_configure_disable_everything() {
     # Disable every qemu feature. Callers can --enable-X the bits they need
     run_configure \
         --audio-drv-list= \
-        --disable-attr \
-        --disable-auth-pam \
-        --disable-avx2 \
-        --disable-avx512f \
-        --disable-blobs \
-        --disable-bochs \
-        --disable-brlapi \
-        --disable-bsd-user \
-        --disable-bzip2 \
-        --disable-cap-ng \
-        --disable-capstone \
-        --disable-cloop \
-        --disable-cocoa \
-        --disable-coroutine-pool \
-        --disable-crypto-afalg \
-        --disable-curl \
-        --disable-curses \
-        --disable-debug-info \
-        --disable-debug-mutex \
-        --disable-debug-tcg \
-        --disable-dmg \
-        --disable-docs \
-        --disable-fdt \
-        --disable-gcrypt \
-        --disable-glusterfs \
-        --disable-gnutls \
-        --disable-gtk \
-        --disable-guest-agent \
-        --disable-guest-agent-msi \
-        --disable-hax \
-        --disable-hvf \
-        --disable-iconv \
-        --disable-jemalloc \
-        --disable-keyring \
-        --disable-kvm \
-        --disable-libdaxctl \
-        --disable-libiscsi \
-        --disable-libnfs \
-        --disable-libpmem \
-        --disable-libssh \
-        --disable-libusb \
-        --disable-libxml2 \
-        --disable-linux-aio \
-        --disable-linux-io-uring \
-        --disable-linux-user \
-        --disable-live-block-migration \
-        --disable-lzfse \
-        --disable-lzo \
-        --disable-membarrier \
-        --disable-modules \
-        --disable-mpath \
-        --disable-netmap \
-        --disable-nettle \
-        --disable-numa \
-        --disable-opengl \
-        --disable-parallels \
-        --disable-pie \
-        --disable-pvrdma \
-        --disable-qcow1 \
-        --disable-qed \
-        --disable-qom-cast-debug \
-        --disable-rbd \
-        --disable-rdma \
-        --disable-replication \
-        --disable-rng-none \
-        --disable-sdl \
-        --disable-sdl-image \
-        --disable-seccomp \
-        --disable-sheepdog \
-        --disable-slirp \
-        --disable-smartcard \
-        --disable-snappy \
-        --disable-sparse \
-        --disable-spice \
+        --without-default-features \
+        --without-default-devices \
         --disable-system \
         --disable-tcg \
-        --disable-tcmalloc \
-        --disable-tools \
-        --disable-tpm \
-        --disable-usb-redir \
         --disable-user \
-        --disable-vde \
-        --disable-vdi \
-        --disable-vhost-crypto \
-        --disable-vhost-kernel \
-        --disable-vhost-net \
-        --disable-vhost-scsi \
-        --disable-vhost-user \
-        --disable-vhost-vdpa \
-        --disable-vhost-vsock \
-        --disable-virglrenderer \
-        --disable-virtfs \
+        --disable-blobs \
+        --disable-capstone \
+        --disable-fdt \
         --disable-vnc \
         --disable-vnc-jpeg \
         --disable-vnc-png \
-        --disable-vnc-sasl \
-        --disable-vte \
-        --disable-vvfat \
-        --disable-whpx \
-        --disable-xen \
-        --disable-xen-pci-passthrough \
-        --disable-xfsctl \
-        --disable-zstd \
-        --without-default-devices \
+        --disable-vhost-kernel \
+        --disable-vhost-vdpa \
         "$@"
 }
 
@@ -1278,7 +1226,7 @@ done
 # Install kvm specific source bits, and qemu-kvm manpage
 %if 0%{?need_qemu_kvm}
 ln -sf qemu.1.gz %{buildroot}%{_mandir}/man1/qemu-kvm.1.gz
-install -m 0755 %{_sourcedir}/qemu-kvm.sh %{buildroot}%{_bindir}/qemu-kvm
+ln -sf qemu-system-x86_64 %{buildroot}%{_bindir}/qemu-kvm
 install -D -p -m 0644 %{_sourcedir}/kvm-x86.modprobe.conf %{buildroot}%{_sysconfdir}/modprobe.d/kvm.conf
 %endif
 
@@ -1434,17 +1382,10 @@ getent passwd qemu >/dev/null || \
 
 
 %files common
-%dir %{qemudocdir}
-%doc %{qemudocdir}/README.rst
-%doc %{qemudocdir}/index.html
-%doc %{qemudocdir}/interop
-%doc %{qemudocdir}/specs
-%doc %{qemudocdir}/system
-%doc %{qemudocdir}/tools
-%doc %{qemudocdir}/user
 %license %{qemudocdir}/COPYING
 %license %{qemudocdir}/COPYING.LIB
 %license %{qemudocdir}/LICENSE
+%doc %{qemudocdir}
 %dir %{_datadir}/qemu/
 %{_datadir}/applications/qemu.desktop
 %{_datadir}/icons/hicolor/*/apps/*
@@ -1478,6 +1419,7 @@ getent passwd qemu >/dev/null || \
 %{_datadir}/qemu/efi-vmxnet3.rom
 %{_datadir}/qemu/vhost-user/50-qemu-virtiofsd.json
 %{_mandir}/man1/qemu.1*
+%{_mandir}/man1/qemu-storage-daemon.1*
 %{_mandir}/man1/qemu-trace-stap.1*
 %{_mandir}/man1/virtfs-proxy-helper.1*
 %{_mandir}/man1/virtiofsd.1*
@@ -1485,6 +1427,7 @@ getent passwd qemu >/dev/null || \
 %{_mandir}/man7/qemu-cpu-models.7*
 %{_mandir}/man7/qemu-qmp-ref.7*
 %{_mandir}/man7/qemu-ga-ref.7*
+%{_mandir}/man7/qemu-storage-daemon-qmp-ref.7*
 %{_mandir}/man8/qemu-pr-helper.8*
 %{_bindir}/elf2dmp
 %{_bindir}/qemu-edid
@@ -1535,14 +1478,16 @@ getent passwd qemu >/dev/null || \
 %endif
 %files block-iscsi
 %{_libdir}/qemu/block-iscsi.so
-%files block-nfs
-%{_libdir}/qemu/block-nfs.so
 %if %{with_block_rbd}
 %files block-rbd
 %{_libdir}/qemu/block-rbd.so
 %endif
 %files block-ssh
 %{_libdir}/qemu/block-ssh.so
+%if %{with_block_nfs}
+%files block-nfs
+%{_libdir}/qemu/block-nfs.so
+%endif
 
 
 %files audio-alsa
@@ -1551,6 +1496,10 @@ getent passwd qemu >/dev/null || \
 %{_libdir}/qemu/audio-oss.so
 %files audio-pa
 %{_libdir}/qemu/audio-pa.so
+%if %{have_jack}
+%files audio-jack
+%{_libdir}/qemu/audio-jack.so
+%endif
 
 
 %files ui-curses
@@ -1568,6 +1517,8 @@ getent passwd qemu >/dev/null || \
 %{_libdir}/qemu/hw-display-virtio-gpu.so
 %files device-display-virtio-gpu-pci
 %{_libdir}/qemu/hw-display-virtio-gpu-pci.so
+%files device-display-virtio-gpu-ccw
+%{_libdir}/qemu/hw-s390x-virtio-gpu-ccw.so
 %files device-display-virtio-vga
 %{_libdir}/qemu/hw-display-virtio-vga.so
 %files device-usb-redirect
@@ -1609,6 +1560,7 @@ getent passwd qemu >/dev/null || \
 %{_bindir}/qemu-armeb
 %{_bindir}/qemu-cris
 %{_bindir}/qemu-hppa
+%{_bindir}/qemu-hexagon
 %{_bindir}/qemu-m68k
 %{_bindir}/qemu-microblaze
 %{_bindir}/qemu-microblazeel
@@ -1641,6 +1593,7 @@ getent passwd qemu >/dev/null || \
 %{_datadir}/systemtap/tapset/qemu-arm*.stp
 %{_datadir}/systemtap/tapset/qemu-cris*.stp
 %{_datadir}/systemtap/tapset/qemu-hppa*.stp
+%{_datadir}/systemtap/tapset/qemu-hexagon*.stp
 %{_datadir}/systemtap/tapset/qemu-m68k*.stp
 %{_datadir}/systemtap/tapset/qemu-microblaze*.stp
 %{_datadir}/systemtap/tapset/qemu-mips*.stp
@@ -1862,6 +1815,32 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
+* Wed May 12 2021 Cole Robinson <crobinso@redhat.com> - 2:6.0.0-1
+- Rebase to qemu 6.0.0 GA
+
+* Wed Apr 21 2021 Cole Robinson <crobinso@redhat.com> - 2:6.0.0-0.3.rc4
+- Rebase to qemu 6.0.0-rc4
+
+* Wed Apr 14 2021 Richard W.M. Jones <rjones@redhat.com> - 2:6.0.0-0.2.rc2
+- Rebuild for updated liburing.
+
+* Tue Apr 06 2021 Cole Robinson <aintdiscole@gmail.com> - 6.0.0-0.1.rc2
+- Rebase to qemu 6.0.0-rc2
+
+* Tue Mar 02 2021 Zbigniew Jędrzejewski-Szmek <zbyszek@in.waw.pl> - 2:5.2.0-6.1
+- Rebuilt for updated systemd-rpm-macros
+  See https://pagure.io/fesco/issue/2583.
+
+* Mon Mar 01 2021 Cole Robinson <aintdiscole@gmail.com> - 5.2.0-6
+- Fix building on centos stream in copr
+
+* Wed Jan 27 2021 Fedora Release Engineering <releng@fedoraproject.org> - 2:5.2.0-5.1
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_34_Mass_Rebuild
+
+* Mon Jan 11 2021 Paolo Bonzini <pbonzini@redhat.com> - 2:5.2.0-5
+- Use symlink for qemu-kvm.
+- Fix make check on bash 5.1.
+
 * Fri Dec 11 2020 Richard W.M. Jones <rjones@redhat.com> - 2:5.2.0-4
 - qemu-char-spice not qemu-chardev-spice.
 
@@ -1983,109 +1962,3 @@ getent passwd qemu >/dev/null || \
 
 * Sat Jan 25 2020 Richard W.M. Jones <rjones@redhat.com> - 4.2.0-3
 - Add miscellaneous fixes for RISC-V (RHBZ#1794902).
-
-* Thu Dec 19 2019 Mohan Boddu <mboddu@bhujji.com> - 4.2.0-2
-- Rebuild for xen 4.13
-
-* Fri Dec 13 2019 Cole Robinson <aintdiscole@gmail.com> - 4.2.0-1
-- Update to qemu-4.2.0 GA
-
-* Tue Dec 10 2019 Cole Robinson <aintdiscole@gmail.com> - 4.2.0-0.4.rc5
-- Update to qemu-4.2.0 rc5
-
-* Mon Dec  2 2019 Daniel P. Berrangé <berrange@redhat.com> - 2:4.2.0-0.3.rc2
-- Disable RDMA on 32-bit arm (rhbz #1778517)
-
-* Wed Nov 20 2019 Cole Robinson <aintdiscole@gmail.com> - 2:4.2.0-0.2.rc2
-- Update to qemu-4.2.0 rc2
-
-* Tue Nov 12 2019 Cole Robinson <aintdiscole@gmail.com> - 2:4.2.0-0.1.rc1
-- Update to qemu-4.2.0 rc1
-
-* Mon Nov 11 2019 Cole Robinson <crobinso@redhat.com> - 2:4.1.0-6
-- Fix compressed qcow2 'qemu-img check' errors (bz #1768541)
-
-* Thu Oct 24 2019 Cole Robinson <crobinso@redhat.com> - 2:4.1.0-5
-- Workaround for qcow2 triggered XFS corruption (bz #1763519)
-
-* Thu Oct 03 2019 Cole Robinson <crobinso@redhat.com> - 2:4.1.0-4
-- Rebuild for new virglrenderer
-
-* Wed Sep 11 2019 Leigh Scott <leigh123linux@googlemail.com> - 2:4.1.0-3
-- Rebuild for new libnfs version
-
-* Wed Sep 04 2019 Cole Robinson <crobinso@redhat.com> - 2:4.1.0-2
-- gluster 4K block size fixes (bz #1737256)
-
-* Mon Aug 19 2019 Cole Robinson <aintdiscole@gmail.com> - 2:4.1.0-1
-- Update to qemu-4.1.0 GA
-
-* Wed Jul 17 2019 Cole Robinson <aintdiscole@gmail.com> - 2:4.1.0-0.1.rc2
-- Update to qemu-4.1.0-rc2
-- Re-add libattr for qemu-user-static (bz 1731756)
-
-* Wed Jul 17 2019 Cole Robinson <aintdiscole@gmail.com> - 2:4.1.0-0.1.rc1
-- Update to qemu-4.1.0-rc1
-
-* Thu Jul 11 2019 Cole Robinson <aintdiscole@gmail.com> - 2:4.1.0-0.1.rc0
-- Update to qemu-4.1.0-rc0
-
-* Fri Jun 28 2019 Kevin Fenzi <kevin@scrye.com> - 2:4.0.0-5
-- Rebuild for new brltty.
-
-* Thu Jun 20 2019 Cole Robinson <crobinso@redhat.com> - 2:4.0.0-4
-- CVE-2019-12155: qxl: null pointer dereference while releasing spice
-  resources (bz #1712727, bz #1712670)
-- qemu-4.0.0-2.fc31 ppc64le: rpm hash calculation buggy (bz #1715017)
-- Fix rawhide build (bz #1718926)
-- Link against libslirp (bz #1712980)
-- Add vgabios-ramfb.bin and vgabios-bochs-display.bin (bz #1721445)
-
-* Tue May 14 2019 Daniel P. Berrangé <berrange@redhat.com> - 2:4.0.0-2
-- Define md-clear CPUID bit
-- Resolves: rhbz #1710002 (CVE-2018-12126), rhbz #1710004 (CVE-2018-12127),
-  rhbz #1710003 (CVE-2018-12130), rhbz #1710006 (CVE-2019-11091)
-
-* Wed Apr 24 2019 Cole Robinson <aintdiscole@gmail.com> - 2:4.0.0-1
-- Update to qemu-4.0.0 GA
-
-* Tue Apr 16 2019 Cole Robinson <crobinso@redhat.com> - 2:4.0.0-0.7.rc3
-- Don't block migration with nested VMX (bz #1697997)
-- Update to qemu-4.0.0-rc3
-
-* Sat Apr 06 2019 Richard W.M. Jones <rjones@redhat.com> - 2:4.0.0-0.6.rc2
-- Rebuild against xen 4.12.
-
-* Wed Apr 03 2019 Cole Robinson <aintdiscole@gmail.com> - 2:4.0.0-0.5.rc2
-- Update to 4.0.0-rc2
-
-* Wed Mar 27 2019 Cole Robinson <aintdiscole@gmail.com> - 2:4.0.0-0.4.rc1
-- Update to 4.0.0-rc1
-
-* Mon Mar 25 2019 Adam Williamson <awilliam@redhat.com> - 2:4.0.0-0.3.rc0
-- Backport patch to fix 3D crasher bug (bz #1692323)
-
-* Thu Mar 21 2019 Cole Robinson <aintdiscole@gmail.com> - 2:4.0.0-0.2.rc0
-- Fix python paths for qemu-trace-stap
-
-* Wed Mar 20 2019 Cole Robinson <aintdiscole@gmail.com> - 2:4.0.0-0.2.rc0
-- Update to 4.0.0-rc0
-
-* Wed Mar 20 2019 Daniel P. Berrangé <berrange@redhat.com> - 2:3.1.0-5
-- Fix compat with latest glibc which has gettid func
-
-* Sun Mar 03 2019 Cole Robinson <aintdiscole@gmail.com> - 2:3.1.0-4.3
-- Temporarily disable glusterfs (bz #1684298)
-
-* Thu Feb 28 2019 Cole Robinson <aintdiscole@gmail.com> - 2:3.1.0-4.2
-- Rebuild for brltty soname bump
-
-* Sat Feb 02 2019 Fedora Release Engineering <releng@fedoraproject.org> - 2:3.1.0-4.1
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_30_Mass_Rebuild
-
-* Sat Jan 12 2019 Richard W.M. Jones <rjones@redhat.com> - 2:3.1.0-4
-- Remove temporary patch and rebuild against fixed capstone.
-
-* Fri Jan 11 2019 Richard W.M. Jones <rjones@redhat.com> - 2:3.1.0-3
-- Rebuild for unannounced libcapstone soname bump from 3 to 4.
-- Add a temporary patch to fix capstone header location.

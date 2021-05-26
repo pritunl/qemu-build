@@ -1,18 +1,18 @@
 # build
 
 ```bash
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/33/Everything/SRPMS/Packages/l/libepoxy-1.5.5-1.fc33.src.rpm
+rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/34/Everything/SRPMS/Packages/l/libepoxy-1.5.7-1.fc34.src.rpm
 
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/33/Everything/SRPMS/Packages/l/liburing-0.7-3.fc33.src.rpm
+rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/34/Everything/source/tree/Packages/l/liburing-0.7-4.fc34.src.rpm
 
 rpm -i https://download-ib01.fedoraproject.org/pub/epel/8/Everything/SRPMS/Packages/c/capstone-4.0.1-9.el8.src.rpm
 rpm -i https://download-ib01.fedoraproject.org/pub/epel/8/Everything/SRPMS/Packages/l/libnfs-4.0.0-1.el8.src.rpm
 rpm -i https://download-ib01.fedoraproject.org/pub/epel/8/Everything/SRPMS/Packages/l/libslirp-4.3.1-2.el8.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-5.2.0-4.fc34.src.rpm
+rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-6.0.0-1.fc35.src.rpm
 rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/33/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-1.fc33.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/33/Everything/source/tree/Packages/v/virglrenderer-0.8.2-2.20200212git7d204f39.fc33.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/33/Everything/SRPMS/Packages/s/seabios-1.14.0-1.fc33.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/33/Everything/source/tree/Packages/d/dtc-1.6.0-3.fc33.src.rpm
+rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/v/virglrenderer-0.9.1-1.20210420git36391559.fc35.src.rpm
+rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/34/Everything/source/tree/Packages/s/seabios-1.14.0-2.fc34.src.rpm
+rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/34/Everything/source/tree/Packages/d/dtc-1.6.0-4.fc34.src.rpm
 
 rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
     123.123.123.123:/home/cloud/rpmbuild/SOURCES/ /home/cloud/git/qemu-build/SOURCES/
@@ -29,17 +29,17 @@ cd ~/rpmbuild/SPECS/
 sudo yum-builddep -y ~/rpmbuild/SPECS/libepoxy.spec
 rpmbuild -ba libepoxy.spec
 
-sudo yum -y install ~/rpmbuild/RPMS/x86_64/libepoxy-1.5.5-1.el8.x86_64.rpm ~/rpmbuild/RPMS/x86_64/libepoxy-devel-1.5.5-1.el8.x86_64.rpm
+sudo yum -y install ~/rpmbuild/RPMS/x86_64/libepoxy-1.5.7-1.el8.x86_64.rpm ~/rpmbuild/RPMS/x86_64/libepoxy-devel-1.5.7-1.el8.x86_64.rpm
 
 sudo yum-builddep -y ~/rpmbuild/SPECS/virglrenderer.spec
 rpmbuild -ba virglrenderer.spec
 
-sudo yum -y install ~/rpmbuild/RPMS/x86_64/virglrenderer-0.8.2-2.20200212git7d204f39.el8.x86_64.rpm ~/rpmbuild/RPMS/x86_64/virglrenderer-devel-0.8.2-2.20200212git7d204f39.el8.x86_64.rpm
+sudo yum -y install ~/rpmbuild/RPMS/x86_64/virglrenderer-0.9.1-1.20210420git36391559.el8.x86_64.rpm ~/rpmbuild/RPMS/x86_64/virglrenderer-devel-0.9.1-1.20210420git36391559.el8.x86_64.rpm
 
 sudo yum-builddep -y ~/rpmbuild/SPECS/liburing.spec
 rpmbuild -ba liburing.spec
 
-sudo yum -y install ~/rpmbuild/RPMS/x86_64/liburing-0.7-3.el8.x86_64.rpm ~/rpmbuild/RPMS/x86_64/liburing-devel-0.7-3.el8.x86_64.rpm
+sudo yum -y install ~/rpmbuild/RPMS/x86_64/liburing-0.7-4.el8.x86_64.rpm ~/rpmbuild/RPMS/x86_64/liburing-devel-0.7-4.el8.x86_64.rpm
 
 sudo yum-builddep -y ~/rpmbuild/SPECS/qemu-sanity-check.spec
 rpmbuild -ba qemu-sanity-check.spec
@@ -65,8 +65,8 @@ rpmbuild -ba seabios.spec
 sudo yum-builddep -y ~/rpmbuild/SPECS/dtc.spec
 rpmbuild -ba dtc.spec
 
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/33/Everything/x86_64/Packages/e/edk2-ovmf-20200801stable-3.fc33.noarch.rpm
-mv edk2-ovmf-20200801stable-3.fc33.noarch.rpm ~/repo/edk2-ovmf-20200801stable-3.fc33.noarch.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/34/Everything/x86_64/os/Packages/e/edk2-ovmf-20200801stable-4.fc34.noarch.rpm
+mv edk2-ovmf-20200801stable-4.fc34.noarch.rpm ~/repo/edk2-ovmf-20200801stable-4.fc34.noarch.rpm
 ```
 
 # repo
