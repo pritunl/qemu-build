@@ -81,5 +81,6 @@ rm ~/repo/qemu-sanity-check-*
 
 rpm --resign ~/repo/*.rpm
 createrepo ~/repo
-mc mirror --remove --overwrite --md5 ~/repo repo/kvm
+mc mirror --remove --overwrite --md5 ~/repo repo-east/kvm
+mc mirror --remove --overwrite --md5 ~/repo repo-west/kvm
 ```
