@@ -13,6 +13,7 @@ rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/33/Ever
 rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/v/virglrenderer-0.9.1-1.20210420git36391559.fc35.src.rpm
 rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/34/Everything/source/tree/Packages/s/seabios-1.14.0-2.fc34.src.rpm
 rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/34/Everything/source/tree/Packages/d/dtc-1.6.0-4.fc34.src.rpm
+rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/34/Everything/source/tree/Packages/k/ksmtuned-0.1.0-6.fc34.src.rpm
 
 rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
     123.123.123.123:/home/cloud/rpmbuild/SOURCES/ /home/cloud/git/qemu-build/SOURCES/
@@ -64,6 +65,9 @@ rpmbuild -ba seabios.spec
 
 sudo yum-builddep -y ~/rpmbuild/SPECS/dtc.spec
 rpmbuild -ba dtc.spec
+
+sudo yum-builddep -y ~/rpmbuild/SPECS/ksmtuned.spec
+rpmbuild -ba ksmtuned.spec
 
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/34/Everything/x86_64/os/Packages/e/edk2-ovmf-20200801stable-4.fc34.noarch.rpm
 mv edk2-ovmf-20200801stable-4.fc34.noarch.rpm ~/repo/edk2-ovmf-20200801stable-4.fc34.noarch.rpm
