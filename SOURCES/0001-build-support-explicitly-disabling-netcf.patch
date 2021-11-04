@@ -1,0 +1,56 @@
+From: Laine Stump <laine@redhat.com>
+Date: Thu, 21 Jan 2021 16:01:06 -0500
+Subject: [PATCH] build: support explicitly disabling netcf
+
+placing "-Dnetcf=disabled" on the meson commandline was ignored,
+meaning that even with that option the build would get WITH_NETCF if
+the netcf-devel package was found - the only way to disable it was to
+uninstall netcf-devel.
+
+This patch adds the small bit of logic to check the netcf meson
+commandline option (in addition to whether netcf-devel is installed)
+before defining WITH_NETCF.
+
+Signed-off-by: Laine Stump <laine@redhat.com>
+Reviewed-by: Neal Gompa <ngompa13@gmail.com>
+Reviewed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 06169a115d46d8870a96d293c2faf6ea87e71020)
+---
+ meson.build | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/meson.build b/meson.build
+index b5164f68ed..e9d6d9f82e 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1155,8 +1155,10 @@ libm_dep = cc.find_library('m', required : false)
+ 
+ netcf_version = '0.1.8'
+ netcf_dep = dependency('netcf', version: '>=' + netcf_version, required: get_option('netcf'))
+-if netcf_dep.found()
+-  conf.set('WITH_NETCF', 1)
++if not get_option('netcf').disabled()
++  if netcf_dep.found()
++    conf.set('WITH_NETCF', 1)
++  endif
+ endif
+ 
+ have_gnu_gettext_tools = false
+@@ -1550,7 +1552,7 @@ elif get_option('driver_hyperv').enabled()
+   error('openwsman is required for the Hyper-V driver')
+ endif
+ 
+-if not get_option('driver_interface').disabled() and conf.has('WITH_LIBVIRTD') and (udev_dep.found() or netcf_dep.found())
++if not get_option('driver_interface').disabled() and conf.has('WITH_LIBVIRTD') and (udev_dep.found() or conf.has('WITH_NETCF'))
+   conf.set('WITH_INTERFACE', 1)
+ elif get_option('driver_interface').enabled()
+   error('Requested the Interface driver without netcf or udev and libvirtd support')
+@@ -2362,7 +2364,7 @@ libs_summary = {
+   'libssh': libssh_dep.found(),
+   'libssh2': libssh2_dep.found(),
+   'libutil': libutil_dep.found(),
+-  'netcf': netcf_dep.found(),
++  'netcf': conf.has('WITH_NETCF'),
+   'NLS': have_gnu_gettext_tools,
+   'numactl': numactl_dep.found(),
+   'openwsman': openwsman_dep.found(),

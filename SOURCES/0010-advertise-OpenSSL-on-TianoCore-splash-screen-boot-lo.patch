@@ -1,0 +1,659 @@
+From 8c815e04dda7897899dfa011063f779280cd4d5d Mon Sep 17 00:00:00 2001
+From: Laszlo Ersek <lersek@redhat.com>
+Date: Wed, 11 Jun 2014 23:33:33 +0200
+Subject: advertise OpenSSL on TianoCore splash screen / boot logo (RHEL only)
+
+Notes about the RHEL-8.3/20200603-ca407c7246bf [edk2-stable202005] ->
+RHEL-8.5/20210520-e1999b264f1f [edk2-stable202105] rebase:
+
+- Extend the DSC/FDF change to the new OvmfPkg/AmdSev platform, which has
+  been introduced upstream in commit 30d277ed7a82 ("OvmfPkg/Amdsev: Base
+  commit to build encrypted boot specific OVMF", 2020-12-14), for
+  TianoCore#3077.
+
+  We've always patched all those DSC/FDF files in OvmfPkg down-stream that
+  made sense at least in theory on QEMU. (For example, we've always
+  patched "OvmfPkgIa32.dsc" and "OvmfPkgIa32.fdf", even though we never
+  build or ship the pure IA32 firmware platform.) Follow suit with
+  "AmdSevX64.dsc" and "AmdSevX64.fdf".
+
+  "AmdSevX64.dsc" consumes OpenSSL when built with "-D TPM_ENABLE".
+
+Notes about the RHEL-8.2/20190904-37eef91017ad [edk2-stable201908] ->
+RHEL-8.3/20200603-ca407c7246bf [edk2-stable202005] rebase:
+
+- Replace the open-coded BSDL with "SPDX-License-Identifier:
+  BSD-2-Clause-Patent" in the following files:
+
+  - MdeModulePkg/Logo/Logo-OpenSSL.idf
+  - MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+  - MdeModulePkg/Logo/LogoOpenSSLDxe.uni
+
+  (This should have been done in the previous rebase, because the same
+  license block changes had been applied to MdeModulePkg/Logo/ in upstream
+  commit 9d510e61fcee ("MdeModulePkg: Replace BSD License with BSD+Patent
+  License", 2019-04-09), part of tag edk2-stable201905.)
+
+Notes about the RHEL-8.1/20190308-89910a39dcfd [edk2-stable201903] ->
+RHEL-8.2/20190904-37eef91017ad [edk2-stable201908] rebase:
+
+- trivial context update (performed silently by git-cherry-pick) for
+  upstream commit 3207a872a405 ("OvmfPkg: Update DSC/FDF files to consume
+  CSM components in OvmfPkg", 2019-06-14)
+
+- A note for the future: the logo could change completely in a subsequent
+  rebase. See <https://bugzilla.tianocore.org/show_bug.cgi?id=2050> (in
+  CONFIRMED status at the time of writing).
+
+Notes about the RHEL-8.0/20180508-ee3198e672e2 ->
+RHEL-8.1/20190308-89910a39dcfd rebase:
+
+- Upstream edk2 removed the obsoleted network drivers in MdeModulePkg. The
+  OvmfPkg platforms were adapted in commit d2f1f6423bd1 ("OvmfPkg: Replace
+  obsoleted network drivers from platform DSC/FDF.", 2018-11-06). The
+  ArmVirtPkg platforms were adapted in commit 9a67ba261fe9 ("ArmVirtPkg:
+  Replace obsoleted network drivers from platform DSC/FDF.", 2018-12-14).
+
+  Consequently, because the NetworkPkg iSCSI driver requires OpenSSL
+  unconditionally, as explained in
+  <https://bugzilla.tianocore.org/show_bug.cgi?id=1278#c3>, this patch now
+  builds LogoOpenSSLDxe unconditionally, squashing and updating previous
+  downstream commits
+
+  - 8e8ea8811e26 advertise OpenSSL on TianoCore splash screen / boot logo
+                 (RHEL only)
+  - 02ed2c501cdd advertise OpenSSL due to IPv6 enablement too (RHEL only)
+
+Notes about the RHEL-7.6/ovmf-20180508-2.gitee3198e672e2.el7 ->
+RHEL-8.0/20180508-ee3198e672e2 rebase:
+
+- reorder the rebase changelog in the commit message so that it reads like
+  a blog: place more recent entries near the top
+- no changes to the patch body
+
+Notes about the 20171011-92d07e48907f -> 20180508-ee3198e672e2 rebase:
+
+- Adapted to upstream 25184ec33c36 ("MdeModulePkg/Logo.idf: Remove
+  incorrect comments.", 2018-02-28)
+
+Notes about the 20170228-c325e41585e3 -> 20171011-92d07e48907f rebase:
+
+- After picking previous downstream-only commit 32192c62e289, carry new
+  upstream commit e01e9ae28250 ("MdeModulePkg/LogoDxe: Add missing
+  dependency gEfiHiiImageExProtocolGuid", 2017-03-16) over to
+  "LogoOpenSSLDxe.inf".
+
+Notes about the 20160608b-988715a -> 20170228-c325e41585e3 rebase:
+
+- For more fun, upstream completely changed the way logo bitmaps are
+  embedded in the firmware binary (see for example commit ab970515d2c6,
+  "OvmfPkg: Use the new LogoDxe driver", 2016-09-26). Therefore in this
+  rebase, we reimplement the previous downstream-only commit e775fb20c999,
+  as described below.
+
+- Beyond the new bitmap file (which we preserve intact from the last
+  downstream branch), we introduce:
+
+  - a new IDF (image description file) referencing the new BMP,
+
+  - a new driver INF file, referencing the new BMP and new IDF (same C
+    source code though),
+
+  - a new UNI (~description) file for the new driver INF file.
+
+- In the OVMF DSC and FDF files, we select the new driver INF for
+  inclusion if either SECURE_BOOT_ENABLE or TLS_ENABLE is set, as they
+  both make use of OpenSSL (although different subsets of it).
+
+- In the AAVMF DSC and FDF files, we only look at SECURE_BOOT_ENABLE,
+  because the ArmVirtQemu platform does not support TLS_ENABLE yet.
+
+- This patch is best displayed with "git show --find-copies-harder".
+
+Notes about the d7c0dfa -> 90bb4c5 rebase:
+
+- squash in the following downstream-only commits (made originally for
+  <https://bugzilla.redhat.com/show_bug.cgi?id=1308678>):
+
+  - eef9eb0 restore TianoCore splash logo without OpenSSL advertisment
+            (RHEL only)
+
+  - 25842f0 OvmfPkg, ArmVirtPkg: show OpenSSL-less logo without Secure
+            Boot (RH only)
+
+  The reason is that ideas keep changing when and where to include the
+  Secure Boot feature, so the logo must be controllable directly on the
+  build command line, from the RPM spec file. See the following
+  references:
+
+  - https://post-office.corp.redhat.com/mailman/private/virt-devel/2016-March/msg00253.html
+  - https://post-office.corp.redhat.com/mailman/private/virt-devel/2016-April/msg00118.html
+  - https://bugzilla.redhat.com/show_bug.cgi?id=1323363
+
+- This squashed variant should remain the final version of this patch.
+
+Notes about the c9e5618 -> b9ffeab rebase:
+- AAVMF gained Secure Boot support, therefore the logo is again modified
+  in the common location, and no FDF changes are necessary.
+
+Notes about the 9ece15a -> c9e5618 rebase:
+- Logo.bmp is no longer modified in-place; instead a modified copy is
+  created. That's because AAVMF includes the logo too, but it doesn't
+  include OpenSSL / Secure Boot, so we need the original copy too.
+
+Because we may include the OpenSSL library in our OVMF and AAVMF builds
+now, we should advertise it as required by its license. This patch takes
+the original TianoCore logo, shifts it up by 20 pixels, and adds the
+horizontally centered message
+
+  This product includes software developed by the OpenSSL Project
+  for use in the OpenSSL Toolkit (http://www.openssl.org/)
+
+below.
+
+Logo-OpenSSL.bmp: PC bitmap, Windows 3.x format, 469 x 111 x 24
+Logo.bmp:         PC bitmap, Windows 3.x format, 193 x 58 x 8
+
+Downstream only because upstream edk2 does not intend to release a
+secure-boot-enabled OVMF build. (However the advertising requirement in
+the OpenSSL license,
+"CryptoPkg/Library/OpensslLib/openssl-1.0.2*/LICENSE", has been discussed
+nonetheless, which is why I'm changing the logo.)
+
+Signed-off-by: Laszlo Ersek <lersek@redhat.com>
+(cherry picked from commit 32192c62e289f261f5ce74acee48e5a94561f10b)
+(cherry picked from commit 33a710cd613c2ca7d534b8401e2f9f2178af05be)
+(cherry picked from commit 0b2d90347cb016cc71c2de62e941a2a4ab0f35a3)
+(cherry picked from commit 8e8ea8811e269cdb31103c70fcd91d2dcfb1755d)
+(cherry picked from commit 727c11ecd9f34990312e14f239e6238693619849)
+(cherry picked from commit 740d239222c2656ae8eeb2d1cc4802ce5b07f3d2)
+(cherry picked from commit cee80878b19e51d9b3c63335c681f152dcc59764)
+---
+ ArmVirtPkg/ArmVirtQemu.dsc           |   2 +-
+ ArmVirtPkg/ArmVirtQemuFvMain.fdf.inc |   2 +-
+ ArmVirtPkg/ArmVirtQemuKernel.dsc     |   2 +-
+ MdeModulePkg/Logo/Logo-OpenSSL.bmp   | Bin 0 -> 156342 bytes
+ MdeModulePkg/Logo/Logo-OpenSSL.idf   |  10 +++++
+ MdeModulePkg/Logo/LogoOpenSSLDxe.inf |  56 +++++++++++++++++++++++++++
+ MdeModulePkg/Logo/LogoOpenSSLDxe.uni |  17 ++++++++
+ OvmfPkg/AmdSev/AmdSevX64.dsc         |   2 +-
+ OvmfPkg/AmdSev/AmdSevX64.fdf         |   2 +-
+ OvmfPkg/OvmfPkgIa32.dsc              |   2 +-
+ OvmfPkg/OvmfPkgIa32.fdf              |   2 +-
+ OvmfPkg/OvmfPkgIa32X64.dsc           |   2 +-
+ OvmfPkg/OvmfPkgIa32X64.fdf           |   2 +-
+ OvmfPkg/OvmfPkgX64.dsc               |   2 +-
+ OvmfPkg/OvmfPkgX64.fdf               |   2 +-
+ 15 files changed, 94 insertions(+), 11 deletions(-)
+ create mode 100644 MdeModulePkg/Logo/Logo-OpenSSL.bmp
+ create mode 100644 MdeModulePkg/Logo/Logo-OpenSSL.idf
+ create mode 100644 MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+ create mode 100644 MdeModulePkg/Logo/LogoOpenSSLDxe.uni
+
+diff --git a/ArmVirtPkg/ArmVirtQemu.dsc b/ArmVirtPkg/ArmVirtQemu.dsc
+index 7ef5e7297b..54d637163c 100644
+--- a/ArmVirtPkg/ArmVirtQemu.dsc
++++ b/ArmVirtPkg/ArmVirtQemu.dsc
+@@ -433,7 +433,7 @@
+   MdeModulePkg/Universal/SetupBrowserDxe/SetupBrowserDxe.inf
+   MdeModulePkg/Universal/DriverHealthManagerDxe/DriverHealthManagerDxe.inf
+   MdeModulePkg/Universal/BdsDxe/BdsDxe.inf
+-  MdeModulePkg/Logo/LogoDxe.inf
++  MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+   MdeModulePkg/Application/UiApp/UiApp.inf {
+     <LibraryClasses>
+       NULL|MdeModulePkg/Library/DeviceManagerUiLib/DeviceManagerUiLib.inf
+diff --git a/ArmVirtPkg/ArmVirtQemuFvMain.fdf.inc b/ArmVirtPkg/ArmVirtQemuFvMain.fdf.inc
+index 5b1d100575..6cdbfc39be 100644
+--- a/ArmVirtPkg/ArmVirtQemuFvMain.fdf.inc
++++ b/ArmVirtPkg/ArmVirtQemuFvMain.fdf.inc
+@@ -196,7 +196,7 @@ READ_LOCK_STATUS   = TRUE
+   #
+   # TianoCore logo (splash screen)
+   #
+-  INF MdeModulePkg/Logo/LogoDxe.inf
++  INF MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+ 
+   #
+   # Ramdisk support
+diff --git a/ArmVirtPkg/ArmVirtQemuKernel.dsc b/ArmVirtPkg/ArmVirtQemuKernel.dsc
+index a542fcb157..f598ac6a85 100644
+--- a/ArmVirtPkg/ArmVirtQemuKernel.dsc
++++ b/ArmVirtPkg/ArmVirtQemuKernel.dsc
+@@ -369,7 +369,7 @@
+   MdeModulePkg/Universal/SetupBrowserDxe/SetupBrowserDxe.inf
+   MdeModulePkg/Universal/DriverHealthManagerDxe/DriverHealthManagerDxe.inf
+   MdeModulePkg/Universal/BdsDxe/BdsDxe.inf
+-  MdeModulePkg/Logo/LogoDxe.inf
++  MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+   MdeModulePkg/Application/UiApp/UiApp.inf {
+     <LibraryClasses>
+       NULL|MdeModulePkg/Library/DeviceManagerUiLib/DeviceManagerUiLib.inf
+diff --git a/MdeModulePkg/Logo/Logo-OpenSSL.bmp b/MdeModulePkg/Logo/Logo-OpenSSL.bmp
+new file mode 100644
+index 0000000000000000000000000000000000000000..4af5740232ce484a939a5852604e35711ea88a29
+GIT binary patch
+literal 156342
+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
+BLUI5A
+
+literal 0
+HcmV?d00001
+
+diff --git a/MdeModulePkg/Logo/Logo-OpenSSL.idf b/MdeModulePkg/Logo/Logo-OpenSSL.idf
+new file mode 100644
+index 0000000000..2a60ac61b7
+--- /dev/null
++++ b/MdeModulePkg/Logo/Logo-OpenSSL.idf
+@@ -0,0 +1,10 @@
++// /** @file
++// Platform Logo image definition file.
++//
++// Copyright (c) 2016 - 2018, Intel Corporation. All rights reserved.<BR>
++//
++// SPDX-License-Identifier: BSD-2-Clause-Patent
++//
++// **/
++
++#image IMG_LOGO Logo-OpenSSL.bmp
+diff --git a/MdeModulePkg/Logo/LogoOpenSSLDxe.inf b/MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+new file mode 100644
+index 0000000000..d1207663b2
+--- /dev/null
++++ b/MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+@@ -0,0 +1,56 @@
++## @file
++#  The default logo bitmap picture shown on setup screen.
++#
++#  Copyright (c) 2016 - 2017, Intel Corporation. All rights reserved.<BR>
++#
++#  SPDX-License-Identifier: BSD-2-Clause-Patent
++#
++#
++##
++
++[Defines]
++  INF_VERSION                    = 0x00010005
++  BASE_NAME                      = LogoOpenSSLDxe
++  MODULE_UNI_FILE                = LogoOpenSSLDxe.uni
++  FILE_GUID                      = 9CAE7B89-D48D-4D68-BBC4-4C0F1D48CDFF
++  MODULE_TYPE                    = DXE_DRIVER
++  VERSION_STRING                 = 1.0
++
++  ENTRY_POINT                    = InitializeLogo
++#
++#  This flag specifies whether HII resource section is generated into PE image.
++#
++  UEFI_HII_RESOURCE_SECTION      = TRUE
++
++#
++# The following information is for reference only and not required by the build tools.
++#
++#  VALID_ARCHITECTURES           = IA32 X64
++#
++
++[Sources]
++  Logo-OpenSSL.bmp
++  Logo.c
++  Logo-OpenSSL.idf
++
++[Packages]
++  MdeModulePkg/MdeModulePkg.dec
++  MdePkg/MdePkg.dec
++
++[LibraryClasses]
++  UefiBootServicesTableLib
++  UefiDriverEntryPoint
++  DebugLib
++
++[Protocols]
++  gEfiHiiDatabaseProtocolGuid        ## CONSUMES
++  gEfiHiiImageExProtocolGuid         ## CONSUMES
++  gEfiHiiPackageListProtocolGuid     ## PRODUCES CONSUMES
++  gEdkiiPlatformLogoProtocolGuid     ## PRODUCES
++
++[Depex]
++  gEfiHiiDatabaseProtocolGuid AND
++  gEfiHiiImageExProtocolGuid
++
++[UserExtensions.TianoCore."ExtraFiles"]
++  LogoDxeExtra.uni
+diff --git a/MdeModulePkg/Logo/LogoOpenSSLDxe.uni b/MdeModulePkg/Logo/LogoOpenSSLDxe.uni
+new file mode 100644
+index 0000000000..6439502b6a
+--- /dev/null
++++ b/MdeModulePkg/Logo/LogoOpenSSLDxe.uni
+@@ -0,0 +1,17 @@
++// /** @file
++// The logo bitmap picture (with OpenSSL advertisment) shown on setup screen.
++//
++// This module provides the logo bitmap picture (with OpenSSL advertisment)
++// shown on setup screen, through EDKII Platform Logo protocol.
++//
++// Copyright (c) 2016, Intel Corporation. All rights reserved.<BR>
++//
++// SPDX-License-Identifier: BSD-2-Clause-Patent
++//
++// **/
++
++
++#string STR_MODULE_ABSTRACT             #language en-US "Provides the logo bitmap picture (with OpenSSL advertisment) shown on setup screen."
++
++#string STR_MODULE_DESCRIPTION          #language en-US "This module provides the logo bitmap picture (with OpenSSL advertisment) shown on setup screen, through EDKII Platform Logo protocol."
++
+diff --git a/OvmfPkg/AmdSev/AmdSevX64.dsc b/OvmfPkg/AmdSev/AmdSevX64.dsc
+index 66bbbc80cd..52bcae6cf6 100644
+--- a/OvmfPkg/AmdSev/AmdSevX64.dsc
++++ b/OvmfPkg/AmdSev/AmdSevX64.dsc
+@@ -688,7 +688,7 @@
+   PcAtChipsetPkg/PcatRealTimeClockRuntimeDxe/PcatRealTimeClockRuntimeDxe.inf
+   MdeModulePkg/Universal/DriverHealthManagerDxe/DriverHealthManagerDxe.inf
+   MdeModulePkg/Universal/BdsDxe/BdsDxe.inf
+-  MdeModulePkg/Logo/LogoDxe.inf
++  MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+   MdeModulePkg/Application/UiApp/UiApp.inf {
+     <LibraryClasses>
+       NULL|MdeModulePkg/Library/DeviceManagerUiLib/DeviceManagerUiLib.inf
+diff --git a/OvmfPkg/AmdSev/AmdSevX64.fdf b/OvmfPkg/AmdSev/AmdSevX64.fdf
+index dd0030dbf1..fa5e484e63 100644
+--- a/OvmfPkg/AmdSev/AmdSevX64.fdf
++++ b/OvmfPkg/AmdSev/AmdSevX64.fdf
+@@ -279,7 +279,7 @@ INF  OvmfPkg/AmdSev/Grub/Grub.inf
+ INF  ShellPkg/Application/Shell/Shell.inf
+ !endif
+ 
+-INF MdeModulePkg/Logo/LogoDxe.inf
++INF MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+ 
+ #
+ # Usb Support
+diff --git a/OvmfPkg/OvmfPkgIa32.dsc b/OvmfPkg/OvmfPkgIa32.dsc
+index 33fbd76790..d8f03caa30 100644
+--- a/OvmfPkg/OvmfPkgIa32.dsc
++++ b/OvmfPkg/OvmfPkgIa32.dsc
+@@ -777,7 +777,7 @@
+       NULL|OvmfPkg/Csm/LegacyBootManagerLib/LegacyBootManagerLib.inf
+ !endif
+   }
+-  MdeModulePkg/Logo/LogoDxe.inf
++  MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+   MdeModulePkg/Application/UiApp/UiApp.inf {
+     <LibraryClasses>
+       NULL|MdeModulePkg/Library/DeviceManagerUiLib/DeviceManagerUiLib.inf
+diff --git a/OvmfPkg/OvmfPkgIa32.fdf b/OvmfPkg/OvmfPkgIa32.fdf
+index b3c8b56f3b..e3b1d74ce2 100644
+--- a/OvmfPkg/OvmfPkgIa32.fdf
++++ b/OvmfPkg/OvmfPkgIa32.fdf
+@@ -300,7 +300,7 @@ INF  OvmfPkg/LinuxInitrdDynamicShellCommand/LinuxInitrdDynamicShellCommand.inf
+ !endif
+ INF  ShellPkg/Application/Shell/Shell.inf
+ 
+-INF MdeModulePkg/Logo/LogoDxe.inf
++INF MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+ 
+ #
+ # Network modules
+diff --git a/OvmfPkg/OvmfPkgIa32X64.dsc b/OvmfPkg/OvmfPkgIa32X64.dsc
+index b13e5cfd90..312577ebae 100644
+--- a/OvmfPkg/OvmfPkgIa32X64.dsc
++++ b/OvmfPkg/OvmfPkgIa32X64.dsc
+@@ -791,7 +791,7 @@
+       NULL|OvmfPkg/Csm/LegacyBootManagerLib/LegacyBootManagerLib.inf
+ !endif
+   }
+-  MdeModulePkg/Logo/LogoDxe.inf
++  MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+   MdeModulePkg/Application/UiApp/UiApp.inf {
+     <LibraryClasses>
+       NULL|MdeModulePkg/Library/DeviceManagerUiLib/DeviceManagerUiLib.inf
+diff --git a/OvmfPkg/OvmfPkgIa32X64.fdf b/OvmfPkg/OvmfPkgIa32X64.fdf
+index 86592c2364..f7732382d4 100644
+--- a/OvmfPkg/OvmfPkgIa32X64.fdf
++++ b/OvmfPkg/OvmfPkgIa32X64.fdf
+@@ -301,7 +301,7 @@ INF  OvmfPkg/LinuxInitrdDynamicShellCommand/LinuxInitrdDynamicShellCommand.inf
+ !endif
+ INF  ShellPkg/Application/Shell/Shell.inf
+ 
+-INF MdeModulePkg/Logo/LogoDxe.inf
++INF MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+ 
+ #
+ # Network modules
+diff --git a/OvmfPkg/OvmfPkgX64.dsc b/OvmfPkg/OvmfPkgX64.dsc
+index 999738dc39..d72a00e6b4 100644
+--- a/OvmfPkg/OvmfPkgX64.dsc
++++ b/OvmfPkg/OvmfPkgX64.dsc
+@@ -789,7 +789,7 @@
+       NULL|OvmfPkg/Csm/LegacyBootManagerLib/LegacyBootManagerLib.inf
+ !endif
+   }
+-  MdeModulePkg/Logo/LogoDxe.inf
++  MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+   MdeModulePkg/Application/UiApp/UiApp.inf {
+     <LibraryClasses>
+       NULL|MdeModulePkg/Library/DeviceManagerUiLib/DeviceManagerUiLib.inf
+diff --git a/OvmfPkg/OvmfPkgX64.fdf b/OvmfPkg/OvmfPkgX64.fdf
+index d6be798fca..137ed6bceb 100644
+--- a/OvmfPkg/OvmfPkgX64.fdf
++++ b/OvmfPkg/OvmfPkgX64.fdf
+@@ -313,7 +313,7 @@ INF  OvmfPkg/LinuxInitrdDynamicShellCommand/LinuxInitrdDynamicShellCommand.inf
+ !endif
+ INF  ShellPkg/Application/Shell/Shell.inf
+ 
+-INF MdeModulePkg/Logo/LogoDxe.inf
++INF MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+ 
+ #
+ # Network modules
+-- 
+2.27.0
+

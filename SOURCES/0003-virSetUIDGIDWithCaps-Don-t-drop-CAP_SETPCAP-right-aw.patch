@@ -1,0 +1,53 @@
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 24 Jun 2021 16:58:09 +0200
+Subject: [PATCH] virSetUIDGIDWithCaps: Don't drop CAP_SETPCAP right away
+
+There are few cases where we execute a virCommand with all caps
+cleared (virCommandClearCaps()). For instance
+dnsmasqCapsRefreshInternal() does just that. This means, that
+after fork() and before exec() the virSetUIDGIDWithCaps() is
+called. But since the caller did not want to change anything,
+just drop capabilities, these are the values of arguments:
+
+  virSetUIDGIDWithCaps (uid=-1, gid=-1, groups=0x0, ngroups=0,
+                        capBits=0, clearExistingCaps=true)
+
+This means that indeed all capabilities will be dropped,
+including CAP_SETPCAP. But this capability controls whether
+capabilities can be set, IOW whether capng_apply() succeeds.
+
+There are two calls of capng_apply() in the function. The
+CAP_SETPCAP is dropped after the first call and thus the other
+call (capng_apply(CAPNG_SELECT_BOUNDS);) fails.
+
+The solution is to keep the capability for as long as needed
+(just like CAP_SETGID and CAP_SETUID) and drop it only at the
+very end (just like CAP_SETGID and CAP_SETUID).
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1949388
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Martin Kletzander <mkletzan@redhat.com>
+(cherry picked from commit 438b50dda8a863fdc988e9ab612f097cc1626e8a)
+---
+ src/util/virutil.c | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/src/util/virutil.c b/src/util/virutil.c
+index a0cd0f1bcd..7ae23a7061 100644
+--- a/src/util/virutil.c
++++ b/src/util/virutil.c
+@@ -1202,12 +1202,10 @@ virSetUIDGIDWithCaps(uid_t uid, gid_t gid, gid_t *groups, int ngroups,
+     }
+ # ifdef PR_CAPBSET_DROP
+     /* If newer kernel, we need also need setpcap to change the bounding set */
+-    if ((capBits || need_setgid || need_setuid) &&
+-        !capng_have_capability(CAPNG_EFFECTIVE, CAP_SETPCAP)) {
++    if (!capng_have_capability(CAPNG_EFFECTIVE, CAP_SETPCAP)) {
+         need_setpcap = true;
+-    }
+-    if (need_setpcap)
+         capng_update(CAPNG_ADD, CAPNG_EFFECTIVE|CAPNG_PERMITTED, CAP_SETPCAP);
++    }
+ # endif
+ 
+     /* Tell system we want to keep caps across uid change */

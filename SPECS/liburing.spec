@@ -1,6 +1,6 @@
 Name: liburing
-Version: 0.7
-Release: 4%{?dist}
+Version: 2.0
+Release: 2%{?dist}
 Summary: Linux-native io_uring I/O access library
 License: (GPLv2 with exceptions and LGPLv2+) or MIT
 Source0: https://brick.kernel.dk/snaps/%{name}-%{version}.tar.gz
@@ -8,6 +8,10 @@ Source1: https://brick.kernel.dk/snaps/%{name}-%{version}.tar.gz.asc
 URL: https://git.kernel.dk/cgit/liburing/
 BuildRequires: gcc
 BuildRequires: make
+Patch1: 0001-spec-bump-version-to-2.0.patch
+Patch2: 0002-spec-add-explicit-build-dependency-on-make.patch
+Patch3: 0003-test-get-rid-of-x86_64-isms-in-the-test-code.patch
+Patch4: 0004-examples-ucontext-cp.c-cope-with-variable-SIGSTKSZ.patch
 
 %description
 Provides native async IO for the Linux kernel, in a fast and efficient
@@ -23,7 +27,7 @@ This package provides header files to include and libraries to link with
 for the Linux-native io_uring.
 
 %prep
-%autosetup
+%autosetup -p1
 
 %build
 %set_build_flags
@@ -45,8 +49,18 @@ for the Linux-native io_uring.
 %exclude %{_libdir}/liburing.a
 %{_libdir}/pkgconfig/*
 %{_mandir}/man2/*
+%{_mandir}/man3/*
+%{_mandir}/man7/*
 
 %changelog
+* Thu Jul 22 2021 Fedora Release Engineering <releng@fedoraproject.org> - 2.0-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_35_Mass_Rebuild
+
+* Tue Apr 13 2021 Stefan Hajnoczi <stefanha@redhat.com> - 2.0-1
+- Update to liburing 2.0. This release is source-compatible with 0.7 but
+  applications must be recompiled since <liburing.h> struct sizes have changed.
+- Add man3 and man7 documentation
+
 * Tue Jan 26 2021 Fedora Release Engineering <releng@fedoraproject.org> - 0.7-4
 - Rebuilt for https://fedoraproject.org/wiki/Fedora_34_Mass_Rebuild
 

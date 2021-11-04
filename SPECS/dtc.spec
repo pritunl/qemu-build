@@ -1,6 +1,6 @@
 Name:          dtc
-Version:       1.6.0
-Release:       4%{?dist}
+Version:       1.6.1
+Release:       2%{?dist}
 Summary:       Device Tree Compiler
 License:       GPLv2+
 URL:           https://devicetree.org/
@@ -71,7 +71,7 @@ rm -f $RPM_BUILD_ROOT/%{_bindir}/ftdump
 
 %files -n libfdt
 %license GPL
-%{_libdir}/libfdt-1.6.0.so
+%{_libdir}/libfdt-%{version}.so
 %{_libdir}/libfdt.so.*
 
 %files -n libfdt-static
@@ -85,6 +85,15 @@ rm -f $RPM_BUILD_ROOT/%{_bindir}/ftdump
 %{python3_sitearch}/*
 
 %changelog
+* Wed Jul 21 2021 Fedora Release Engineering <releng@fedoraproject.org> - 1.6.1-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_35_Mass_Rebuild
+
+* Tue Jun 08 2021 Peter Robinson <pbrobinson@fedoraproject.org> - 1.6.1-1
+- Update to 1.6.1
+
+* Fri Jun 04 2021 Python Maint <python-maint@redhat.com> - 1.6.0-5
+- Rebuilt for Python 3.10
+
 * Tue Jan 26 2021 Fedora Release Engineering <releng@fedoraproject.org> - 1.6.0-4
 - Rebuilt for https://fedoraproject.org/wiki/Fedora_34_Mass_Rebuild
 

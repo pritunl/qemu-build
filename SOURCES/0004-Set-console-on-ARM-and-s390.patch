@@ -1,0 +1,48 @@
+From 897c61498660017e91b16acc6817f99fc09cf39e Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Fri, 25 Sep 2020 10:01:33 +0100
+Subject: [PATCH 4/4] Set console on ARM and s390.
+
+---
+ qemu-sanity-check.in | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/qemu-sanity-check.in b/qemu-sanity-check.in
+index 5066ebc..79372ed 100644
+--- a/qemu-sanity-check.in
++++ b/qemu-sanity-check.in
+@@ -29,6 +29,7 @@ timeout=10m
+ accel=kvm:tcg
+ cpu=
+ memory=768
++console=ttyS0
+ machine=
+ 
+ # Both libguestfs and virt-manager choose cpu=host when we think that
+@@ -43,10 +44,14 @@ fi
+ # using -m|--machine and --cpu options.
+ case "$canonical_arch" in
+     arm*)
++	console=ttyAMA0
+ 	machine=virt ;;
+     aarch*)
++	console=ttyAMA0
+ 	if [ "$cpu" = "" ]; then cpu=cortex-a57; fi
+ 	machine=virt ;;
++    s390*)
++	console=ttysclp0 ;;
+ esac
+ 
+ # Handle command line parsing.
+@@ -200,7 +205,7 @@ argv[$((i++))]="$kernel"
+ argv[$((i++))]="-initrd"
+ argv[$((i++))]="$initrd"
+ argv[$((i++))]="-append"
+-argv[$((i++))]="console=ttyS0 oops=panic panic=-1"
++argv[$((i++))]="console=$console oops=panic panic=-1"
+ 
+ if [ "$verbose" = "yes" ]; then
+     echo "${argv[@]}"
+-- 
+2.28.0.rc2
+

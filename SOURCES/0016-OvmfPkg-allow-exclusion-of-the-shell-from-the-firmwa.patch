@@ -1,0 +1,172 @@
+From e9d9e73c317b256c0bdc6530b82a6a625d7d54db Mon Sep 17 00:00:00 2001
+From: Laszlo Ersek <lersek@redhat.com>
+Date: Tue, 4 Nov 2014 23:02:53 +0100
+Subject: OvmfPkg: allow exclusion of the shell from the firmware image (RH
+ only)
+
+Notes about the RHEL-8.3/20200603-ca407c7246bf [edk2-stable202005] ->
+RHEL-8.5/20210520-e1999b264f1f [edk2-stable202105] rebase:
+
+- No manual / explicit code change is necessary, because the newly
+  inherited OvmfPkg/AmdSev platform already has its own BUILD_SHELL
+  build-time macro (feature test flag), with default value FALSE -- from
+  upstream commit b261a30c900a ("OvmfPkg/AmdSev: add Grub Firmware Volume
+  Package", 2020-12-14).
+
+- Contextual differences from new upstream commits 2d8ca4f90eae ("OvmfPkg:
+  enable HttpDynamicCommand", 2020-10-01) and 5ab6a0e1c8e9 ("OvmfPkg:
+  introduce VirtioFsDxe", 2020-12-21) have been auto-resolved by
+  git-cherry-pick.
+
+- Remove obsolete commit message tags related to downstream patch
+  management: Message-id, Patchwork-id, O-Subject, Acked-by
+  (RHBZ#1846481).
+
+Notes about the RHEL-8.2/20190904-37eef91017ad [edk2-stable201908] ->
+RHEL-8.3/20200603-ca407c7246bf [edk2-stable202005] rebase:
+
+- context difference from upstream commit ec41733cfd10 ("OvmfPkg: add the
+  'initrd' dynamic shell command", 2020-03-04) correctly auto-resolved
+
+Notes about the RHEL-8.1/20190308-89910a39dcfd [edk2-stable201903] ->
+RHEL-8.2/20190904-37eef91017ad [edk2-stable201908] rebase:
+
+- no change
+
+Notes about the RHEL-8.0/20180508-ee3198e672e2 ->
+RHEL-8.1/20190308-89910a39dcfd rebase:
+
+- update the patch against the following upstream commits:
+  - 4b888334d234 ("OvmfPkg: Remove EdkShellBinPkg in FDF", 2018-11-19)
+  - 277a3958d93a ("OvmfPkg: Don't include TftpDynamicCommand in XCODE5
+                  tool chain", 2018-11-27)
+
+Notes about the RHEL-7.6/ovmf-20180508-2.gitee3198e672e2.el7 ->
+RHEL-8.0/20180508-ee3198e672e2 rebase:
+
+- reorder the rebase changelog in the commit message so that it reads like
+  a blog: place more recent entries near the top
+- no changes to the patch body
+
+Notes about the 20171011-92d07e48907f -> 20180508-ee3198e672e2 rebase:
+
+- no change
+
+Notes about the 20170228-c325e41585e3 -> 20171011-92d07e48907f rebase:
+
+- no changes
+
+Notes about the 20160608b-988715a -> 20170228-c325e41585e3 rebase:
+
+- no changes
+
+Bugzilla: 1147592
+
+When '-D EXCLUDE_SHELL_FROM_FD' is passed to 'build', exclude the shell
+binary from the firmware image.
+
+Peter Jones advised us that firmware vendors for physical systems disable
+the memory-mapped, firmware image-contained UEFI shell in
+SecureBoot-enabled builds. The reason being that the memory-mapped shell
+can always load, it may have direct access to various hardware in the
+system, and it can run UEFI shell scripts (which cannot be signed at all).
+
+Intended use of the new build option:
+
+- In-tree builds: don't pass '-D EXCLUDE_SHELL_FROM_FD'. The resultant
+  firmware image will contain a shell binary, independently of SecureBoot
+  enablement, which is flexible for interactive development. (Ie. no
+  change for in-tree builds.)
+
+- RPM builds: pass both '-D SECURE_BOOT_ENABLE' and
+  '-D EXCLUDE_SHELL_FROM_FD'. The resultant RPM will provide:
+
+  - OVMF_CODE.fd: SecureBoot-enabled firmware, without builtin UEFI shell,
+
+  - OVMF_VARS.fd: variable store template matching OVMF_CODE.fd,
+
+  - UefiShell.iso: a bootable ISO image with the shell on it as default
+    boot loader. The shell binary will load when SecureBoot is turned off,
+    and won't load when SecureBoot is turned on (because it is not
+    signed).
+
+    UefiShell.iso is the reason we're not excluding the shell from the DSC
+    files as well, only the FDF files -- when '-D EXCLUDE_SHELL_FROM_FD'
+    is specified, the shell binary needs to be built the same, only it
+    will be included in UefiShell.iso.
+
+Signed-off-by: Laszlo Ersek <lersek@redhat.com>
+(cherry picked from commit 9c391def70366cabae08e6008814299c3372fafd)
+(cherry picked from commit d9dd9ee42937b2611fe37183cc9ec7f62d946933)
+(cherry picked from commit 23df46ebbe7b09451d3a05034acd4d3a25e7177b)
+(cherry picked from commit f0303f71d576c51b01c4ff961b429d0e0e707245)
+(cherry picked from commit bbd64eb8658e9a33eab4227d9f4e51ad78d9f687)
+(cherry picked from commit 8628ef1b8d675ebec39d83834abbe3c8c8c42cf4)
+(cherry picked from commit 229c88dc3ded9baeaca8b87767dc5c41c05afd6e)
+(cherry picked from commit c2812d7189dee06c780f05a5880eb421c359a687)
+---
+ OvmfPkg/OvmfPkgIa32.fdf    | 2 ++
+ OvmfPkg/OvmfPkgIa32X64.fdf | 2 ++
+ OvmfPkg/OvmfPkgX64.fdf     | 2 ++
+ 3 files changed, 6 insertions(+)
+
+diff --git a/OvmfPkg/OvmfPkgIa32.fdf b/OvmfPkg/OvmfPkgIa32.fdf
+index e3b1d74ce2..969524cf3b 100644
+--- a/OvmfPkg/OvmfPkgIa32.fdf
++++ b/OvmfPkg/OvmfPkgIa32.fdf
+@@ -293,12 +293,14 @@ INF  FatPkg/EnhancedFatDxe/Fat.inf
+ INF  MdeModulePkg/Universal/Disk/UdfDxe/UdfDxe.inf
+ INF  OvmfPkg/VirtioFsDxe/VirtioFsDxe.inf
+ 
++!ifndef $(EXCLUDE_SHELL_FROM_FD)
+ !if $(TOOL_CHAIN_TAG) != "XCODE5"
+ INF  ShellPkg/DynamicCommand/TftpDynamicCommand/TftpDynamicCommand.inf
+ INF  ShellPkg/DynamicCommand/HttpDynamicCommand/HttpDynamicCommand.inf
+ INF  OvmfPkg/LinuxInitrdDynamicShellCommand/LinuxInitrdDynamicShellCommand.inf
+ !endif
+ INF  ShellPkg/Application/Shell/Shell.inf
++!endif
+ 
+ INF MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+ 
+diff --git a/OvmfPkg/OvmfPkgIa32X64.fdf b/OvmfPkg/OvmfPkgIa32X64.fdf
+index f7732382d4..36f078556f 100644
+--- a/OvmfPkg/OvmfPkgIa32X64.fdf
++++ b/OvmfPkg/OvmfPkgIa32X64.fdf
+@@ -294,12 +294,14 @@ INF  FatPkg/EnhancedFatDxe/Fat.inf
+ INF  MdeModulePkg/Universal/Disk/UdfDxe/UdfDxe.inf
+ INF  OvmfPkg/VirtioFsDxe/VirtioFsDxe.inf
+ 
++!ifndef $(EXCLUDE_SHELL_FROM_FD)
+ !if $(TOOL_CHAIN_TAG) != "XCODE5"
+ INF  ShellPkg/DynamicCommand/TftpDynamicCommand/TftpDynamicCommand.inf
+ INF  ShellPkg/DynamicCommand/HttpDynamicCommand/HttpDynamicCommand.inf
+ INF  OvmfPkg/LinuxInitrdDynamicShellCommand/LinuxInitrdDynamicShellCommand.inf
+ !endif
+ INF  ShellPkg/Application/Shell/Shell.inf
++!endif
+ 
+ INF MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+ 
+diff --git a/OvmfPkg/OvmfPkgX64.fdf b/OvmfPkg/OvmfPkgX64.fdf
+index 137ed6bceb..a5900d8377 100644
+--- a/OvmfPkg/OvmfPkgX64.fdf
++++ b/OvmfPkg/OvmfPkgX64.fdf
+@@ -306,12 +306,14 @@ INF  FatPkg/EnhancedFatDxe/Fat.inf
+ INF  MdeModulePkg/Universal/Disk/UdfDxe/UdfDxe.inf
+ INF  OvmfPkg/VirtioFsDxe/VirtioFsDxe.inf
+ 
++!ifndef $(EXCLUDE_SHELL_FROM_FD)
+ !if $(TOOL_CHAIN_TAG) != "XCODE5"
+ INF  ShellPkg/DynamicCommand/TftpDynamicCommand/TftpDynamicCommand.inf
+ INF  ShellPkg/DynamicCommand/HttpDynamicCommand/HttpDynamicCommand.inf
+ INF  OvmfPkg/LinuxInitrdDynamicShellCommand/LinuxInitrdDynamicShellCommand.inf
+ !endif
+ INF  ShellPkg/Application/Shell/Shell.inf
++!endif
+ 
+ INF MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+ 
+-- 
+2.27.0
+

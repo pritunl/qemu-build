@@ -1,0 +1,24 @@
+From 3b6b45488513dfb2c2a871d020dee532eb89714d Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Fri, 25 Sep 2020 09:38:36 +0100
+Subject: [PATCH 1/4] tests: run-qemu-sanity-check: Add -v flag for verbose
+ messages.
+
+Useful when debugging test failures.
+---
+ run-qemu-sanity-check | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/run-qemu-sanity-check b/run-qemu-sanity-check
+index 65039ce..79745e5 100755
+--- a/run-qemu-sanity-check
++++ b/run-qemu-sanity-check
+@@ -17,4 +17,4 @@
+ # with this program; if not, write to the Free Software Foundation, Inc.,
+ # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ 
+-./qemu-sanity-check --initrd=./initrd "$@"
++./qemu-sanity-check -v --initrd=./initrd "$@"
+-- 
+2.28.0.rc2
+

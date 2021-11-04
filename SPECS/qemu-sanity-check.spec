@@ -7,70 +7,76 @@
 #
 # 2020-09: armv7 failed with:
 # ./qemu-sanity-check: cannot find a Linux kernel in /boot
-#
-# 2020-09: aarch64 hangs.
-%global test_arches %{s390x} x86_64
+%global test_arches aarch64 %{s390x} x86_64
 
-Name:            qemu-sanity-check
-Version:         1.1.6
-Release:         1%{?dist}
-Summary:         Simple qemu and Linux kernel sanity checker
-License:         GPLv2+
+Name:           qemu-sanity-check
+Version:        1.1.6
+Release:        5%{?dist}
+Summary:        Simple qemu and Linux kernel sanity checker
+License:        GPLv2+
 
-ExclusiveArch:   x86_64
+ExclusiveArch:  %{kernel_arches}
 
-URL:             http://people.redhat.com/~rjones/qemu-sanity-check
-Source0:         http://people.redhat.com/~rjones/qemu-sanity-check/files/%{name}-%{version}.tar.gz
-Source1:         http://people.redhat.com/~rjones/qemu-sanity-check/files/%{name}-%{version}.tar.gz.sig
+URL:            http://people.redhat.com/~rjones/qemu-sanity-check
+Source0:        http://people.redhat.com/~rjones/qemu-sanity-check/files/%{name}-%{version}.tar.gz
+Source1:        http://people.redhat.com/~rjones/qemu-sanity-check/files/%{name}-%{version}.tar.gz.sig
 # Keyring used to verify tarball signature.
 Source2:        libguestfs.keyring
+
+# Patches (all upstream).
+Patch1:         0001-tests-run-qemu-sanity-check-Add-v-flag-for-verbose-m.patch
+Patch2:         0002-Add-cpu-option.patch
+Patch3:         0003-Set-RAM-to-something-larger-than-qemu-default.patch
+Patch4:         0004-Set-console-on-ARM-and-s390.patch
 
 # To verify the tarball signature.
 BuildRequires:  gnupg2
 
-BuildRequires:   gcc
+BuildRequires:  make
+BuildRequires:  gcc
 
 # For building manual pages.
 BuildRequires:   /usr/bin/perldoc
 
 # For building the initramfs.
-BuildRequires:   cpio
-BuildRequires:   glibc-static
+BuildRequires:  cpio
+BuildRequires:  glibc-static
 
 # For testing.
-BuildRequires:   kernel
+BuildRequires:  qemu
+BuildRequires:  kernel
 
 # For complicated reasons, this is required so that
 # /bin/kernel-install puts the kernel directly into /boot, instead of
 # into a /boot/<machine-id> subdirectory (in Fedora >= 23).  Read the
 # kernel-install script to understand why.
-BuildRequires:   grubby
+BuildRequires:  grubby
 
 %ifarch %{ix86} x86_64
-Requires:        qemu-system-x86
-%global qemu     %{_bindir}/qemu-system-x86_64
+Requires:       qemu-system-x86
+%global qemu    %{_bindir}/qemu-system-x86_64
 %endif
 %ifarch armv7hl
-Requires:        qemu-system-arm
-%global qemu     %{_bindir}/qemu-system-arm
+Requires:       qemu-system-arm
+%global qemu    %{_bindir}/qemu-system-arm
 %endif
 %ifarch aarch64
-Requires:        qemu-system-aarch64
-%global qemu     %{_bindir}/qemu-system-aarch64
+Requires:       qemu-system-aarch64
+%global qemu    %{_bindir}/qemu-system-aarch64
 %endif
 %ifarch %{power64}
-Requires:        qemu-system-ppc
-%global qemu     %{_bindir}/qemu-system-ppc64
+Requires:       qemu-system-ppc
+%global qemu    %{_bindir}/qemu-system-ppc64
 %endif
 %ifarch %{s390x}
-Requires:        qemu-system-s390x
-%global qemu     %{_bindir}/qemu-system-s390x
+Requires:       qemu-system-s390x
+%global qemu    %{_bindir}/qemu-system-s390x
 %endif
 
-Requires:        kernel
+Requires:       kernel
 
 # Require the -nodeps subpackage.
-Requires:        %{name}-nodeps = %{version}-%{release}
+Requires:       %{name}-nodeps = %{version}-%{release}
 
 
 %description
@@ -96,6 +102,7 @@ as %{name} except that this package does not depend on qemu or kernel.
 
 
 %prep
+%{gpgverify} --keyring='%{SOURCE2}' --signature='%{SOURCE1}' --data='%{SOURCE0}'
 %autosetup -p1
 
 
@@ -115,6 +122,15 @@ as %{name} except that this package does not depend on qemu or kernel.
 make %{?_smp_mflags}
 
 
+%check
+%ifarch %{test_arches}
+make check || {
+  cat test-suite.log
+  exit 1
+}
+%endif
+
+
 %install
 make DESTDIR=$RPM_BUILD_ROOT install
 
@@ -131,6 +147,19 @@ make DESTDIR=$RPM_BUILD_ROOT install
 
 
 %changelog
+* Fri Jul 23 2021 Richard W.M. Jones <rjones@redhat.com> - 1.1.6-5
+- Rebuild for fixed qemu metapackage.
+
+* Fri Jul 23 2021 Fedora Release Engineering <releng@fedoraproject.org> - 1.1.6-4
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_35_Mass_Rebuild
+
+* Wed Jan 27 2021 Fedora Release Engineering <releng@fedoraproject.org> - 1.1.6-3
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_34_Mass_Rebuild
+
+* Fri Sep 25 2020 Richard W.M. Jones <rjones@redhat.com> - 1.1.6-2
+- Add some upstream patches to fix aarch64 tests.
+- Enable tests on aarch64.
+
 * Thu Sep 10 2020 Richard W.M. Jones <rjones@redhat.com> - 1.1.6-1
 - New upstream version 1.1.6.
 - Remove all patches.

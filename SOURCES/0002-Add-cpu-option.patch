@@ -1,0 +1,104 @@
+From 0460bb87b6fba08fb5df8056cc3fb67ffa8e8080 Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Fri, 25 Sep 2020 09:45:30 +0100
+Subject: [PATCH 2/4] Add --cpu option.
+
+If not set, then pick a more suitable default for aarch64.
+---
+ qemu-sanity-check.in     | 32 +++++++++++++++++++++++++++-----
+ qemu-sanity-check.pod.in |  6 ++++++
+ 2 files changed, 33 insertions(+), 5 deletions(-)
+
+diff --git a/qemu-sanity-check.in b/qemu-sanity-check.in
+index 72257a8..5a3594a 100644
+--- a/qemu-sanity-check.in
++++ b/qemu-sanity-check.in
+@@ -27,13 +27,25 @@ canonical_arch="$(uname -m | sed 's/i[456]86/i386/')"
+ verbose=no
+ timeout=10m
+ accel=kvm:tcg
++cpu=
++machine=
+ 
+-# Default machine type depends on arch.  You can override this using
+-# -m|--machine option.
++# Both libguestfs and virt-manager choose cpu=host when we think that
++# KVM is available, and default otherwise.  Although testing for KVM
++# is hairy, I found that on aarch64 it can fail unless we choose
++# cpu=host for KVM.
++if test -r /dev/kvm; then
++    cpu=host
++fi
++
++# Default machine and CPU type depends on arch.  You can override this
++# using -m|--machine and --cpu options.
+ case "$canonical_arch" in
+-    arm*|aarch*) machine=virt ;;
+-    # On non-ARM let qemu pick the default.
+-    *) machine= ;;
++    arm*)
++	machine=virt ;;
++    aarch*)
++	if [ "$cpu" = "" ]; then cpu=cortex-a57; fi
++	machine=virt ;;
+ esac
+ 
+ # Handle command line parsing.
+@@ -43,6 +55,7 @@ function usage {
+     echo "Options:"
+     echo "  --help               Display this help"
+     echo "  --accel=[kvm|tcg]    Force KVM or software emulation"
++    echo "  --cpu=cpu            Set CPU"
+     echo "  -i|--initrd=initrd   Set location of initramfs"
+     echo "  -k|--kernel=vmlinuz  Set location of kernel"
+     echo "  -m|--machine=machine Set machine type"
+@@ -57,6 +70,7 @@ TEMP=$(getopt \
+     -o i:k:m:q:t:vV \
+     --long help \
+     --long accel: \
++    --long cpu: \
+     --long initrd: \
+     --long kernel: \
+     --long machine: \
+@@ -77,6 +91,10 @@ while true; do
+             accel="$2"
+             shift 2
+             ;;
++	--cpu)
++	    cpu="$2"
++	    shift 2
++	    ;;
+         -i|--initrd)
+             initrd="$2"
+             shift 2
+@@ -167,6 +185,10 @@ argv[$((i++))]="-no-user-config"
+ argv[$((i++))]="-nodefaults"
+ argv[$((i++))]="-machine"
+ argv[$((i++))]="$machine${machine:+,}accel=$accel"
++if [ "$cpu" != "" ]; then
++    argv[$((i++))]="-cpu"
++    argv[$((i++))]="$cpu"
++fi
+ argv[$((i++))]="-no-reboot"
+ argv[$((i++))]="-serial"
+ argv[$((i++))]="file:$test_output"
+diff --git a/qemu-sanity-check.pod.in b/qemu-sanity-check.pod.in
+index 8bf1d4b..7ef3200 100644
+--- a/qemu-sanity-check.pod.in
++++ b/qemu-sanity-check.pod.in
+@@ -78,6 +78,12 @@ Other typical values of this parameter are: C<tcg>, which means to
+ force software emulation.  C<kvm>, which means to force KVM and fail
+ if KVM is unavailable.
+ 
++=item B<--cpu>=CPU
++
++Set the qemu I<--cpu> option.  If not set then a suitable default is
++picked depending on the architecture and whether KVM is available.
++You can also use I<--cpu=> to let qemu pick the default.
++
+ =item B<-i> INITRD
+ 
+ =item B<--initrd>=INITRD
+-- 
+2.28.0.rc2
+

@@ -1,0 +1,33 @@
+{
+    "description": "OVMF with SEV-ES support",
+    "interface-types": [
+        "uefi"
+    ],
+    "mapping": {
+        "device": "flash",
+        "executable": {
+            "filename": "/usr/share/edk2/ovmf/OVMF_CODE.cc.fd",
+            "format": "raw"
+        },
+        "nvram-template": {
+            "filename": "/usr/share/edk2/ovmf/OVMF_VARS.fd",
+            "format": "raw"
+        }
+    },
+    "targets": [
+        {
+            "architecture": "x86_64",
+            "machines": [
+                "pc-q35-rhel8.5.0"
+            ]
+        }
+    ],
+    "features": [
+        "amd-sev",
+        "amd-sev-es",
+        "verbose-dynamic"
+    ],
+    "tags": [
+
+    ]
+}

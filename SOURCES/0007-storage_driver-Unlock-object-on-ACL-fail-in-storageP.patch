@@ -1,0 +1,33 @@
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 21 Jul 2021 11:22:25 +0200
+Subject: [PATCH] storage_driver: Unlock object on ACL fail in
+ storagePoolLookupByTargetPath
+
+'virStoragePoolObjListSearch' returns a locked and refed object, thus we
+must release it on ACL permission failure.
+
+Fixes: 7aa0e8c0cb8
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1984318
+Signed-off-by: Peter Krempa <pkrempa@redhat.com>
+Reviewed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 447f69dec47e1b0bd15ecd7cd49a9fd3b050fb87)
+---
+ src/storage/storage_driver.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/storage/storage_driver.c b/src/storage/storage_driver.c
+index 16bc53aa46..2787c1671b 100644
+--- a/src/storage/storage_driver.c
++++ b/src/storage/storage_driver.c
+@@ -1739,8 +1739,10 @@ storagePoolLookupByTargetPath(virConnectPtr conn,
+                                            storagePoolLookupByTargetPathCallback,
+                                            cleanpath))) {
+         def = virStoragePoolObjGetDef(obj);
+-        if (virStoragePoolLookupByTargetPathEnsureACL(conn, def) < 0)
++        if (virStoragePoolLookupByTargetPathEnsureACL(conn, def) < 0) {
++            virStoragePoolObjEndAPI(&obj);
+             return NULL;
++        }
+ 
+         pool = virGetStoragePool(conn, def->name, def->uuid, NULL, NULL);
+         virStoragePoolObjEndAPI(&obj);

@@ -1,0 +1,57 @@
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Mon, 10 May 2021 15:07:09 +0200
+Subject: [PATCH] qemu_firmware: don't error out for unknown firmware features
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+When QEMU introduces new firmware features libvirt will fail until we
+list that feature in our code as well which doesn't sound right.
+
+We should simply ignore the new feature until we add a proper support
+for it.
+
+Reported-by: Laszlo Ersek <lersek@redhat.com>
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Reviewed-by: Peter Krempa <pkrempa@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 61d95a1073833ec4323c1ef28e71e913c55aa7b9)
+---
+ src/qemu/qemu_firmware.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/src/qemu/qemu_firmware.c b/src/qemu/qemu_firmware.c
+index 639cff7459..e602de22e3 100644
+--- a/src/qemu/qemu_firmware.c
++++ b/src/qemu/qemu_firmware.c
+@@ -573,6 +573,7 @@ qemuFirmwareFeatureParse(const char *path,
+     virJSONValuePtr featuresJSON;
+     g_autoptr(qemuFirmwareFeature) features = NULL;
+     size_t nfeatures;
++    size_t nparsed = 0;
+     size_t i;
+ 
+     if (!(featuresJSON = virJSONValueObjectGetArray(doc, "features"))) {
+@@ -592,17 +593,16 @@ qemuFirmwareFeatureParse(const char *path,
+         int tmp;
+ 
+         if ((tmp = qemuFirmwareFeatureTypeFromString(tmpStr)) <= 0) {
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("unknown feature %s"),
+-                           tmpStr);
+-            return -1;
++            VIR_DEBUG("ignoring unknown QEMU firmware feature '%s'", tmpStr);
++            continue;
+         }
+ 
+-        features[i] = tmp;
++        features[nparsed] = tmp;
++        nparsed++;
+     }
+ 
+     fw->features = g_steal_pointer(&features);
+-    fw->nfeatures = nfeatures;
++    fw->nfeatures = nparsed;
+     return 0;
+ }
+ 

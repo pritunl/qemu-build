@@ -1,0 +1,72 @@
+From: wangjian <wangjian161@huawei.com>
+Date: Fri, 26 Mar 2021 11:21:16 +0800
+Subject: [PATCH] node_device_udev: Serialize access to pci_get_strings)_
+
+Since the functions provided by libpciaccess are not thread-safe,
+when the udev-event and nodedev-init threads of libvirt call the
+pci_get_strings function provided by libpaciaccess at the same
+time the following can happen:
+
+nodedev-init thread:
+nodeStateInitializeEnumerate ->
+  udevEnumerateDevices->
+    udevProcessDeviceListEntry ->
+      udevAddOneDevice ->
+        udevGetDeviceDetails->
+          udevProcessPCI ->
+            udevTranslatePCIIds ->
+              pci_get_strings -> (libpciaccess)
+                find_device_name ->
+                  populate_vendor ->
+                    d = realloc( vend->devices, (vend->num_devices + 1), * sizeof( struct pci_device_leaf ) );
+                    vend->num_devices++;
+
+udev-event thread:
+udevEventHandleThread ->
+  udevHandleOneDevice ->
+    udevAddOneDevice->
+      udevGetDeviceDetails->
+        udevProcessPCI ->
+          udevTranslatePCIIds ->
+            pci_get_strings -> (libpciaccess)
+              find_device_name ->
+                populate_vendor ->
+                  d = realloc( vend->devices, (vend->num_devices + 1), * sizeof( struct pci_device_leaf ) );
+                  vend->num_devices++;
+
+Signed-off-by: WangJian <wangjian161@huawei.com>
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 59788a5caea5f292c86e07a31ee2b853d68db87e)
+---
+ src/node_device/node_device_udev.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/node_device/node_device_udev.c b/src/node_device/node_device_udev.c
+index 55a2731681..6f0defe908 100644
+--- a/src/node_device/node_device_udev.c
++++ b/src/node_device/node_device_udev.c
+@@ -328,6 +328,7 @@ udevGenerateDeviceName(struct udev_device *device,
+     return 0;
+ }
+ 
++static virMutex pciaccessMutex = VIR_MUTEX_INITIALIZER;
+ 
+ static int
+ udevTranslatePCIIds(unsigned int vendor,
+@@ -346,12 +347,14 @@ udevTranslatePCIIds(unsigned int vendor,
+     m.device_class_mask = 0;
+     m.match_data = 0;
+ 
+-    /* pci_get_strings returns void */
++    /* pci_get_strings returns void and unfortunately is not thread safe. */
++    virMutexLock(&pciaccessMutex);
+     pci_get_strings(&m,
+                     &device_name,
+                     &vendor_name,
+                     NULL,
+                     NULL);
++    virMutexUnlock(&pciaccessMutex);
+ 
+     *vendor_string = g_strdup(vendor_name);
+     *product_string = g_strdup(device_name);

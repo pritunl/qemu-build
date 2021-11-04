@@ -1,0 +1,43 @@
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 22 Jul 2021 14:26:00 +0200
+Subject: [PATCH] virSetUIDGIDWithCaps: Set bounding capabilities only with
+ CAP_SETPCAP
+
+In one of my previous patches I've tried to postpone dropping
+CAP_SETPCAP until the very end because it's needed for
+capng_apply(). What I did not realize back then was that we might
+not have the capability to begin with. Because of unknown reasons
+capng_apply() pollutes logs only for CAPNG_SELECT_BOUNDS and not
+for CAPNG_SELECT_CAPS.
+
+Reproducer is really simple: run libvirtd as a regular user.
+During its initialization, libvirtd will spawn some binaries
+(dnsmasq, qemu-*, etc.) and while doing so it will try to drop
+capabilities.
+
+Anyway, let's call capng_apply(CAPNG_SELECT_BOUNDS) only if we
+have the CAP_SETPCAP (which is tracked in need_setpcap variable).
+
+Fixes: 438b50dda8a863fdc988e9ab612f097cc1626e8a
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1924218
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Cole Robinson <crobinso@redhat.com>
+(cherry picked from commit a2476f37a7789eb9315b77bb451f4754ef4ef15b)
+---
+ src/util/virutil.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/util/virutil.c b/src/util/virutil.c
+index 7ae23a7061..333f99e91d 100644
+--- a/src/util/virutil.c
++++ b/src/util/virutil.c
+@@ -1269,7 +1269,8 @@ virSetUIDGIDWithCaps(uid_t uid, gid_t gid, gid_t *groups, int ngroups,
+      * do this if we failed to get the capability above, so ignore the
+      * return value.
+      */
+-    capng_apply(CAPNG_SELECT_BOUNDS);
++    if (!need_setpcap)
++        capng_apply(CAPNG_SELECT_BOUNDS);
+ 
+     /* Drop the caps that allow setuid/gid (unless they were requested) */
+     if (need_setgid)
