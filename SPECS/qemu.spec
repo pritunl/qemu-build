@@ -6,7 +6,7 @@
 %global libfdt_version 1.6.0
 %global libseccomp_version 2.4.0
 %global libusbx_version 1.0.23
-%global meson_version 0.55.3
+%global meson_version 0.58.2
 %global usbredir_version 0.7.1
 %global ipxe_version 20200823-5.git4bd064de
 
@@ -286,8 +286,8 @@ Obsoletes: %{name}-system-unicore32-core <= %{epoch}:%{version}-%{release}
 
 Summary: QEMU is a FAST! processor emulator
 Name: qemu
-Version: 6.1.0
-Release: 9%{?rcrel}%{?dist}
+Version: 6.2.0
+Release: 1%{?rcrel}%{?dist}
 Epoch: 2
 License: GPLv2 and BSD and MIT and CC-BY
 URL: http://www.qemu.org/
@@ -305,23 +305,11 @@ Source30: kvm-s390x.conf
 Source31: kvm-x86.conf
 Source36: README.tests
 
-# Fix -cpu max
-# https://bugzilla.redhat.com/show_bug.cgi?id=1999700
-Patch1: 0001-target-i386-add-missing-bits-to-CR4_RESERVED_MASK.patch
-
-# Fix assertion on armv7hl
-# https://bugzilla.redhat.com/show_bug.cgi?id=1999878
-Patch2: 0001-tcg-arm-Reduce-vector-alignment-requirement-for-NEON.patch
-
-# Fix qemu crash with vnc + libvirt virDomainOpenConsole
-Patch3: 0001-qemu-sockets-fix-unix-socket-path-copy-again.patch
-# Fix tcg PVH test with binutils 2.36+
-Patch4: 0001-tests-tcg-Fix-PVH-test-with-binutils-2.36.patch
-
 BuildRequires: meson >= %{meson_version}
 BuildRequires: zlib-devel
 BuildRequires: glib2-devel
 BuildRequires: gnutls-devel
+BuildRequires: libselinux-devel
 BuildRequires: cyrus-sasl-devel
 BuildRequires: libaio-devel
 BuildRequires: python3-devel
@@ -1239,7 +1227,6 @@ mkdir -p %{static_builddir}
   --disable-hax                    \\\
   --disable-hvf                    \\\
   --disable-iconv                  \\\
-  --disable-jemalloc               \\\
   --disable-kvm                    \\\
   --disable-libdaxctl              \\\
   --disable-libiscsi               \\\
@@ -1291,7 +1278,6 @@ mkdir -p %{static_builddir}
   --disable-strip                  \\\
   --disable-system                 \\\
   --disable-tcg                    \\\
-  --disable-tcmalloc               \\\
   --disable-tools                  \\\
   --disable-tpm                    \\\
   --disable-u2f                    \\\
@@ -1339,12 +1325,16 @@ run_configure() {
         --docdir="%{_docdir}" \
         --libexecdir="%{_libexecdir}" \
         --extra-ldflags="%{build_ldflags}" \
+%ifnarch %{arm}
         --extra-cflags="%{optflags}" \
+%else
+        --extra-cflags="%{optflags} -DSTAP_SDT_ARG_CONSTRAINT=g" \
+%endif
         --with-pkgversion="%{name}-%{version}-%{release}" \
         --with-suffix="%{name}" \
         --firmwarepath="%firmwaredirs" \
         --meson="%{__meson}" \
-        --enable-trace-backend=dtrace \
+        --enable-trace-backends=dtrace \
         --with-coroutine=ucontext \
         --with-git=git \
         --tls-priority=@QEMU,SYSTEM \
@@ -1375,13 +1365,13 @@ run_configure \
 %endif
   --enable-bpf \
   --enable-cap-ng \
-  --enable-capstone \
+  --enable-capstone=system \
   --enable-coroutine-pool \
   --enable-curl \
   --enable-debug-info \
   --enable-docs \
 %if %{have_fdt}
-  --enable-fdt \
+  --enable-fdt=system \
 %endif
   --enable-gnutls \
   --enable-guest-agent \
@@ -1416,6 +1406,9 @@ run_configure \
   --enable-rdma \
 %endif
   --enable-seccomp \
+%if 0%{?must_remember_to_add_this_in_qemu_6_2}
+  --enable-selinux \
+%endif
   --enable-slirp=system \
   --enable-slirp-smbd \
   --enable-snappy \
@@ -1442,7 +1435,7 @@ run_configure \
   --enable-xkbcommon \
   \
   \
-  --audio-drv-list=pa,sdl,alsa,try-jack,oss \
+  --audio-drv-list=pa,sdl,alsa,jack,oss \
   --target-list-exclude=moxie-softmmu \
   --with-default-devices \
   --enable-auth-pam \
@@ -1533,7 +1526,7 @@ run_configure \
   --enable-attr \
   --enable-linux-user \
   --enable-tcg \
-  --disable-blobs \
+  --disable-install-blobs \
   --static
 
 %make_build
@@ -1618,12 +1611,12 @@ install -m 0644 -t %{buildroot}%{_datadir}/%{name}/tracetool/format scripts/trac
 # Create new directories and put them all under tests-src
 mkdir -p %{buildroot}%{testsdir}/python
 mkdir -p %{buildroot}%{testsdir}/tests
-mkdir -p %{buildroot}%{testsdir}/tests/acceptance
+mkdir -p %{buildroot}%{testsdir}/tests/avocado
 mkdir -p %{buildroot}%{testsdir}/tests/qemu-iotests
 mkdir -p %{buildroot}%{testsdir}/scripts/qmp
 
 # Install avocado_qemu tests
-cp -R %{qemu_kvm_build}/tests/acceptance/* %{buildroot}%{testsdir}/tests/acceptance/
+cp -R %{qemu_kvm_build}/tests/avocado/* %{buildroot}%{testsdir}/tests/avocado/
 
 # Install qemu.py and qmp/ scripts required to run avocado_qemu tests
 cp -R %{qemu_kvm_build}/python/qemu %{buildroot}%{testsdir}/python
@@ -2229,6 +2222,7 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %{_datadir}/%{name}/kvmvapic.bin
 %{_datadir}/%{name}/linuxboot.bin
 %{_datadir}/%{name}/multiboot.bin
+%{_datadir}/%{name}/multiboot_dma.bin
 %{_datadir}/%{name}/pvh.bin
 %{_datadir}/%{name}/qboot.rom
 %if %{need_qemu_kvm}
@@ -2249,6 +2243,26 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 
 %changelog
+* Wed Dec 15 2021 Eduardo Lima (Etrunko) <etrunko@redhat.com> - 6.2.0-1
+- Rebase to qemu 6.2.0
+
+* Thu Dec 09 2021 Eduardo Lima (Etrunko) <etrunko@redhat.com> - 6.2.0-0.1-rc4
+- Rebase to qemu 6.2.0-rc4
+
+* Fri Dec 03 2021 Eduardo Lima (Etrunko) <etrunko@redhat.com> - 6.2.0-0.1-rc3
+- Rebase to qemu 6.2.0-rc3
+
+* Thu Nov 25 2021 Daniel P. Berrangé <berrange@redhat.com> - 6.1.0-13
+- Fix iovec limits with scsi-generic
+
+* Wed Nov 24 2021 Richard W.M. Jones <rjones@redhat.com> - 6.1.0-12
+- Add support for qemu-nbd --selinux-relabel option (RHBZ#1984938)
+- Define STAP_SDT_ARG_CONSTRAINT=g on %%{arm}, workaround for:
+  https://gcc.gnu.org/bugzilla/show_bug.cgi?id=103395
+
+* Mon Nov 08 2021 Adam Williamson <awilliam@redhat.com> - 6.1.0-10
+- Fix snapshot creation with qxl graphics
+
 * Fri Oct 08 2021 Cole Robinson <crobinso@redhat.com> - 6.1.0-9
 - Fix tcg PVH test with binutils 2.36+
 
