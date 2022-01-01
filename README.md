@@ -112,11 +112,11 @@ sudo yum -y install https://download-ib01.fedoraproject.org/pub/fedora/linux/upd
 sudo yum-builddep -y ~/rpmbuild/SPECS/seabios.spec
 rpmbuild -ba seabios.spec
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/qemu.spec
-rpmbuild -ba qemu.spec
-
 sudo yum-builddep -y ~/rpmbuild/SPECS/ksmtuned.spec
 rpmbuild -ba ksmtuned.spec
+
+sudo yum-builddep -y ~/rpmbuild/SPECS/qemu.spec
+rpmbuild -ba qemu.spec
 ```
 
 # repo
