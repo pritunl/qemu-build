@@ -1,0 +1,82 @@
+From ed975a4db7c55e49ab9de1a0919baafdce9661e3 Mon Sep 17 00:00:00 2001
+From: Laszlo Ersek <lersek@redhat.com>
+Date: Thu, 20 Feb 2014 22:54:45 +0100
+Subject: OvmfPkg: increase max debug message length to 512 (RHEL only)
+
+Notes about the RHEL-8.3/20200603-ca407c7246bf [edk2-stable202005] ->
+RHEL-8.5/20210520-e1999b264f1f [edk2-stable202105] rebase:
+
+- no change
+
+Notes about the RHEL-8.2/20190904-37eef91017ad [edk2-stable201908] ->
+RHEL-8.3/20200603-ca407c7246bf [edk2-stable202005] rebase:
+
+- no change
+
+Notes about the RHEL-8.1/20190308-89910a39dcfd [edk2-stable201903] ->
+RHEL-8.2/20190904-37eef91017ad [edk2-stable201908] rebase:
+
+- trivial context difference due to upstream commit 2fe5f2f52918
+  ("OvmfPkg/PlatformDebugLibIoPort: Add new APIs", 2019-04-02), resolved
+  by git-cherry-pick automatically
+
+Notes about the RHEL-8.0/20180508-ee3198e672e2 ->
+RHEL-8.1/20190308-89910a39dcfd rebase:
+
+- no changes
+
+Notes about the RHEL-7.6/ovmf-20180508-2.gitee3198e672e2.el7 ->
+RHEL-8.0/20180508-ee3198e672e2 rebase:
+
+- reorder the rebase changelog in the commit message so that it reads like
+  a blog: place more recent entries near the top
+- no changes to the patch body
+
+Notes about the 20171011-92d07e48907f -> 20180508-ee3198e672e2 rebase:
+
+- no changes
+
+Notes about the 20170228-c325e41585e3 -> 20171011-92d07e48907f rebase:
+
+- no changes
+
+Notes about the 20160608b-988715a -> 20170228-c325e41585e3 rebase:
+
+- no changes
+
+Upstream prefers short debug messages (sometimes even limited to 80
+characters), but any line length under 512 characters is just unsuitable
+for effective debugging. (For example, config strings in HII routing,
+logged by the platform driver "OvmfPkg/PlatformDxe" on DEBUG_VERBOSE
+level, can be several hundred characters long.) 512 is an empirically good
+value.
+
+Signed-off-by: Laszlo Ersek <lersek@redhat.com>
+(cherry picked from commit bfe568d18dba15602604f155982e3b73add63dfb)
+(cherry picked from commit 29435a32ec9428720c74c454ce9817662e601fb6)
+(cherry picked from commit 58e1d1ebb78bfdaf05f4c6e8abf8d4908dfa038a)
+(cherry picked from commit 1df2c822c996ad767f2f45570ab2686458f7604a)
+(cherry picked from commit 22c9b4e971c70c69b4adf8eb93133824ccb6426a)
+(cherry picked from commit a1260c9122c95bcbef1efc5eebe11902767813c2)
+(cherry picked from commit e949bab1268f83f0f5815a96cd1cb9dd3b21bfb5)
+(cherry picked from commit a95cff0b9573bf23699551beb4786383f697ff1e)
+---
+ OvmfPkg/Library/PlatformDebugLibIoPort/DebugLib.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/OvmfPkg/Library/PlatformDebugLibIoPort/DebugLib.c b/OvmfPkg/Library/PlatformDebugLibIoPort/DebugLib.c
+index dffb20822d..0577c43c3d 100644
+--- a/OvmfPkg/Library/PlatformDebugLibIoPort/DebugLib.c
++++ b/OvmfPkg/Library/PlatformDebugLibIoPort/DebugLib.c
+@@ -21,7 +21,7 @@
+ //
+ // Define the maximum debug and assert message length that this library supports
+ //
+-#define MAX_DEBUG_MESSAGE_LENGTH  0x100
++#define MAX_DEBUG_MESSAGE_LENGTH  0x200
+ 
+ //
+ // VA_LIST can not initialize to NULL for all compiler, so we use this to
+-- 
+2.27.0
+

@@ -1,0 +1,82 @@
+From b14a92fafb171ad4a47598076bd028e5cf33ac28 Mon Sep 17 00:00:00 2001
+From: Laszlo Ersek <lersek@redhat.com>
+Date: Wed, 14 Oct 2015 14:07:17 +0200
+Subject: ArmVirtPkg: set early hello message (RH only)
+
+Notes about the RHEL-8.3/20200603-ca407c7246bf [edk2-stable202005] ->
+RHEL-8.5/20210520-e1999b264f1f [edk2-stable202105] rebase:
+
+- no change
+
+Notes about the RHEL-8.2/20190904-37eef91017ad [edk2-stable201908] ->
+RHEL-8.3/20200603-ca407c7246bf [edk2-stable202005] rebase:
+
+- context difference from upstream commit f5cb3767038e
+  ("ArmVirtPkg/ArmVirtQemu: add ResetSystem PEIM for upcoming TPM2
+  support", 2020-03-04) automatically resolved correctly
+
+Notes about the RHEL-8.1/20190308-89910a39dcfd [edk2-stable201903] ->
+RHEL-8.2/20190904-37eef91017ad [edk2-stable201908] rebase:
+
+- no change
+
+Notes about the RHEL-8.0/20180508-ee3198e672e2 ->
+RHEL-8.1/20190308-89910a39dcfd rebase:
+
+- resolve context conflict with upstream commit eaa1e98ae31d ("ArmVirtPkg:
+  don't set PcdCoreCount", 2019-02-13)
+
+Notes about the RHEL-7.6/ovmf-20180508-2.gitee3198e672e2.el7 ->
+RHEL-8.0/20180508-ee3198e672e2 rebase:
+
+- reorder the rebase changelog in the commit message so that it reads like
+  a blog: place more recent entries near the top
+- no changes to the patch body
+
+Notes about the 20171011-92d07e48907f -> 20180508-ee3198e672e2 rebase:
+
+- no changes
+
+Notes about the 20170228-c325e41585e3 -> 20171011-92d07e48907f rebase:
+
+- no changes
+
+Notes about the 20160608b-988715a -> 20170228-c325e41585e3 rebase:
+
+- no changes
+
+Print a friendly banner on QEMU, regardless of debug mask settings.
+
+RHBZ: https://bugzilla.redhat.com/show_bug.cgi?id=1270279
+Downstream only:
+<http://thread.gmane.org/gmane.comp.bios.edk2.devel/2996/focus=3433>.
+
+Contributed-under: TianoCore Contribution Agreement 1.0
+Signed-off-by: Laszlo Ersek <lersek@redhat.com>
+(cherry picked from commit 5d4a15b9019728b2d96322bc679099da49916925)
+(cherry picked from commit 179df76dbb0d199bd905236e98775b4059c6502a)
+(cherry picked from commit ce3f59d0710c24c162d5222bbf5cd7e36180c80c)
+(cherry picked from commit c201a8e6ae28d75f7ba581828b533c3b26fa7f18)
+(cherry picked from commit 2d4db6ec70e004cd9ac147615d17033bee5d3b18)
+(cherry picked from commit fb2032bbea7e02c426855cf86a323556d493fd8a)
+(cherry picked from commit ba73b99d5cb38f87c1a8f0936d515eaaefa3f04b)
+(cherry picked from commit 72550e12ae469012a505bf5b98a6543a754028d3)
+---
+ ArmVirtPkg/ArmVirtQemu.dsc | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/ArmVirtPkg/ArmVirtQemu.dsc b/ArmVirtPkg/ArmVirtQemu.dsc
+index 41a26c8d18..971422411d 100644
+--- a/ArmVirtPkg/ArmVirtQemu.dsc
++++ b/ArmVirtPkg/ArmVirtQemu.dsc
+@@ -132,6 +132,7 @@
+   gArmVirtTokenSpaceGuid.PcdTpm2SupportEnabled|$(TPM2_ENABLE)
+ 
+ [PcdsFixedAtBuild.common]
++  gArmPlatformTokenSpaceGuid.PcdEarlyHelloMessage|"UEFI firmware starting.\r\n"
+ !if $(ARCH) == AARCH64
+   gArmTokenSpaceGuid.PcdVFPEnabled|1
+ !endif
+-- 
+2.27.0
+
