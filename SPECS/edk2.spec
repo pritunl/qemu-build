@@ -8,8 +8,9 @@ ExclusiveArch: %{ix86} x86_64 %{arm} aarch64
 ExclusiveArch: x86_64 aarch64
 %endif
 
-%define GITDATE        20210527
-%define GITCOMMIT      e1999b264f1f
+# edk2-stable202111
+%define GITDATE        20211126
+%define GITCOMMIT      bb1bba3d7767
 %define TOOLCHAIN      GCC5
 %define OPENSSL_VER    1.1.1k
 
@@ -18,10 +19,15 @@ ExclusiveArch: x86_64 aarch64
 %define qosb_testing 1
 %endif
 
-%if %{defined rhel}
+%if %{defined fedora} || %{defined eln}
+%define qemu_package qemu-system-x86-core
+%define qemu_binary /usr/bin/qemu-system-x86_64
+%else
 %define qemu_package qemu-kvm-core >= 2.12.0-89
 %define qemu_binary /usr/libexec/qemu-kvm
+%endif
 
+%if %{defined rhel}
 %define build_ovmf 0
 %define build_aarch64 0
 %ifarch x86_64
@@ -31,8 +37,6 @@ ExclusiveArch: x86_64 aarch64
   %define build_aarch64 1
 %endif
 %else
-%define qemu_package qemu-system-x86-core
-%define qemu_binary /usr/bin/qemu-system-x86_64
 %define build_ovmf 1
 %define build_aarch64 1
 %endif
@@ -44,13 +48,13 @@ ExclusiveArch: x86_64 aarch64
 
 Name:       edk2
 Version:    %{GITDATE}git%{GITCOMMIT}
-Release:    2%{?dist}
+Release:    1%{?dist}
 Summary:    UEFI firmware for 64-bit virtual machines
 License:    BSD-2-Clause-Patent and OpenSSL and MIT
 URL:        http://www.tianocore.org
 
 # The source tarball is created using following commands:
-# COMMIT=e1999b264f1f
+# COMMIT=bb1bba3d7767
 # git archive --format=tar --prefix=edk2-$COMMIT/ $COMMIT \
 # | xz -9ev >/tmp/edk2-$COMMIT.tar.xz
 Source0: edk2-%{GITCOMMIT}.tar.xz
@@ -73,10 +77,10 @@ Source56: 50-edk2-ovmf-ia32-sb.json
 Source57: 60-edk2-ovmf-ia32.json
 Source58: edk2-ovmf-nosb.json
 Source59: 70-edk2-arm-verbose.json
+Source60: edk2-microvm.json
 
 Patch0008: 0008-BaseTools-do-not-build-BrotliCompress-RH-only.patch
 Patch0009: 0009-MdeModulePkg-remove-package-private-Brotli-include-p.patch
-Patch0010: 0010-advertise-OpenSSL-on-TianoCore-splash-screen-boot-lo.patch
 Patch0011: 0011-OvmfPkg-increase-max-debug-message-length-to-512-RHE.patch
 Patch0012: 0012-MdeModulePkg-TerminalDxe-add-other-text-resolutions-.patch
 Patch0013: 0013-MdeModulePkg-TerminalDxe-set-xterm-resolution-on-mod.patch
@@ -94,6 +98,8 @@ Patch0024: 0024-OvmfPkg-silence-EFI_D_VERBOSE-0x00400000-in-NvmExpre.patch
 Patch0025: 0025-CryptoPkg-OpensslLib-list-RHEL8-specific-OpenSSL-fil.patch
 Patch0026: 0026-OvmfPkg-QemuKernelLoaderFsDxe-suppress-error-on-no-k.patch
 Patch0027: 0027-SecurityPkg-Tcg2Dxe-suppress-error-on-no-swtpm-in-si.patch
+Patch0028: 0028-OvmfPkg-MemEncryptSevLib-Check-the-guest-type-before.patch
+Patch0029: 0029-OvmfPkg-Microvm-take-PcdResizeXterm-from-the-QEMU-co.patch
 
 # Fedora specific
 Patch1000: fedora-Tweak-the-tools_def-to-support-cross-compiling.patch
@@ -402,6 +408,9 @@ build ${CC_FLAGS} -a AARCH64 \
 
 
 %if %{defined fedora}
+# build microvm
+build ${OVMF_FLAGS} -a X64 -p OvmfPkg/Microvm/MicrovmX64.dsc
+
 # build ovmf-ia32
 mkdir -p ovmf-ia32
 build ${OVMF_FLAGS} -a IA32 -p OvmfPkg/OvmfPkgIa32.dsc
@@ -543,6 +552,12 @@ install -m 0644 edk2-aarch64-verbose.json \
 
 
 %if %{defined fedora}
+# install microvm
+install -m 0644 Build/MicrovmX64/DEBUG_%{TOOLCHAIN}/FV/MICROVM.fd \
+  %{buildroot}%{_datadir}/%{name}/ovmf/MICROVM.fd
+install -p -m 0644 %{_sourcedir}/edk2-microvm.json \
+  %{buildroot}%{_datadir}/qemu/firmware/60-edk2-ovmf-microvm.json
+
 # Install extra x86_64 json files
 install -p -m 0644 %{_sourcedir}/edk2-ovmf-nosb.json \
   %{buildroot}%{_datadir}/qemu/firmware/60-edk2-ovmf-nosb.json
@@ -639,7 +654,9 @@ KERNEL_IMG=$(rpm -q -l $KERNEL_PKG | egrep '^/lib/modules/[^/]+/vmlinuz$')
 %{_datadir}/qemu/firmware/50-edk2-ovmf-cc.json
 %{_datadir}/qemu/firmware/50-edk2-ovmf.json
 %if %{defined fedora}
+%{_datadir}/%{name}/ovmf/MICROVM.fd
 %{_datadir}/qemu/firmware/60-edk2-ovmf-nosb.json
+%{_datadir}/qemu/firmware/60-edk2-ovmf-microvm.json
 %endif
 # endif build_ovmf
 %endif
@@ -740,6 +757,21 @@ KERNEL_IMG=$(rpm -q -l $KERNEL_PKG | egrep '^/lib/modules/[^/]+/vmlinuz$')
 
 
 %changelog
+* Mon Dec 6 2021 Gerd Hoffmann <kraxel@redhat.com> - 20211126gitbb1bba3d7767-1
+- Update to edk2-stable202111
+- Resolves rhbz#1978966
+- Resolves rhbz#2026744
+
+* Mon Dec  6 2021 Daniel P. Berrangé <berrange@redhat.com> - 20210527gite1999b264f1f-5
+- Drop glibc strcmp workaround
+
+* Mon Nov 29 2021 Daniel P. Berrangé <berrange@redhat.com> - 20210527gite1999b264f1f-4
+- Drop customized splash screen boot logo
+- Temporary workaround for suspected glibc strcmp bug breaking builds in koji
+
+* Wed Sep  1 2021 Daniel P. Berrangé <berrange@redhat.com> - 20210527gite1999b264f1f-3
+- Fix qemu packaging conditionals for ELN builds
+
 * Wed Jul 21 2021 Fedora Release Engineering <releng@fedoraproject.org> - 20210527gite1999b264f1f-2
 - Rebuilt for https://fedoraproject.org/wiki/Fedora_35_Mass_Rebuild
 

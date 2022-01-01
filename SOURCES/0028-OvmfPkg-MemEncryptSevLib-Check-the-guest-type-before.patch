@@ -1,0 +1,230 @@
+From 418ad50beaffaeb4b7b25d86b935f122f1740ebd Mon Sep 17 00:00:00 2001
+From: Brijesh Singh <brijesh.singh@amd.com>
+Date: Wed, 1 Dec 2021 10:24:07 -0600
+Subject: [PATCH 1/1] OvmfPkg/MemEncryptSevLib: Check the guest type before
+ EsWorkarea access
+
+The commit 80e67af9afca added support for a generic workarea concept.
+The workarea header contains the information of the guest type. The
+header is populated by ResetVector code during the guest detection.
+
+Currently, the InternalMemEncryptSevStatus() reads the EsWorkArea to
+determine the C-bit position. The EsWorkArea PCD is valid only for the
+SEV guest type. Add a check of the guest type before accessing the
+EsWorkArea PCD.
+
+Fixes: 80e67af9afca ("OvmfPkg: introduce a common work area")
+Cc: James Bottomley <jejb@linux.ibm.com>
+Cc: Min Xu <min.m.xu@intel.com>
+Cc: Jiewen Yao <jiewen.yao@intel.com>
+Cc: Tom Lendacky <thomas.lendacky@amd.com>
+Cc: Jordan Justen <jordan.l.justen@intel.com>
+Cc: Ard Biesheuvel <ardb+tianocore@kernel.org>
+Cc: Erdem Aktas <erdemaktas@google.com>
+Cc: Gerd Hoffmann <kraxel@redhat.com>
+Cc: Qi Zhou <atmgnd@outlook.com>
+Signed-off-by: Brijesh Singh <brijesh.singh@amd.com>
+Message-Id: <20211201162407.3323063-1-brijesh.singh@amd.com>
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+---
+ .../DxeMemEncryptSevLib.inf                   |  2 +
+ .../PeiMemEncryptSevLib.inf                   |  2 +
+ .../SecMemEncryptSevLib.inf                   |  2 +
+ .../PeiMemEncryptSevLibInternal.c             | 50 +++++++++++++++-
+ .../SecMemEncryptSevLibInternal.c             | 58 ++++++++++++++++++-
+ 5 files changed, 110 insertions(+), 4 deletions(-)
+
+diff --git a/OvmfPkg/Library/BaseMemEncryptSevLib/DxeMemEncryptSevLib.inf b/OvmfPkg/Library/BaseMemEncryptSevLib/DxeMemEncryptSevLib.inf
+index f2e162d68076..ca3d82ef93bf 100644
+--- a/OvmfPkg/Library/BaseMemEncryptSevLib/DxeMemEncryptSevLib.inf
++++ b/OvmfPkg/Library/BaseMemEncryptSevLib/DxeMemEncryptSevLib.inf
+@@ -54,4 +54,6 @@ [FeaturePcd]
+   gUefiOvmfPkgTokenSpaceGuid.PcdSmmSmramRequire
+ 
+ [Pcd]
++  gUefiOvmfPkgTokenSpaceGuid.PcdOvmfWorkAreaBase
+   gEfiMdeModulePkgTokenSpaceGuid.PcdPteMemoryEncryptionAddressOrMask
++  gUefiOvmfPkgTokenSpaceGuid.PcdOvmfConfidentialComputingWorkAreaHeader
+diff --git a/OvmfPkg/Library/BaseMemEncryptSevLib/PeiMemEncryptSevLib.inf b/OvmfPkg/Library/BaseMemEncryptSevLib/PeiMemEncryptSevLib.inf
+index 03a78c32df28..2f27b5569d7a 100644
+--- a/OvmfPkg/Library/BaseMemEncryptSevLib/PeiMemEncryptSevLib.inf
++++ b/OvmfPkg/Library/BaseMemEncryptSevLib/PeiMemEncryptSevLib.inf
+@@ -54,4 +54,6 @@ [FeaturePcd]
+   gUefiOvmfPkgTokenSpaceGuid.PcdSmmSmramRequire
+ 
+ [FixedPcd]
++  gUefiOvmfPkgTokenSpaceGuid.PcdOvmfWorkAreaBase
+   gUefiCpuPkgTokenSpaceGuid.PcdSevEsWorkAreaBase
++  gUefiOvmfPkgTokenSpaceGuid.PcdOvmfConfidentialComputingWorkAreaHeader
+diff --git a/OvmfPkg/Library/BaseMemEncryptSevLib/SecMemEncryptSevLib.inf b/OvmfPkg/Library/BaseMemEncryptSevLib/SecMemEncryptSevLib.inf
+index 279c38bfbc2c..36c4f906d554 100644
+--- a/OvmfPkg/Library/BaseMemEncryptSevLib/SecMemEncryptSevLib.inf
++++ b/OvmfPkg/Library/BaseMemEncryptSevLib/SecMemEncryptSevLib.inf
+@@ -48,4 +48,6 @@ [LibraryClasses]
+   PcdLib
+ 
+ [FixedPcd]
++  gUefiOvmfPkgTokenSpaceGuid.PcdOvmfWorkAreaBase
+   gUefiCpuPkgTokenSpaceGuid.PcdSevEsWorkAreaBase
++  gUefiOvmfPkgTokenSpaceGuid.PcdOvmfConfidentialComputingWorkAreaHeader
+diff --git a/OvmfPkg/Library/BaseMemEncryptSevLib/PeiMemEncryptSevLibInternal.c b/OvmfPkg/Library/BaseMemEncryptSevLib/PeiMemEncryptSevLibInternal.c
+index e2fd109d120f..c61bee4c4779 100644
+--- a/OvmfPkg/Library/BaseMemEncryptSevLib/PeiMemEncryptSevLibInternal.c
++++ b/OvmfPkg/Library/BaseMemEncryptSevLib/PeiMemEncryptSevLibInternal.c
+@@ -24,6 +24,52 @@ STATIC BOOLEAN mSevStatusChecked = FALSE;
+ STATIC UINT64  mSevEncryptionMask = 0;
+ STATIC BOOLEAN mSevEncryptionMaskSaved = FALSE;
+ 
++/**
++ Determine if the SEV is active.
++
++ During the early booting, GuestType is set in the work area. Verify that it
++ is an SEV guest.
++
++ @retval TRUE   SEV is enabled
++ @retval FALSE  SEV is not enabled
++
++ **/
++STATIC
++BOOLEAN
++IsSevGuest (
++  VOID
++  )
++{
++  OVMF_WORK_AREA  *WorkArea;
++
++  //
++  // Ensure that the size of the Confidential Computing work area header
++  // is same as what is provided through a fixed PCD.
++  //
++  ASSERT ((UINTN) FixedPcdGet32 (PcdOvmfConfidentialComputingWorkAreaHeader) ==
++          sizeof(CONFIDENTIAL_COMPUTING_WORK_AREA_HEADER));
++
++  WorkArea = (OVMF_WORK_AREA *) FixedPcdGet32 (PcdOvmfWorkAreaBase);
++
++  return ((WorkArea != NULL) && (WorkArea->Header.GuestType == GUEST_TYPE_AMD_SEV));
++}
++
++STATIC
++SEC_SEV_ES_WORK_AREA *
++GetSevEsWorkArea (
++  VOID
++  )
++{
++  //
++  // Before accessing the Es workarea lets verify that its SEV guest
++  //
++  if (!IsSevGuest()) {
++    return NULL;
++  }
++
++  return (SEC_SEV_ES_WORK_AREA *) FixedPcdGet32 (PcdSevEsWorkAreaBase);
++}
++
+ /**
+   Reads and sets the status of SEV features.
+ 
+@@ -43,7 +89,7 @@ InternalMemEncryptSevStatus (
+ 
+   ReadSevMsr = FALSE;
+ 
+-  SevEsWorkArea = (SEC_SEV_ES_WORK_AREA *) FixedPcdGet32 (PcdSevEsWorkAreaBase);
++  SevEsWorkArea = GetSevEsWorkArea ();
+   if (SevEsWorkArea != NULL && SevEsWorkArea->EncryptionMask != 0) {
+     //
+     // The MSR has been read before, so it is safe to read it again and avoid
+@@ -139,7 +185,7 @@ MemEncryptSevGetEncryptionMask (
+   if (!mSevEncryptionMaskSaved) {
+     SEC_SEV_ES_WORK_AREA  *SevEsWorkArea;
+ 
+-    SevEsWorkArea = (SEC_SEV_ES_WORK_AREA *) FixedPcdGet32 (PcdSevEsWorkAreaBase);
++    SevEsWorkArea = GetSevEsWorkArea ();
+     if (SevEsWorkArea != NULL) {
+       mSevEncryptionMask = SevEsWorkArea->EncryptionMask;
+     } else {
+diff --git a/OvmfPkg/Library/BaseMemEncryptSevLib/SecMemEncryptSevLibInternal.c b/OvmfPkg/Library/BaseMemEncryptSevLib/SecMemEncryptSevLibInternal.c
+index 56d8f3f3183f..f906f0de1b6c 100644
+--- a/OvmfPkg/Library/BaseMemEncryptSevLib/SecMemEncryptSevLibInternal.c
++++ b/OvmfPkg/Library/BaseMemEncryptSevLib/SecMemEncryptSevLibInternal.c
+@@ -17,6 +17,52 @@
+ #include <Register/Cpuid.h>
+ #include <Uefi/UefiBaseType.h>
+ 
++/**
++ Determine if the SEV is active.
++
++ During the early booting, GuestType is set in the work area. Verify that it
++ is an SEV guest.
++
++ @retval TRUE   SEV is enabled
++ @retval FALSE  SEV is not enabled
++
++ **/
++STATIC
++BOOLEAN
++IsSevGuest (
++  VOID
++  )
++{
++  OVMF_WORK_AREA  *WorkArea;
++
++  //
++  // Ensure that the size of the Confidential Computing work area header
++  // is same as what is provided through a fixed PCD.
++  //
++  ASSERT ((UINTN) FixedPcdGet32 (PcdOvmfConfidentialComputingWorkAreaHeader) ==
++          sizeof(CONFIDENTIAL_COMPUTING_WORK_AREA_HEADER));
++
++  WorkArea = (OVMF_WORK_AREA *) FixedPcdGet32 (PcdOvmfWorkAreaBase);
++
++  return ((WorkArea != NULL) && (WorkArea->Header.GuestType == GUEST_TYPE_AMD_SEV));
++}
++
++STATIC
++SEC_SEV_ES_WORK_AREA *
++GetSevEsWorkArea (
++  VOID
++  )
++{
++  //
++  // Before accessing the Es workarea lets verify that its SEV guest
++  //
++  if (!IsSevGuest()) {
++    return NULL;
++  }
++
++  return (SEC_SEV_ES_WORK_AREA *) FixedPcdGet32 (PcdSevEsWorkAreaBase);
++}
++
+ /**
+   Reads and sets the status of SEV features.
+ 
+@@ -35,7 +81,8 @@ InternalMemEncryptSevStatus (
+ 
+   ReadSevMsr = FALSE;
+ 
+-  SevEsWorkArea = (SEC_SEV_ES_WORK_AREA *) FixedPcdGet32 (PcdSevEsWorkAreaBase);
++
++  SevEsWorkArea = GetSevEsWorkArea ();
+   if (SevEsWorkArea != NULL && SevEsWorkArea->EncryptionMask != 0) {
+     //
+     // The MSR has been read before, so it is safe to read it again and avoid
+@@ -115,7 +162,14 @@ MemEncryptSevGetEncryptionMask (
+   SEC_SEV_ES_WORK_AREA              *SevEsWorkArea;
+   UINT64                            EncryptionMask;
+ 
+-  SevEsWorkArea = (SEC_SEV_ES_WORK_AREA *) FixedPcdGet32 (PcdSevEsWorkAreaBase);
++  //
++  // Before accessing the Es workarea lets verify that its SEV guest
++  //
++  if (!IsSevGuest()) {
++    return 0;
++  }
++
++  SevEsWorkArea = GetSevEsWorkArea ();
+   if (SevEsWorkArea != NULL) {
+     EncryptionMask = SevEsWorkArea->EncryptionMask;
+   } else {
+-- 
+2.33.1
+

@@ -127,7 +127,7 @@ index e3b1d74ce2..969524cf3b 100644
  INF  ShellPkg/Application/Shell/Shell.inf
 +!endif
  
- INF MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+ INF MdeModulePkg/Logo/LogoDxe.inf
  
 diff --git a/OvmfPkg/OvmfPkgIa32X64.fdf b/OvmfPkg/OvmfPkgIa32X64.fdf
 index f7732382d4..36f078556f 100644
@@ -146,7 +146,7 @@ index f7732382d4..36f078556f 100644
  INF  ShellPkg/Application/Shell/Shell.inf
 +!endif
  
- INF MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+ INF MdeModulePkg/Logo/LogoDxe.inf
  
 diff --git a/OvmfPkg/OvmfPkgX64.fdf b/OvmfPkg/OvmfPkgX64.fdf
 index 137ed6bceb..a5900d8377 100644
@@ -165,7 +165,7 @@ index 137ed6bceb..a5900d8377 100644
  INF  ShellPkg/Application/Shell/Shell.inf
 +!endif
  
- INF MdeModulePkg/Logo/LogoOpenSSLDxe.inf
+ INF MdeModulePkg/Logo/LogoDxe.inf
  
 -- 
 2.27.0

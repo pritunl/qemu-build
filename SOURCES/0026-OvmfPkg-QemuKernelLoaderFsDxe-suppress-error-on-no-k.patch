@@ -1,8 +1,8 @@
-From 29be717a1ae0a2617a7ae95698940286201d1612 Mon Sep 17 00:00:00 2001
+From 11a79ac24d7411c8ad9d8a6779b324c5164e06d0 Mon Sep 17 00:00:00 2001
 From: Laszlo Ersek <lersek@redhat.com>
 Date: Wed, 24 Jun 2020 11:31:36 +0200
-Subject: OvmfPkg/QemuKernelLoaderFsDxe: suppress error on no "-kernel" in
- silent aa64 build (RH)
+Subject: [PATCH 19/20] OvmfPkg/QemuKernelLoaderFsDxe: suppress error on no
+ "-kernel" in silent aa64 build (RH)
 
 Notes about the RHEL-8.3/20200603-ca407c7246bf [edk2-stable202005] ->
 RHEL-8.5/20210520-e1999b264f1f [edk2-stable202105] rebase:
@@ -27,23 +27,35 @@ Signed-off-by: Laszlo Ersek <lersek@redhat.com>
 Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
 (cherry picked from commit 9adcdf493ebbd11efb74e2905ab5f6c8996e096d)
 ---
- .../QemuKernelLoaderFsDxe.c                     | 17 +++++++++++++++++
  .../QemuKernelLoaderFsDxe.inf                   |  1 +
+ .../QemuKernelLoaderFsDxe.c                     | 17 +++++++++++++++++
  2 files changed, 18 insertions(+)
 
+diff --git a/OvmfPkg/QemuKernelLoaderFsDxe/QemuKernelLoaderFsDxe.inf b/OvmfPkg/QemuKernelLoaderFsDxe/QemuKernelLoaderFsDxe.inf
+index 7b35adb8e034..e0331c6e2cbc 100644
+--- a/OvmfPkg/QemuKernelLoaderFsDxe/QemuKernelLoaderFsDxe.inf
++++ b/OvmfPkg/QemuKernelLoaderFsDxe/QemuKernelLoaderFsDxe.inf
+@@ -28,6 +28,7 @@ [LibraryClasses]
+   BaseLib
+   BaseMemoryLib
+   DebugLib
++  DebugPrintErrorLevelLib
+   DevicePathLib
+   MemoryAllocationLib
+   QemuFwCfgLib
 diff --git a/OvmfPkg/QemuKernelLoaderFsDxe/QemuKernelLoaderFsDxe.c b/OvmfPkg/QemuKernelLoaderFsDxe/QemuKernelLoaderFsDxe.c
-index b09ff6a359..ec0244d61b 100644
+index 6832d563bcb0..08ed67f5ffea 100644
 --- a/OvmfPkg/QemuKernelLoaderFsDxe/QemuKernelLoaderFsDxe.c
 +++ b/OvmfPkg/QemuKernelLoaderFsDxe/QemuKernelLoaderFsDxe.c
-@@ -18,6 +18,7 @@
- #include <Library/BaseLib.h>
+@@ -19,6 +19,7 @@
  #include <Library/BaseMemoryLib.h>
+ #include <Library/BlobVerifierLib.h>
  #include <Library/DebugLib.h>
 +#include <Library/DebugPrintErrorLevelLib.h>
  #include <Library/DevicePathLib.h>
  #include <Library/MemoryAllocationLib.h>
  #include <Library/QemuFwCfgLib.h>
-@@ -1039,6 +1040,22 @@ QemuKernelLoaderFsDxeEntrypoint (
+@@ -1054,6 +1055,22 @@ QemuKernelLoaderFsDxeEntrypoint (
  
    if (KernelBlob->Data == NULL) {
      Status = EFI_NOT_FOUND;
@@ -66,18 +78,6 @@ index b09ff6a359..ec0244d61b 100644
      goto FreeBlobs;
    }
  
-diff --git a/OvmfPkg/QemuKernelLoaderFsDxe/QemuKernelLoaderFsDxe.inf b/OvmfPkg/QemuKernelLoaderFsDxe/QemuKernelLoaderFsDxe.inf
-index 7b35adb8e0..e0331c6e2c 100644
---- a/OvmfPkg/QemuKernelLoaderFsDxe/QemuKernelLoaderFsDxe.inf
-+++ b/OvmfPkg/QemuKernelLoaderFsDxe/QemuKernelLoaderFsDxe.inf
-@@ -28,6 +28,7 @@
-   BaseLib
-   BaseMemoryLib
-   DebugLib
-+  DebugPrintErrorLevelLib
-   DevicePathLib
-   MemoryAllocationLib
-   QemuFwCfgLib
 -- 
-2.27.0
+2.33.1
 
