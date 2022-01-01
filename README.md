@@ -30,7 +30,7 @@ rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Ever
 rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/source/tree/Packages/m/meson-0.59.4-1.fc35.src.rpm
 rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/k/keyutils-1.6.1-3.fc35.src.rpm
 rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/i/ipxe-20200823-7.git4bd064de.fc35.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/e/edk2-20210527gite1999b264f1f-2.fc35.src.rpm
+rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/source/tree/Packages/e/edk2-20211126gitbb1bba3d7767-1.fc35.src.rpm
 rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-6.2.0-1.fc36.src.rpm
 rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-5.fc35.src.rpm
 rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/v/virglrenderer-0.9.1-2.20210420git36391559.fc35.src.rpm
@@ -95,12 +95,12 @@ sudo yum -y install ~/rpmbuild/RPMS/x86_64/dtc-*.el8.x86_64.rpm
 sudo yum-builddep -y ~/rpmbuild/SPECS/edk2.spec
 rpmbuild -ba edk2.spec
 
-sudo yum -y install ~/rpmbuild/RPMS/x86_64/edk2-*.el8.x86_64.rpm
+sudo yum -y install ~/rpmbuild/RPMS/noarch/edk2-*.el8.noarch.rpm ~/rpmbuild/RPMS/x86_64/edk2-*.el8.x86_64.rpm
 
 sudo yum-builddep -y ~/rpmbuild/SPECS/ipxe.spec
 rpmbuild -ba ipxe.spec
 
-sudo yum -y install ~/rpmbuild/RPMS/x86_64/ipxe-*.el8.x86_64.rpm
+sudo yum -y install ~/rpmbuild/RPMS/noarch/ipxe-*.el8.noarch.rpm
 
 sudo yum-builddep -y ~/rpmbuild/SPECS/meson.spec
 rpmbuild -ba meson.spec
@@ -130,6 +130,8 @@ rm -rf ~/repo
 mkdir ~/repo
 cp rpmbuild/RPMS/noarch/* ~/repo
 cp rpmbuild/RPMS/x86_64/* ~/repo
+rm ~/repo/*debuginfo*
+rm ~/repo/*debugsource*
 
 rpm --resign ~/repo/*.rpm
 createrepo ~/repo
