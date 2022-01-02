@@ -22,21 +22,55 @@ sudo yum -y groupinstall 'Development Tools'
 sudo systemctl stop firewalld
 sudo systemctl disable firewalld
 
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/l/libepoxy-1.5.9-1.fc35.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/l/liburing-2.0-2.fc35.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/epel/8/Everything/SRPMS/Packages/c/capstone-4.0.2-5.el8.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/epel/8/Everything/SRPMS/Packages/l/libnfs-4.0.0-1.el8.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/l/libslirp-4.6.1-2.fc35.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/source/tree/Packages/m/meson-0.59.4-1.fc35.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/k/keyutils-1.6.1-3.fc35.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/i/ipxe-20200823-7.git4bd064de.fc35.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/source/tree/Packages/e/edk2-20211126gitbb1bba3d7767-1.fc35.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-6.2.0-1.fc36.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-5.fc35.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/v/virglrenderer-0.9.1-2.20210420git36391559.fc35.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/d/dtc-1.6.1-2.fc35.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/source/tree/Packages/s/seabios-1.15.0-1.fc35.src.rpm
-rpm -i https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/k/ksmtuned-0.1.0-8.fc35.src.rpm
+sudo rpm --import https://getfedora.org/static/fedora.gpg
+
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/l/libepoxy-1.5.9-1.fc35.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/l/liburing-2.0-2.fc35.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/epel/8/Everything/SRPMS/Packages/c/capstone-4.0.2-5.el8.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/epel/8/Everything/SRPMS/Packages/l/libnfs-4.0.0-1.el8.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/l/libslirp-4.6.1-2.fc35.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/source/tree/Packages/m/meson-0.59.4-1.fc35.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/k/keyutils-1.6.1-3.fc35.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/i/ipxe-20200823-7.git4bd064de.fc35.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/source/tree/Packages/e/edk2-20211126gitbb1bba3d7767-1.fc35.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-6.2.0-1.fc36.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-5.fc35.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/v/virglrenderer-0.9.1-2.20210420git36391559.fc35.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/d/dtc-1.6.1-2.fc35.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/source/tree/Packages/s/seabios-1.15.0-1.fc35.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/k/ksmtuned-0.1.0-8.fc35.src.rpm
+
+rpm -K libepoxy-1.5.9-1.fc35.src.rpm
+rpm -K liburing-2.0-2.fc35.src.rpm
+rpm -K capstone-4.0.2-5.el8.src.rpm
+rpm -K libnfs-4.0.0-1.el8.src.rpm
+rpm -K libslirp-4.6.1-2.fc35.src.rpm
+rpm -K meson-0.59.4-1.fc35.src.rpm
+rpm -K keyutils-1.6.1-3.fc35.src.rpm
+rpm -K ipxe-20200823-7.git4bd064de.fc35.src.rpm
+rpm -K edk2-20211126gitbb1bba3d7767-1.fc35.src.rpm
+rpm -K qemu-6.2.0-1.fc36.src.rpm
+rpm -K qemu-sanity-check-1.1.6-5.fc35.src.rpm
+rpm -K virglrenderer-0.9.1-2.20210420git36391559.fc35.src.rpm
+rpm -K dtc-1.6.1-2.fc35.src.rpm
+rpm -K seabios-1.15.0-1.fc35.src.rpm
+rpm -K ksmtuned-0.1.0-8.fc35.src.rpm
+
+rpm -i libepoxy-1.5.9-1.fc35.src.rpm
+rpm -i liburing-2.0-2.fc35.src.rpm
+rpm -i capstone-4.0.2-5.el8.src.rpm
+rpm -i libnfs-4.0.0-1.el8.src.rpm
+rpm -i libslirp-4.6.1-2.fc35.src.rpm
+rpm -i meson-0.59.4-1.fc35.src.rpm
+rpm -i keyutils-1.6.1-3.fc35.src.rpm
+rpm -i ipxe-20200823-7.git4bd064de.fc35.src.rpm
+rpm -i edk2-20211126gitbb1bba3d7767-1.fc35.src.rpm
+rpm -i qemu-6.2.0-1.fc36.src.rpm
+rpm -i qemu-sanity-check-1.1.6-5.fc35.src.rpm
+rpm -i virglrenderer-0.9.1-2.20210420git36391559.fc35.src.rpm
+rpm -i dtc-1.6.1-2.fc35.src.rpm
+rpm -i seabios-1.15.0-1.fc35.src.rpm
+rpm -i ksmtuned-0.1.0-8.fc35.src.rpm
 
 rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
     opc@123.123.123.123:/home/opc/rpmbuild/SOURCES/ /home/cloud/git/qemu-build/SOURCES/
@@ -49,6 +83,16 @@ rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
 scp /home/cloud/git/qemu-build/SPECS/meson.spec opc@123.123.123.123:/home/opc/rpmbuild/SPECS/meson.spec
 scp /home/cloud/git/qemu-build/SPECS/qemu.spec opc@123.123.123.123:/home/opc/rpmbuild/SPECS/qemu.spec
 scp /home/cloud/git/qemu-build/SPECS/qemu-sanity-check.spec opc@123.123.123.123:/home/opc/rpmbuild/SPECS/qemu-sanity-check.spec
+
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/x86_64/Packages/s/seabios-1.15.0-1.fc35.noarch.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/x86_64/Packages/s/seabios-bin-1.15.0-1.fc35.noarch.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/x86_64/Packages/s/seavgabios-bin-1.15.0-1.fc35.noarch.rpm
+
+rpm -K seabios-1.15.0-1.fc35.noarch.rpm
+rpm -K seabios-bin-1.15.0-1.fc35.noarch.rpm
+rpm -K seavgabios-bin-1.15.0-1.fc35.noarch.rpm
+
+sudo yum -y install seabios-1.15.0-1.fc35.noarch.rpm seabios-bin-1.15.0-1.fc35.noarch.rpm seavgabios-bin-1.15.0-1.fc35.noarch.rpm
 
 cd ~/rpmbuild/SPECS/
 
@@ -112,7 +156,6 @@ rpmbuild -ba keyutils.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/x86_64/keyutils-*.el8.x86_64.rpm
 
-sudo yum -y install https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/x86_64/Packages/s/seabios-1.15.0-1.fc35.noarch.rpm https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/x86_64/Packages/s/seabios-bin-1.15.0-1.fc35.noarch.rpm https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/x86_64/Packages/s/seavgabios-bin-1.15.0-1.fc35.noarch.rpm
 sudo yum-builddep -y ~/rpmbuild/SPECS/seabios.spec
 rpmbuild -ba seabios.spec
 
