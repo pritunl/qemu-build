@@ -2,6 +2,19 @@
 
 Build source for kvm repository
 
+```bash
+sudo tee /etc/yum.repos.d/pritunl-kvm.repo << EOF
+[pritunl-kvm]
+name=Pritunl KVM Repository
+baseurl=https://repo.pritunl.com/kvm/
+gpgcheck=1
+enabled=1
+EOF
+
+gpg --keyserver hkp://keyserver.ubuntu.com --recv-keys 1BB6FBB8D641BD9C6C0398D74D55437EC0508F5F
+gpg --armor --export 1BB6FBB8D641BD9C6C0398D74D55437EC0508F5F > key.tmp; sudo rpm --import key.tmp; rm -f key.tmp
+```
+
 # build
 
 ```bash
