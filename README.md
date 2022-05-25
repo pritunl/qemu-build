@@ -36,54 +36,62 @@ sudo systemctl stop firewalld
 sudo systemctl disable firewalld
 
 sudo rpm --import https://getfedora.org/static/fedora.gpg
+mkidr rpmkeys
+cd rpmkeys
+wget https://download.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/x86_64/os/Packages/d/distribution-gpg-keys-1.71-1.fc37.noarch.rpm
+rpm2cpio ./distribution-gpg-keys-1.67-1.fc37.noarch.rpm | cpio -idmv
+sudo rpm --import ./usr/share/distribution-gpg-keys/fedora/RPM-GPG-KEY-fedora-rawhide-primary
 
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/l/libepoxy-1.5.9-1.fc35.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/l/liburing-2.0-2.fc35.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/epel/8/Everything/SRPMS/Packages/c/capstone-4.0.2-5.el8.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/epel/8/Everything/SRPMS/Packages/l/libnfs-4.0.0-1.el8.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/l/libslirp-4.6.1-2.fc35.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/source/tree/Packages/m/meson-0.59.4-1.fc35.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/k/keyutils-1.6.1-3.fc35.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/i/ipxe-20200823-7.git4bd064de.fc35.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/source/tree/Packages/e/edk2-20211126gitbb1bba3d7767-1.fc35.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-6.2.0-1.fc36.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-5.fc35.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/v/virglrenderer-0.9.1-2.20210420git36391559.fc35.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/d/dtc-1.6.1-2.fc35.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/source/tree/Packages/s/seabios-1.15.0-1.fc35.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/35/Everything/source/tree/Packages/k/ksmtuned-0.1.0-8.fc35.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/source/tree/Packages/l/libepoxy-1.5.10-1.fc36.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/source/tree/Packages/l/liburing-2.0-3.fc36.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/source/tree/Packages/l/libcacard-2.8.1-2.fc36.src.rpm
+wget https://yum.oracle.com/repo/OracleLinux/OL8/developer/EPEL/x86_64/getPackageSource/capstone-4.0.2-5.el8.src.rpm
+wget https://yum.oracle.com/repo/OracleLinux/OL8/developer/EPEL/x86_64/getPackageSource/libnfs-4.0.0-1.el8.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/source/tree/Packages/l/libslirp-4.6.1-3.fc36.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/36/Everything/source/tree/Packages/m/meson-0.62.1-1.fc36.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/source/tree/Packages/k/keyutils-1.6.1-4.fc36.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/source/tree/Packages/i/ipxe-20200823-8.git4bd064de.fc36.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/36/Everything/source/tree/Packages/e/edk2-20220221gitb24306f15daa-4.fc36.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-7.0.0-3.fc37.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-6.fc36.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/source/tree/Packages/v/virglrenderer-0.9.1-3.20210420git36391559.fc36.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/source/tree/Packages/d/dtc-1.6.1-2.fc35.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/source/tree/Packages/s/seabios-1.16.0-1.fc36.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/source/tree/Packages/k/ksmtuned-0.1.0-9.fc36.src.rpm
 
-rpm -K libepoxy-1.5.9-1.fc35.src.rpm
-rpm -K liburing-2.0-2.fc35.src.rpm
 rpm -K capstone-4.0.2-5.el8.src.rpm
-rpm -K libnfs-4.0.0-1.el8.src.rpm
-rpm -K libslirp-4.6.1-2.fc35.src.rpm
-rpm -K meson-0.59.4-1.fc35.src.rpm
-rpm -K keyutils-1.6.1-3.fc35.src.rpm
-rpm -K ipxe-20200823-7.git4bd064de.fc35.src.rpm
-rpm -K edk2-20211126gitbb1bba3d7767-1.fc35.src.rpm
-rpm -K qemu-6.2.0-1.fc36.src.rpm
-rpm -K qemu-sanity-check-1.1.6-5.fc35.src.rpm
-rpm -K virglrenderer-0.9.1-2.20210420git36391559.fc35.src.rpm
 rpm -K dtc-1.6.1-2.fc35.src.rpm
-rpm -K seabios-1.15.0-1.fc35.src.rpm
-rpm -K ksmtuned-0.1.0-8.fc35.src.rpm
+rpm -K edk2-20220221gitb24306f15daa-4.fc36.src.rpm
+rpm -K ipxe-20200823-8.git4bd064de.fc36.src.rpm
+rpm -K keyutils-1.6.1-4.fc36.src.rpm
+rpm -K ksmtuned-0.1.0-9.fc36.src.rpm
+rpm -K libcacard-2.8.1-2.fc36.src.rpm
+rpm -K libepoxy-1.5.10-1.fc36.src.rpm
+rpm -K libnfs-4.0.0-1.el8.src.rpm
+rpm -K libslirp-4.6.1-3.fc36.src.rpm
+rpm -K liburing-2.0-3.fc36.src.rpm
+rpm -K meson-0.62.1-1.fc36.src.rpm
+rpm -K qemu-7.0.0-3.fc37.src.rpm
+rpm -K qemu-sanity-check-1.1.6-6.fc36.src.rpm
+rpm -K seabios-1.16.0-1.fc36.src.rpm
+rpm -K virglrenderer-0.9.1-3.20210420git36391559.fc36.src.rpm
 
-rpm -i libepoxy-1.5.9-1.fc35.src.rpm
-rpm -i liburing-2.0-2.fc35.src.rpm
 rpm -i capstone-4.0.2-5.el8.src.rpm
-rpm -i libnfs-4.0.0-1.el8.src.rpm
-rpm -i libslirp-4.6.1-2.fc35.src.rpm
-rpm -i meson-0.59.4-1.fc35.src.rpm
-rpm -i keyutils-1.6.1-3.fc35.src.rpm
-rpm -i ipxe-20200823-7.git4bd064de.fc35.src.rpm
-rpm -i edk2-20211126gitbb1bba3d7767-1.fc35.src.rpm
-rpm -i qemu-6.2.0-1.fc36.src.rpm
-rpm -i qemu-sanity-check-1.1.6-5.fc35.src.rpm
-rpm -i virglrenderer-0.9.1-2.20210420git36391559.fc35.src.rpm
 rpm -i dtc-1.6.1-2.fc35.src.rpm
-rpm -i seabios-1.15.0-1.fc35.src.rpm
-rpm -i ksmtuned-0.1.0-8.fc35.src.rpm
+rpm -i edk2-20220221gitb24306f15daa-4.fc36.src.rpm
+rpm -i ipxe-20200823-8.git4bd064de.fc36.src.rpm
+rpm -i keyutils-1.6.1-4.fc36.src.rpm
+rpm -i ksmtuned-0.1.0-9.fc36.src.rpm
+rpm -i libcacard-2.8.1-2.fc36.src.rpm
+rpm -i libepoxy-1.5.10-1.fc36.src.rpm
+rpm -i libnfs-4.0.0-1.el8.src.rpm
+rpm -i libslirp-4.6.1-3.fc36.src.rpm
+rpm -i liburing-2.0-3.fc36.src.rpm
+rpm -i meson-0.62.1-1.fc36.src.rpm
+rpm -i qemu-7.0.0-3.fc37.src.rpm
+rpm -i qemu-sanity-check-1.1.6-6.fc36.src.rpm
+rpm -i seabios-1.16.0-1.fc36.src.rpm
+rpm -i virglrenderer-0.9.1-3.20210420git36391559.fc36.src.rpm
 
 rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
     opc@123.123.123.123:/home/opc/rpmbuild/SOURCES/ /home/cloud/git/qemu-build/SOURCES/
@@ -113,6 +121,11 @@ sudo yum-builddep -y ~/rpmbuild/SPECS/libepoxy.spec
 rpmbuild -ba libepoxy.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/x86_64/libepoxy-*.el8.x86_64.rpm
+
+sudo yum-builddep -y ~/rpmbuild/SPECS/libcacard.spec
+rpmbuild -ba libcacard.spec
+
+sudo yum -y install ~/rpmbuild/RPMS/x86_64/libcacard-*.el8.x86_64.rpm
 
 sudo yum-builddep -y ~/rpmbuild/SPECS/virglrenderer.spec
 rpmbuild -ba virglrenderer.spec
