@@ -102,7 +102,9 @@ rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
     opc@123.123.123.123:/home/opc/rpmbuild/SPECS/ /home/cloud/git/qemu-build/SPECS/
 
 rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
-    /home/cloud/git/qemu-build/ opc@123.123.123.123:/home/opc/rpmbuild/
+    /home/cloud/git/qemu-build/SOURCES/ opc@123.123.123.123:/home/opc/rpmbuild/SOURCES/
+rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
+    /home/cloud/git/qemu-build/SPECS/  opc@123.123.123.123:/home/opc/rpmbuild/SPECS/
 
 scp /home/cloud/git/qemu-build/SPECS/meson.spec opc@123.123.123.123:/home/opc/rpmbuild/SPECS/meson.spec
 scp /home/cloud/git/qemu-build/SPECS/qemu.spec opc@123.123.123.123:/home/opc/rpmbuild/SPECS/qemu.spec
