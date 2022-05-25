@@ -48,10 +48,11 @@ wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everyt
 wget https://yum.oracle.com/repo/OracleLinux/OL8/developer/EPEL/x86_64/getPackageSource/capstone-4.0.2-5.el8.src.rpm
 wget https://yum.oracle.com/repo/OracleLinux/OL8/developer/EPEL/x86_64/getPackageSource/libnfs-4.0.0-1.el8.src.rpm
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/source/tree/Packages/l/libslirp-4.6.1-3.fc36.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/36/Everything/source/tree/Packages/m/meson-0.62.1-1.fc36.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/source/tree/Packages/m/meson-0.59.4-1.fc35.src.rpm
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/source/tree/Packages/k/keyutils-1.6.1-4.fc36.src.rpm
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/source/tree/Packages/i/ipxe-20200823-8.git4bd064de.fc36.src.rpm
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/36/Everything/source/tree/Packages/e/edk2-20220221gitb24306f15daa-4.fc36.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/36/Everything/source/tree/Packages/p/python-virt-firmware-0.96-1.fc36.src.rpm
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-7.0.0-3.fc37.src.rpm
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-6.fc36.src.rpm
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/source/tree/Packages/v/virglrenderer-0.9.1-3.20210420git36391559.fc36.src.rpm
@@ -70,7 +71,8 @@ rpm -K libepoxy-1.5.10-1.fc36.src.rpm
 rpm -K libnfs-4.0.0-1.el8.src.rpm
 rpm -K libslirp-4.6.1-3.fc36.src.rpm
 rpm -K liburing-2.0-3.fc36.src.rpm
-rpm -K meson-0.62.1-1.fc36.src.rpm
+rpm -K meson-0.59.4-1.fc35.src.rpm
+rpm -K python-virt-firmware-0.96-1.fc36.src.rpm
 rpm -K qemu-7.0.0-3.fc37.src.rpm
 rpm -K qemu-sanity-check-1.1.6-6.fc36.src.rpm
 rpm -K seabios-1.16.0-1.fc36.src.rpm
@@ -87,7 +89,8 @@ rpm -i libepoxy-1.5.10-1.fc36.src.rpm
 rpm -i libnfs-4.0.0-1.el8.src.rpm
 rpm -i libslirp-4.6.1-3.fc36.src.rpm
 rpm -i liburing-2.0-3.fc36.src.rpm
-rpm -i meson-0.62.1-1.fc36.src.rpm
+rpm -i meson-0.59.4-1.fc35.src.rpm
+rpm -i python-virt-firmware-0.96-1.fc36.src.rpm
 rpm -i qemu-7.0.0-3.fc37.src.rpm
 rpm -i qemu-sanity-check-1.1.6-6.fc36.src.rpm
 rpm -i seabios-1.16.0-1.fc36.src.rpm
@@ -105,15 +108,15 @@ scp /home/cloud/git/qemu-build/SPECS/meson.spec opc@123.123.123.123:/home/opc/rp
 scp /home/cloud/git/qemu-build/SPECS/qemu.spec opc@123.123.123.123:/home/opc/rpmbuild/SPECS/qemu.spec
 scp /home/cloud/git/qemu-build/SPECS/qemu-sanity-check.spec opc@123.123.123.123:/home/opc/rpmbuild/SPECS/qemu-sanity-check.spec
 
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/x86_64/Packages/s/seabios-1.15.0-1.fc35.noarch.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/x86_64/Packages/s/seabios-bin-1.15.0-1.fc35.noarch.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/35/Everything/x86_64/Packages/s/seavgabios-bin-1.15.0-1.fc35.noarch.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/x86_64/os/Packages/s/seabios-1.16.0-1.fc36.noarch.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/x86_64/os/Packages/s/seabios-bin-1.16.0-1.fc36.noarch.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/36/Everything/x86_64/os/Packages/s/seavgabios-bin-1.16.0-1.fc36.noarch.rpm
 
-rpm -K seabios-1.15.0-1.fc35.noarch.rpm
-rpm -K seabios-bin-1.15.0-1.fc35.noarch.rpm
-rpm -K seavgabios-bin-1.15.0-1.fc35.noarch.rpm
+rpm -K seabios-1.16.0-1.fc36.noarch.rpm
+rpm -K seabios-bin-1.16.0-1.fc36.noarch.rpm
+rpm -K seavgabios-bin-1.16.0-1.fc36.noarch.rpm
 
-sudo yum -y install seabios-1.15.0-1.fc35.noarch.rpm seabios-bin-1.15.0-1.fc35.noarch.rpm seavgabios-bin-1.15.0-1.fc35.noarch.rpm
+sudo yum -y install seabios-1.16.0-1.fc36.noarch.rpm seabios-bin-1.16.0-1.fc36.noarch.rpm seavgabios-bin-1.16.0-1.fc36.noarch.rpm
 
 cd ~/rpmbuild/SPECS/
 
@@ -161,6 +164,11 @@ sudo yum-builddep -y ~/rpmbuild/SPECS/dtc.spec
 rpmbuild -ba dtc.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/x86_64/dtc-*.el8.x86_64.rpm
+
+sudo yum-builddep -y ~/rpmbuild/SPECS/python-virt-firmware.spec
+rpmbuild -ba python-virt-firmware.spec
+
+sudo yum -y install ~/rpmbuild/RPMS/noarch/python3-virt-firmware-*.el8.noarch.rpm
 
 sudo yum-builddep -y ~/rpmbuild/SPECS/edk2.spec
 rpmbuild -ba edk2.spec
