@@ -3,7 +3,7 @@
 
 Name:		virglrenderer
 Version:	0.9.1
-Release:	2.%{gitdate}git%{gitversion}%{?dist}
+Release:	3.%{gitdate}git%{gitversion}%{?dist}
 
 Summary:	Virgl Rendering library.
 License:	MIT
@@ -69,6 +69,9 @@ driver to test virgl rendering without GL.
 %{_bindir}/virgl_test_server
 
 %changelog
+* Sat Jan 22 2022 Fedora Release Engineering <releng@fedoraproject.org> - 0.9.1-3.20210420git36391559
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_36_Mass_Rebuild
+
 * Fri Jul 23 2021 Fedora Release Engineering <releng@fedoraproject.org> - 0.9.1-2.20210420git36391559
 - Rebuilt for https://fedoraproject.org/wiki/Fedora_35_Mass_Rebuild
 

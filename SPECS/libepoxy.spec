@@ -1,10 +1,10 @@
 Summary: epoxy runtime library
 Name: libepoxy
-Version: 1.5.9
+Version: 1.5.10
 Release: 1%{?dist}
 License: MIT
 URL: https://github.com/anholt/libepoxy
-Source0: %{url}/releases/download/%{version}/%{name}-%{version}.tar.xz
+Source0: https://download.gnome.org/sources/%{name}/1.5/%{name}-%{version}.tar.xz
 
 BuildRequires: meson
 BuildRequires: gcc
@@ -55,6 +55,12 @@ xvfb-run -d -s "-screen 0 640x480x24" ninja -C %{_vpath_builddir} test || \
 %{_libdir}/pkgconfig/epoxy.pc
 
 %changelog
+* Fri Mar 18 2022 David King <amigadave@amigadave.com> - 1.5.10-1
+- Update to 1.5.10
+
+* Thu Jan 20 2022 Fedora Release Engineering <releng@fedoraproject.org> - 1.5.9-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_36_Mass_Rebuild
+
 * Sun Aug 15 2021 Kalev Lember <klember@redhat.com> - 1.5.9-1
 - Update to 1.5.9
 

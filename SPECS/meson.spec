@@ -6,13 +6,13 @@
 %bcond_with check
 
 Name:           meson
-Version:        0.59.4
+Version:        0.62.1
 Release:        1%{?dist}
 Summary:        High productivity build system
 
 License:        ASL 2.0
 URL:            https://mesonbuild.com/
-Source:         https://github.com/mesonbuild/meson/releases/download/%{version_no_tilde .}/meson-0.59.4.tar.gz
+Source:         https://github.com/mesonbuild/meson/releases/download/%{version_no_tilde .}/meson-%{version_no_tilde %{quote:}}.tar.gz
 
 BuildArch:      noarch
 
@@ -79,7 +79,7 @@ support for modern software development tools and practices, such as
 unit tests, coverage reports, Valgrind, CCache and the like.
 
 %prep
-%autosetup -p1 -n meson-0.59.4
+%autosetup -p1 -n meson-%{version_no_tilde %{quote:}}
 # Macro should not change when we are redefining bindir
 sed -i -e "/^%%__meson /s| .*$| %{_bindir}/%{name}|" data/macros.%{name}
 
@@ -89,6 +89,8 @@ sed -i -e "/^%%__meson /s| .*$| %{_bindir}/%{name}|" data/macros.%{name}
 %install
 %py3_install
 install -Dpm0644 -t %{buildroot}%{rpmmacrodir} data/macros.%{name}
+install -Dpm0644 -t %{buildroot}%{_datadir}/bash-completion/completions/ data/shell-completions/bash/meson
+install -Dpm0644 -t %{buildroot}%{_datadir}/zsh/site-functions/ data/shell-completions/zsh/_meson
 
 %if %{with check}
 %check
@@ -110,8 +112,29 @@ export MESON_PRINT_TEST_OUTPUT=1
 %dir %{_datadir}/polkit-1
 %dir %{_datadir}/polkit-1/actions
 %{_datadir}/polkit-1/actions/com.mesonbuild.install.policy
+%{_datadir}/bash-completion/completions/meson
+%{_datadir}/zsh/site-functions/_meson
 
 %changelog
+* Tue Apr 26 2022 Marc-André Lureau <marcandre.lureau@redhat.com> - 0.62.1-1
+- Update to 0.62.1
+
+* Tue Mar 15 2022 Marc-André Lureau <marcandre.lureau@redhat.com> - 0.61.3-1
+- Update to 0.61.3
+- Install zsh & bash completion
+
+* Thu Jan 20 2022 Fedora Release Engineering <releng@fedoraproject.org> - 0.60.3-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_36_Mass_Rebuild
+
+* Sun Dec 26 2021 Kalev Lember <klember@redhat.com> - 0.60.3-1
+- Update to 0.60.3
+
+* Mon Dec 06 2021 Kalev Lember <klember@redhat.com> - 0.60.2-1
+- Update to 0.60.2
+
+* Fri Nov 12 2021 Neal Gompa <ngompa@fedoraproject.org> - 0.60.1-1
+- Update to 0.60.1
+
 * Thu Oct 28 2021 Kalev Lember <klember@redhat.com> - 0.59.4-1
 - Update to 0.59.4
 

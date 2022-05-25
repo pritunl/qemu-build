@@ -1,0 +1,94 @@
+From da4731a05cd2279c5ba504ad117ccd6256d75305 Mon Sep 17 00:00:00 2001
+From: Laszlo Ersek <lersek@redhat.com>
+Date: Wed, 14 Oct 2015 13:49:43 +0200
+Subject: [PATCH 09/21] ArmPlatformPkg: introduce fixed PCD for early hello
+ message (RH only)
+
+Notes about the RHEL-8.3/20200603-ca407c7246bf [edk2-stable202005] ->
+RHEL-8.5/20210520-e1999b264f1f [edk2-stable202105] rebase:
+
+- no change
+
+Notes about the RHEL-8.2/20190904-37eef91017ad [edk2-stable201908] ->
+RHEL-8.3/20200603-ca407c7246bf [edk2-stable202005] rebase:
+
+- no change
+
+Notes about the RHEL-8.1/20190308-89910a39dcfd [edk2-stable201903] ->
+RHEL-8.2/20190904-37eef91017ad [edk2-stable201908] rebase:
+
+- no change
+
+Notes about the RHEL-8.0/20180508-ee3198e672e2 ->
+RHEL-8.1/20190308-89910a39dcfd rebase:
+
+- no change
+
+Notes about the RHEL-7.6/ovmf-20180508-2.gitee3198e672e2.el7 ->
+RHEL-8.0/20180508-ee3198e672e2 rebase:
+
+- reorder the rebase changelog in the commit message so that it reads like
+  a blog: place more recent entries near the top
+- no changes to the patch body
+
+Notes about the 20171011-92d07e48907f -> 20180508-ee3198e672e2 rebase:
+
+- no changes
+
+Notes about the 20170228-c325e41585e3 -> 20171011-92d07e48907f rebase:
+
+- no changes
+
+Notes about the 20160608b-988715a -> 20170228-c325e41585e3 rebase:
+
+- no changes
+
+Drew has proposed that ARM|AARCH64 platform firmware (especially virtual
+machine firmware) print a reasonably early, simple hello message to the
+serial port, regardless of debug mask settings. This should inform
+interactive users, and provide some rough help in localizing boot
+problems, even with restrictive debug masks.
+
+If a platform doesn't want this feature, it should stick with the default
+empty string.
+
+RHBZ: https://bugzilla.redhat.com/show_bug.cgi?id=1270279
+Downstream only:
+<http://thread.gmane.org/gmane.comp.bios.edk2.devel/2996/focus=3433>.
+
+Suggested-by: Drew Jones <drjones@redhat.com>
+Contributed-under: TianoCore Contribution Agreement 1.0
+Signed-off-by: Laszlo Ersek <lersek@redhat.com>
+(cherry picked from commit 7ce97b06421434c82095f01a1753a8c9c546cc30)
+(cherry picked from commit 20b1f1cbd0590aa71c6d99d35e23cf08e0707750)
+(cherry picked from commit 6734b88cf7abcaf42632e3d2fc469b2169dd2f16)
+(cherry picked from commit ef77da632559e9baa1c69869e4cbea377068ef27)
+(cherry picked from commit 58755c51d3252312d80cbcb97928d71199c2f5e1)
+(cherry picked from commit c3f07e323e76856f1b42ea7b8c598ba3201c28a2)
+(cherry picked from commit 9f756c1ad83cc81f7d892cd036d59a2b567b02dc)
+(cherry picked from commit c75aea7a738ac7fb944c0695a4bfffc3985afaa9)
+---
+ ArmPlatformPkg/ArmPlatformPkg.dec | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/ArmPlatformPkg/ArmPlatformPkg.dec b/ArmPlatformPkg/ArmPlatformPkg.dec
+index 3a25ddcdc8ca..b2b58553c7a6 100644
+--- a/ArmPlatformPkg/ArmPlatformPkg.dec
++++ b/ArmPlatformPkg/ArmPlatformPkg.dec
+@@ -121,6 +121,13 @@ [PcdsFixedAtBuild.common]
+   ## If set, this will swap settings for HDLCD RED_SELECT and BLUE_SELECT registers
+   gArmPlatformTokenSpaceGuid.PcdArmHdLcdSwapBlueRedSelect|FALSE|BOOLEAN|0x00000045
+ 
++  #
++  # Early hello message (ASCII string), printed to the serial port.
++  # If set to the empty string, nothing is printed.
++  # Otherwise, a trailing CRLF should be specified explicitly.
++  #
++  gArmPlatformTokenSpaceGuid.PcdEarlyHelloMessage|""|VOID*|0x00000100
++
+ [PcdsFixedAtBuild.common,PcdsDynamic.common]
+   ## PL031 RealTimeClock
+   gArmPlatformTokenSpaceGuid.PcdPL031RtcBase|0x0|UINT32|0x00000024
+-- 
+2.35.1
+

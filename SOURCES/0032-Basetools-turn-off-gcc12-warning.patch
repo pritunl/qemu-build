@@ -1,0 +1,42 @@
+From 15e8ff0438387a1737f136ab8f1ad513cfb52993 Mon Sep 17 00:00:00 2001
+From: Gerd Hoffmann <kraxel@redhat.com>
+Date: Thu, 24 Mar 2022 10:28:45 +0100
+Subject: [PATCH 32/32] Basetools: turn off gcc12 warning
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+In function ‘SetDevicePathEndNode’,
+    inlined from ‘FileDevicePath’ at DevicePathUtilities.c:857:5:
+DevicePathUtilities.c:321:3: error: writing 4 bytes into a region of size 1 [-Werror=stringop-overflow=]
+  321 |   memcpy (Node, &mUefiDevicePathLibEndDevicePath, sizeof (mUefiDevicePathLibEndDevicePath));
+      |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from UefiDevicePathLib.h:22,
+                 from DevicePathUtilities.c:16:
+../Include/Protocol/DevicePath.h: In function ‘FileDevicePath’:
+../Include/Protocol/DevicePath.h:51:9: note: destination object ‘Type’ of size 1
+   51 |   UINT8 Type;       ///< 0x01 Hardware Device Path.
+      |         ^~~~
+
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+---
+ BaseTools/Source/C/DevicePath/GNUmakefile | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/BaseTools/Source/C/DevicePath/GNUmakefile b/BaseTools/Source/C/DevicePath/GNUmakefile
+index 7ca08af9662d..b05d2bddfa68 100644
+--- a/BaseTools/Source/C/DevicePath/GNUmakefile
++++ b/BaseTools/Source/C/DevicePath/GNUmakefile
+@@ -13,6 +13,9 @@ OBJECTS = DevicePath.o UefiDevicePathLib.o DevicePathFromText.o  DevicePathUtili
+ 
+ include $(MAKEROOT)/Makefiles/app.makefile
+ 
++# gcc 12 trips over device path handling
++BUILD_CFLAGS += -Wno-error=stringop-overflow
++
+ LIBS = -lCommon
+ ifeq ($(CYGWIN), CYGWIN)
+   LIBS += -L/lib/e2fsprogs -luuid
+-- 
+2.35.1
+

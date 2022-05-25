@@ -1,30 +1,22 @@
-%if %{defined fedora}
+# https://fedoraproject.org/wiki/Changes/SetBuildFlagsBuildCheck
+# breaks cross-building
+%undefine _auto_set_build_flags
+
 # actual firmware builds support cross-compiling.  edk2-tools
 # in theory should build everywhere without much trouble, but
 # in practice the edk2 build system barfs on archs it doesn't know
 # (such as ppc), so lets limit things to the known-good ones.
-ExclusiveArch: %{ix86} x86_64 %{arm} aarch64
-%else
 ExclusiveArch: x86_64 aarch64
-%endif
 
-# edk2-stable202111
-%define GITDATE        20211126
-%define GITCOMMIT      bb1bba3d7767
+# edk2-stable202202
+%define GITDATE        20220221
+%define GITCOMMIT      b24306f15daa
 %define TOOLCHAIN      GCC5
 %define OPENSSL_VER    1.1.1k
 
 %define qosb_testing 0
 %ifarch x86_64
 %define qosb_testing 1
-%endif
-
-%if %{defined fedora} || %{defined eln}
-%define qemu_package qemu-system-x86-core
-%define qemu_binary /usr/bin/qemu-system-x86_64
-%else
-%define qemu_package qemu-kvm-core >= 2.12.0-89
-%define qemu_binary /usr/libexec/qemu-kvm
 %endif
 
 %if %{defined rhel}
@@ -48,7 +40,7 @@ ExclusiveArch: x86_64 aarch64
 
 Name:       edk2
 Version:    %{GITDATE}git%{GITCOMMIT}
-Release:    1%{?dist}
+Release:    4%{?dist}
 Summary:    UEFI firmware for 64-bit virtual machines
 License:    BSD-2-Clause-Patent and OpenSSL and MIT
 URL:        http://www.tianocore.org
@@ -79,31 +71,31 @@ Source58: edk2-ovmf-nosb.json
 Source59: 70-edk2-arm-verbose.json
 Source60: edk2-microvm.json
 
-Patch0008: 0008-BaseTools-do-not-build-BrotliCompress-RH-only.patch
-Patch0009: 0009-MdeModulePkg-remove-package-private-Brotli-include-p.patch
-Patch0011: 0011-OvmfPkg-increase-max-debug-message-length-to-512-RHE.patch
-Patch0012: 0012-MdeModulePkg-TerminalDxe-add-other-text-resolutions-.patch
-Patch0013: 0013-MdeModulePkg-TerminalDxe-set-xterm-resolution-on-mod.patch
-Patch0014: 0014-OvmfPkg-take-PcdResizeXterm-from-the-QEMU-command-li.patch
-Patch0015: 0015-ArmVirtPkg-take-PcdResizeXterm-from-the-QEMU-command.patch
-Patch0016: 0016-OvmfPkg-allow-exclusion-of-the-shell-from-the-firmwa.patch
-Patch0017: 0017-ArmPlatformPkg-introduce-fixed-PCD-for-early-hello-m.patch
-Patch0018: 0018-ArmPlatformPkg-PrePeiCore-write-early-hello-message-.patch
-Patch0019: 0019-ArmVirtPkg-set-early-hello-message-RH-only.patch
-Patch0020: 0020-OvmfPkg-enable-DEBUG_VERBOSE-RHEL-only.patch
-Patch0021: 0021-OvmfPkg-silence-DEBUG_VERBOSE-0x00400000-in-QemuVide.patch
-Patch0022: 0022-ArmVirtPkg-silence-DEBUG_VERBOSE-0x00400000-in-QemuR.patch
-Patch0023: 0023-OvmfPkg-QemuRamfbDxe-Do-not-report-DXE-failure-on-Aa.patch
-Patch0024: 0024-OvmfPkg-silence-EFI_D_VERBOSE-0x00400000-in-NvmExpre.patch
-Patch0025: 0025-CryptoPkg-OpensslLib-list-RHEL8-specific-OpenSSL-fil.patch
-Patch0026: 0026-OvmfPkg-QemuKernelLoaderFsDxe-suppress-error-on-no-k.patch
-Patch0027: 0027-SecurityPkg-Tcg2Dxe-suppress-error-on-no-swtpm-in-si.patch
-Patch0028: 0028-OvmfPkg-MemEncryptSevLib-Check-the-guest-type-before.patch
-Patch0029: 0029-OvmfPkg-Microvm-take-PcdResizeXterm-from-the-QEMU-co.patch
+Patch0001: 0001-BaseTools-do-not-build-BrotliCompress-RH-only.patch
+Patch0002: 0002-MdeModulePkg-remove-package-private-Brotli-include-p.patch
+Patch0003: 0003-OvmfPkg-increase-max-debug-message-length-to-512-RHE.patch
+Patch0004: 0004-MdeModulePkg-TerminalDxe-add-other-text-resolutions-.patch
+Patch0005: 0005-MdeModulePkg-TerminalDxe-set-xterm-resolution-on-mod.patch
+Patch0006: 0006-OvmfPkg-take-PcdResizeXterm-from-the-QEMU-command-li.patch
+Patch0007: 0007-ArmVirtPkg-take-PcdResizeXterm-from-the-QEMU-command.patch
+Patch0008: 0008-OvmfPkg-allow-exclusion-of-the-shell-from-the-firmwa.patch
+Patch0009: 0009-ArmPlatformPkg-introduce-fixed-PCD-for-early-hello-m.patch
+Patch0010: 0010-ArmPlatformPkg-PrePeiCore-write-early-hello-message-.patch
+Patch0011: 0011-ArmVirtPkg-set-early-hello-message-RH-only.patch
+Patch0012: 0012-OvmfPkg-enable-DEBUG_VERBOSE-RHEL-only.patch
+Patch0013: 0013-OvmfPkg-silence-DEBUG_VERBOSE-0x00400000-in-QemuVide.patch
+Patch0014: 0014-ArmVirtPkg-silence-DEBUG_VERBOSE-0x00400000-in-QemuR.patch
+Patch0015: 0015-OvmfPkg-QemuRamfbDxe-Do-not-report-DXE-failure-on-Aa.patch
+Patch0016: 0016-OvmfPkg-silence-EFI_D_VERBOSE-0x00400000-in-NvmExpre.patch
+Patch0017: 0017-CryptoPkg-OpensslLib-list-RHEL8-specific-OpenSSL-fil.patch
+Patch0018: 0018-OvmfPkg-QemuKernelLoaderFsDxe-suppress-error-on-no-k.patch
+Patch0019: 0019-SecurityPkg-Tcg2Dxe-suppress-error-on-no-swtpm-in-si.patch
+Patch0020: 0020-OvmfPkg-Microvm-take-PcdResizeXterm-from-the-QEMU-co.patch
+Patch0021: 0021-Tweak-the-tools_def-to-support-cross-compiling.patch
 
-# Fedora specific
-Patch1000: fedora-Tweak-the-tools_def-to-support-cross-compiling.patch
-
+Patch0030: 0030-BaseTools-fix-gcc12-warning.patch
+Patch0031: 0031-BaseTools-fix-gcc12-warning.patch
+Patch0032: 0032-Basetools-turn-off-gcc12-warning.patch
 
 # python3-devel and libuuid-devel are required for building tools.
 # python3-devel is also needed for varstore template generation and
@@ -124,8 +116,8 @@ BuildRequires:  mtools
 BuildRequires:  xorriso
 
 # For generating the variable store template with the default certificates
-# enrolled, we need the qemu-kvm executable.
-BuildRequires:  %{qemu_package}
+# enrolled.
+BuildRequires:  python3-virt-firmware
 
 %if %{qosb_testing}
 # For verifying SB enablement in the above variable store template, we need a
@@ -300,7 +292,8 @@ fi
 CC_FLAGS="$CC_FLAGS --cmd-len=65536 -t %{TOOLCHAIN} -b DEBUG --hash"
 CC_FLAGS="$CC_FLAGS -D NETWORK_IP6_ENABLE"
 CC_FLAGS="$CC_FLAGS -D NETWORK_HTTP_BOOT_ENABLE -D NETWORK_TLS_ENABLE"
-CC_FLAGS="$CC_FLAGS -D TPM_ENABLE"
+CC_FLAGS="$CC_FLAGS -D TPM2_ENABLE"
+CC_FLAGS="$CC_FLAGS -D TPM1_ENABLE"
 
 OVMF_FLAGS="${CC_FLAGS}"
 %if %{defined rhel}
@@ -378,15 +371,9 @@ cmp Build/OvmfX64/DEBUG_%{TOOLCHAIN}/FV/OVMF_VARS.fd \
 # Prepare an ISO image that boots the UEFI shell.
 build_iso Build/Ovmf3264/DEBUG_%{TOOLCHAIN}/X64
 
-# Enroll the default certificates in a separate variable store template.
-%{__python3} ovmf-vars-generator --verbose --verbose \
-  --qemu-binary        %{qemu_binary} \
-  --ovmf-binary        Build/Ovmf3264/DEBUG_%{TOOLCHAIN}/FV/OVMF_CODE.fd \
-  --ovmf-template-vars Build/Ovmf3264/DEBUG_%{TOOLCHAIN}/FV/OVMF_VARS.fd \
-  --uefi-shell-iso     Build/Ovmf3264/DEBUG_%{TOOLCHAIN}/X64/UefiShell.iso \
-  --oem-string         "$(< PkKek1.oemstr)" \
-  --skip-testing \
-  Build/Ovmf3264/DEBUG_%{TOOLCHAIN}/FV/OVMF_VARS.secboot.fd
+virt-fw-vars --input Build/Ovmf3264/DEBUG_%{TOOLCHAIN}/FV/OVMF_VARS.fd \
+             --output Build/Ovmf3264/DEBUG_%{TOOLCHAIN}/FV/OVMF_VARS.secboot.fd \
+             --enroll-redhat --secure-boot
 
 # endif build_ovmf
 %endif
@@ -408,6 +395,7 @@ build ${CC_FLAGS} -a AARCH64 \
 
 
 %if %{defined fedora}
+%if %{build_ovmf}
 # build microvm
 build ${OVMF_FLAGS} -a X64 -p OvmfPkg/Microvm/MicrovmX64.dsc
 
@@ -428,7 +416,8 @@ build_iso Build/OvmfIa32/DEBUG_%{TOOLCHAIN}/IA32
 mv Build/OvmfIa32/DEBUG_%{TOOLCHAIN}/IA32/UefiShell.iso ovmf-ia32
 cp -a Build/OvmfIa32/DEBUG_%{TOOLCHAIN}/IA32/Shell.efi ovmf-ia32
 cp -a Build/OvmfIa32/DEBUG_%{TOOLCHAIN}/IA32/EnrollDefaultKeys.efi ovmf-ia32
-
+# endif build_ovmf
+%endif
 
 # build ARMv7 firmware
 mkdir -p arm
@@ -504,10 +493,9 @@ install -m 0644 edk2-ovmf-cc.json \
 # endif build_ovmf
 %endif
 
+mkdir -p %{buildroot}%{_datadir}/AAVMF
 %if %{build_aarch64}
-mkdir -p \
-  %{buildroot}%{_datadir}/AAVMF \
-  %{buildroot}%{_datadir}/%{name}/aarch64
+mkdir -p %{buildroot}%{_datadir}/%{name}/aarch64
 
 # Pad and install the verbose binary.
 cat Build/ArmVirtQemu-AARCH64/DEBUG_%{TOOLCHAIN}/FV/QEMU_EFI.verbose.fd \
@@ -552,6 +540,7 @@ install -m 0644 edk2-aarch64-verbose.json \
 
 
 %if %{defined fedora}
+%if %{build_ovmf}
 # install microvm
 install -m 0644 Build/MicrovmX64/DEBUG_%{TOOLCHAIN}/FV/MICROVM.fd \
   %{buildroot}%{_datadir}/%{name}/ovmf/MICROVM.fd
@@ -569,7 +558,8 @@ cp -a ovmf-ia32 %{buildroot}%{_datadir}/%{name}
 for f in %{_sourcedir}/*edk2-ovmf-ia32*.json; do
     install -pm 644 $f %{buildroot}/%{_datadir}/qemu/firmware
 done
-
+# endif build_ovmf
+%endif
 
 # install arm32
 cp -a arm %{buildroot}%{_datadir}/%{name}
@@ -605,20 +595,8 @@ install -p ovmf-vars-generator %{buildroot}%{_bindir}
 %check
 
 %if %{qosb_testing}
-# Of the installed host kernels, boot the one with the highest Version-Release
-# under OVMF, and check if it prints "Secure boot enabled".
-KERNEL_PKG=$(rpm -q kernel-core | rpmdev-sort | tail -n 1)
-KERNEL_IMG=$(rpm -q -l $KERNEL_PKG | egrep '^/lib/modules/[^/]+/vmlinuz$')
-
-%{__python3} ovmf-vars-generator --verbose --verbose \
-  --qemu-binary        %{qemu_binary} \
-  --ovmf-binary        Build/Ovmf3264/DEBUG_%{TOOLCHAIN}/FV/OVMF_CODE.fd \
-  --ovmf-template-vars Build/Ovmf3264/DEBUG_%{TOOLCHAIN}/FV/OVMF_VARS.fd \
-  --uefi-shell-iso     Build/Ovmf3264/DEBUG_%{TOOLCHAIN}/X64/UefiShell.iso \
-  --kernel-path        $KERNEL_IMG \
-  --skip-enrollment \
-  --no-download \
-  Build/Ovmf3264/DEBUG_%{TOOLCHAIN}/FV/OVMF_VARS.secboot.fd
+virt-fw-vars --input Build/Ovmf3264/DEBUG_%{TOOLCHAIN}/FV/OVMF_VARS.secboot.fd \
+             --print | grep "SecureBootEnable.*ON"
 
 # endif qosb_testing
 %endif
@@ -705,6 +683,7 @@ KERNEL_IMG=$(rpm -q -l $KERNEL_PKG | egrep '^/lib/modules/[^/]+/vmlinuz$')
 
 
 %if %{defined fedora}
+%if %{build_ovmf}
 %files ovmf-ia32
 %common_files
 %dir %{_datadir}/%{name}/ovmf-ia32
@@ -719,7 +698,7 @@ KERNEL_IMG=$(rpm -q -l $KERNEL_PKG | egrep '^/lib/modules/[^/]+/vmlinuz$')
 %{_datadir}/qemu/firmware/40-edk2-ovmf-ia32-sb-enrolled.json
 %{_datadir}/qemu/firmware/50-edk2-ovmf-ia32-sb.json
 %{_datadir}/qemu/firmware/60-edk2-ovmf-ia32.json
-
+%endif
 
 %files arm
 %common_files
@@ -757,6 +736,21 @@ KERNEL_IMG=$(rpm -q -l $KERNEL_PKG | egrep '^/lib/modules/[^/]+/vmlinuz$')
 
 
 %changelog
+* Tue Apr 19 2022 Gerd Hoffmann <kraxel@redhat.com> - 20220221gitb24306f15daa-4
+- switch to virt-firmware for secure boot key enrollment
+- Stop builds on armv7 too (iasl missing).
+
+* Thu Apr 07 2022 Gerd Hoffmann <kraxel@redhat.com> - 20220221gitb24306f15daa-3
+- Fix TPM build options.
+- Stop builds on i686 (iasl missing).
+- Resolves rhbz#2072827
+
+* Wed Mar 23 2022 Gerd Hoffmann <kraxel@redhat.com> - 20220221gitb24306f15daa-1
+- Update to edk2-stable202202
+
+* Thu Jan 20 2022 Fedora Release Engineering <releng@fedoraproject.org> - 20211126gitbb1bba3d7767-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_36_Mass_Rebuild
+
 * Mon Dec 6 2021 Gerd Hoffmann <kraxel@redhat.com> - 20211126gitbb1bba3d7767-1
 - Update to edk2-stable202111
 - Resolves rhbz#1978966

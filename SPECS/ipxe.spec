@@ -50,7 +50,7 @@
 
 Name:    ipxe
 Version: %{date}
-Release: 7.git%{hash}%{?dist}
+Release: 8.git%{hash}%{?dist}
 Summary: A network boot loader
 
 License: GPLv2 with additional permissions and BSD
@@ -254,6 +254,9 @@ done
 %endif
 
 %changelog
+* Thu Jan 20 2022 Fedora Release Engineering <releng@fedoraproject.org> - 20200823-8.git4bd064de
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_36_Mass_Rebuild
+
 * Sat Jul 24 2021 Cole Robinson <crobinso@redhat.com> - 20200823-7.git4bd064de
 - Add snponly build (bz 1981799)
 
