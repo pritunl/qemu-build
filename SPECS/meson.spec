@@ -12,7 +12,7 @@ Summary:        High productivity build system
 
 License:        ASL 2.0
 URL:            https://mesonbuild.com/
-Source:         https://github.com/mesonbuild/meson/releases/download/%{version_no_tilde .}/meson-%{version_no_tilde %{quote:}}.tar.gz
+Source:         https://github.com/mesonbuild/meson/releases/download/%{version_no_tilde .}/meson-0.59.4.tar.gz
 
 BuildArch:      noarch
 
@@ -79,7 +79,7 @@ support for modern software development tools and practices, such as
 unit tests, coverage reports, Valgrind, CCache and the like.
 
 %prep
-%autosetup -p1 -n meson-%{version_no_tilde %{quote:}}
+%autosetup -p1 -n meson-0.59.4
 # Macro should not change when we are redefining bindir
 sed -i -e "/^%%__meson /s| .*$| %{_bindir}/%{name}|" data/macros.%{name}
 
