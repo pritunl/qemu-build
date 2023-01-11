@@ -1,12 +1,13 @@
 Name:           libslirp
-Version:        4.6.1
-Release:        3%{?dist}
+Version:        4.3.1
+Release:        2%{?dist}
 Summary:        A general purpose TCP-IP emulator
 
 # check the SPDX tags in source files for details
 License:        BSD and MIT
 URL:            https://gitlab.freedesktop.org/slirp/%{name}
 Source0:        %{url}/-/archive/v%{version}/%{name}-%{version}.tar.xz
+Patch0001:      0001-slirp-check-pkt_len-before-reading-protocol-header.patch
 
 BuildRequires:  git-core
 BuildRequires:  meson
@@ -52,33 +53,9 @@ developing applications that use %{name}.
 
 
 %changelog
-* Thu Jan 20 2022 Fedora Release Engineering <releng@fedoraproject.org> - 4.6.1-3
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_36_Mass_Rebuild
-
-* Thu Jul 22 2021 Fedora Release Engineering <releng@fedoraproject.org> - 4.6.1-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_35_Mass_Rebuild
-
-* Fri Jun 18 2021 Marc-André Lureau <marcandre.lureau@redhat.com> - 4.6.1-1
-- new version
-
-* Mon Jun 14 2021 Marc-André Lureau <marcandre.lureau@redhat.com> - 4.6.0-1
-- new version
-
-* Wed May 19 2021 Marc-André Lureau <marcandre.lureau@redhat.com> - 4.5.0-1
-- new version
-
-* Tue Jan 26 2021 Fedora Release Engineering <releng@fedoraproject.org> - 4.4.0-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_34_Mass_Rebuild
-
-* Wed Dec  2 18:19:30 +04 2020 Marc-André Lureau <marcandre.lureau@redhat.com> - 4.4.0-1
-- new version
-
-* Fri Nov 27 20:10:28 +04 2020 Marc-André Lureau <marcandre.lureau@redhat.com> - 4.3.1-3
+* Fri Nov 27 20:10:28 +04 2020 Marc-André Lureau <marcandre.lureau@redhat.com> - 4.3.1-2
 - Fix CVE-2020-29129 CVE-2020-29130 out-of-bounds access while processing ARP/NCSI packets
   rhbz#1902232
-
-* Tue Jul 28 2020 Fedora Release Engineering <releng@fedoraproject.org> - 4.3.1-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_33_Mass_Rebuild
 
 * Wed Jul 08 2020 Marc-André Lureau <marcandre.lureau@redhat.com> - 4.3.1-1
 - New v4.3.1 release

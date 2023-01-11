@@ -1,0 +1,71 @@
+From d659d62b9c094acea66f6f7506877f210a9dd182 Mon Sep 17 00:00:00 2001
+From: Andrea Arcangeli <aarcange@redhat.com>
+Date: Tue, 8 Oct 2013 17:07:23 +0200
+Subject: allow >1TB of RAM
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RH-Author: Andrea Arcangeli <aarcange@redhat.com>
+Message-id: <1381252043-13480-2-git-send-email-aarcange@redhat.com>
+Patchwork-id: 54785
+O-Subject: [RHEL-7.0 seabios PATCH] allow >1TB of RAM
+Bugzilla: 1016974
+RH-Acked-by: Paolo Bonzini <pbonzini@redhat.com>
+RH-Acked-by: Gleb Natapov <gleb@redhat.com>
+RH-Acked-by: Laszlo Ersek <lersek@redhat.com>
+
+Receive bits 40-48 from qemu to setup e820 maps with more than 1TB of ram.
+
+Signed-off-by: Andrea Arcangeli <aarcange@redhat.com>
+---
+ src/cmos.h | 7 ++++---
+ src/post.c | 7 ++++---
+ 2 files changed, 8 insertions(+), 6 deletions(-)
+
+(cherry picked from commit 0dea1df1f9b9a64bd9e71dd1a7b4c6cc9962afa0)
+Signed-off-by: Paweł Poławski <ppolawsk@redhat.com>
+---
+ src/fw/paravirt.c | 7 ++++---
+ src/hw/rtc.h      | 7 ++++---
+ 2 files changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/src/fw/paravirt.c b/src/fw/paravirt.c
+index fba4e52d..090d6555 100644
+--- a/src/fw/paravirt.c
++++ b/src/fw/paravirt.c
+@@ -516,9 +516,10 @@ qemu_cfg_e820(void)
+     }
+ 
+     // Check for memory over 4Gig in cmos
+-    u64 high = ((rtc_read(CMOS_MEM_HIGHMEM_LOW) << 16)
+-                | ((u32)rtc_read(CMOS_MEM_HIGHMEM_MID) << 24)
+-                | ((u64)rtc_read(CMOS_MEM_HIGHMEM_HIGH) << 32));
++    u64 high = ((rtc_read(CMOS_MEM_HIGHMEM_16) << 16)
++                | ((u32)rtc_read(CMOS_MEM_HIGHMEM_24) << 24)
++                | ((u64)rtc_read(CMOS_MEM_HIGHMEM_32) << 32)
++                | ((u64)rtc_read(CMOS_MEM_HIGHMEM_40) << 40));
+     RamSizeOver4G = high;
+     e820_add(0x100000000ull, high, E820_RAM);
+     dprintf(1, "RamSizeOver4G: 0x%016llx [cmos]\n", RamSizeOver4G);
+diff --git a/src/hw/rtc.h b/src/hw/rtc.h
+index 252e73a4..c4369f81 100644
+--- a/src/hw/rtc.h
++++ b/src/hw/rtc.h
+@@ -41,9 +41,10 @@
+ #define CMOS_BIOS_BOOTFLAG1      0x38
+ #define CMOS_BIOS_DISKTRANSFLAG  0x39
+ #define CMOS_BIOS_BOOTFLAG2      0x3d
+-#define CMOS_MEM_HIGHMEM_LOW     0x5b
+-#define CMOS_MEM_HIGHMEM_MID     0x5c
+-#define CMOS_MEM_HIGHMEM_HIGH    0x5d
++#define CMOS_MEM_HIGHMEM_16      0x5b
++#define CMOS_MEM_HIGHMEM_24      0x5c
++#define CMOS_MEM_HIGHMEM_32      0x5d
++#define CMOS_MEM_HIGHMEM_40      0x5e
+ #define CMOS_BIOS_SMP_COUNT      0x5f
+ 
+ // RTC register flags
+-- 
+2.31.1
+

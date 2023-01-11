@@ -1,44 +1,38 @@
-%if 0%{?fedora:1}
-%define cross 1
-%endif
-
 Name:           seabios
 Version:        1.16.0
-Release:        1%{?dist}
+Release:        3%{?dist}
 Summary:        Open-source legacy BIOS implementation
 
+Group:          Applications/Emulators
 License:        LGPLv3
-URL:            http://www.coreboot.org/SeaBIOS
+URL:            https://www.coreboot.org/SeaBIOS
 
-Source0:        http://code.coreboot.org/p/seabios/downloads/get/%{name}-%{version}.tar.gz
+Source0:        https://code.coreboot.org/p/seabios/downloads/get/seabios-1.16.0.tar.gz
 
-Patch0001:      0001-Workaround-for-a-win8.1-32-S4-resume-bug.patch
-Patch0003:      0003-vgabios-Reorder-video-modes-to-work-around-a-Windows.patch
+Source10:       config.vga.cirrus
+Source11:       config.vga.qxl
+Source12:       config.vga.stdvga
+Source13:       config.vga.virtio
+Source14:       config.vga.ramfb
+Source15:       config.vga.bochs-display
 
-Source10:       config.vga-cirrus
-Source11:       config.vga-isavga
-Source12:       config.vga-qxl
-Source13:       config.vga-stdvga
-Source14:       config.vga-vmware
-Source15:       config.csm
-Source16:       config.coreboot
-Source17:       config.seabios-128k
-Source18:       config.seabios-256k
-Source19:       config.vga-virtio
-Source20:       config.vga-ramfb
-Source21:       config.vga-bochs-display
-Source22:       config.vga-ati
-Source23:       config.seabios-microvm
+Source20:       config.seabios-128k
+Source21:       config.seabios-256k
 
-BuildRequires: make
-BuildRequires: gcc
+Patch0002: 0002-allow-1TB-of-RAM.patch
+Patch0003: 0003-smbios-set-bios-vendor-version-fields-to-Seabios-0.5.patch
+Patch0004: 0004-Workaround-for-a-win8.1-32-S4-resume-bug.patch
+# For bz#2073012 - Guest whose os is installed multiple disks but boot partition is installed on single disk can't boot into OS on RHEL 8 [rhel-8.7.0]
+Patch5: seabios-shortcut-skip-unbootable-disks-optimitation.patch
+# For bz#2083884 - qemu reboot problem with seabios 1.16.0
+Patch6: seabios-pci-refactor-the-pci_config_-functions.patch
+# For bz#2083884 - qemu reboot problem with seabios 1.16.0
+Patch7: seabios-reset-force-standard-PCI-configuration-access.patch
+# For bz#2101787 - [rhel.8.7] Loading a kernel/initrd is sometimes very slow
+Patch8: seabios-virtio-blk-use-larger-default-request-size.patch
+
 BuildRequires: python3 iasl
-%if 0%{?cross:1}
-BuildRequires: binutils-x86_64-linux-gnu gcc-x86_64-linux-gnu
-Buildarch:     noarch
-%else
-ExclusiveArch: x86_64
-%endif
+ExclusiveArch: x86_64 %{power64}
 
 Requires: %{name}-bin = %{version}-%{release}
 Requires: seavgabios-bin = %{version}-%{release}
@@ -79,6 +73,7 @@ that a typical x86 proprietary BIOS implements.
 %package -n seavgabios-bin
 Summary: Seavgabios for x86
 Buildarch: noarch
+Obsoletes: vgabios < 0.6c-10
 
 %description -n seavgabios-bin
 SeaVGABIOS is an open-source VGABIOS implementation.
@@ -86,32 +81,29 @@ SeaVGABIOS is an open-source VGABIOS implementation.
 
 %prep
 %setup -q
-%autopatch -p1
+%patch0002 -p1
+%patch0003 -p1
+%patch0004 -p1
+%patch5 -p1
+%patch6 -p1
+%patch7 -p1
+%patch8 -p1
 
 %build
-%define _lto_cflags %{nil}
+%ifarch x86_64
 export CFLAGS="$RPM_OPT_FLAGS"
 mkdir binaries
 
 build_bios() {
-    make clean distclean
+    make PYTHON=%{__python3} clean distclean
     cp $1 .config
     echo "CONFIG_DEBUG_LEVEL=%{debug_level}" >> .config
-    make oldnoconfig V=1
+    make PYTHON=%{__python3} oldnoconfig V=1 EXTRAVERSION="-%release"
 
-    make V=1 \
+    make PYTHON=%{__python3} \
+        V=1 \
+        $4 \
         EXTRAVERSION="-%{release}" \
-        PYTHON=python3 \
-%if 0%{?cross:1}
-        HOSTCC=gcc \
-        CC=x86_64-linux-gnu-gcc \
-        AS=x86_64-linux-gnu-as \
-        LD=x86_64-linux-gnu-ld \
-        OBJCOPY=x86_64-linux-gnu-objcopy \
-        OBJDUMP=x86_64-linux-gnu-objdump \
-        STRIP=x86_64-linux-gnu-strip \
-%endif
-        $4
 
     cp out/$2 binaries/$3
 }
@@ -119,16 +111,12 @@ build_bios() {
 # seabios
 build_bios %{_sourcedir}/config.seabios-128k bios.bin bios.bin
 build_bios %{_sourcedir}/config.seabios-256k bios.bin bios-256k.bin
-%if 0%{?fedora:1}
-build_bios %{_sourcedir}/config.csm Csm16.bin bios-csm.bin
-build_bios %{_sourcedir}/config.coreboot bios.bin.elf bios-coreboot.bin
-build_bios %{_sourcedir}/config.seabios-microvm bios.bin bios-microvm.bin
-%endif
+
 
 # seavgabios
-%global vgaconfigs bochs-display cirrus isavga qxl stdvga ramfb vmware virtio ati
+%global vgaconfigs cirrus qxl stdvga virtio ramfb bochs-display
 for config in %{vgaconfigs}; do
-    build_bios %{_sourcedir}/config.vga-${config} \
+    build_bios %{_sourcedir}/config.vga.${config} \
                vgabios.bin vgabios-${config}.bin out/vgabios.bin
 done
 
@@ -138,11 +126,6 @@ mkdir -p $RPM_BUILD_ROOT%{_datadir}/seabios
 mkdir -p $RPM_BUILD_ROOT%{_datadir}/seavgabios
 install -m 0644 binaries/bios.bin $RPM_BUILD_ROOT%{_datadir}/seabios/bios.bin
 install -m 0644 binaries/bios-256k.bin $RPM_BUILD_ROOT%{_datadir}/seabios/bios-256k.bin
-%if 0%{?fedora:1}
-install -m 0644 binaries/bios-csm.bin $RPM_BUILD_ROOT%{_datadir}/seabios/bios-csm.bin
-install -m 0644 binaries/bios-coreboot.bin $RPM_BUILD_ROOT%{_datadir}/seabios/bios-coreboot.bin
-install -m 0644 binaries/bios-microvm.bin $RPM_BUILD_ROOT%{_datadir}/seabios/bios-microvm.bin
-%endif
 install -m 0644 binaries/vgabios*.bin $RPM_BUILD_ROOT%{_datadir}/seavgabios
 
 
@@ -158,74 +141,89 @@ install -m 0644 binaries/vgabios*.bin $RPM_BUILD_ROOT%{_datadir}/seavgabios
 %dir %{_datadir}/seavgabios/
 %{_datadir}/seavgabios/vgabios*.bin
 
+# endif for %ifarch x86_64 {power64}
+%endif
+
 
 %changelog
-* Wed Mar 02 2022 Gerd Hoffmann <kraxel@redhat.com> - 1.15.0-1
-- Update to 1.16.0
+* Wed Jul 27 2022 Miroslav Rezanina <mrezanin@redhat.com> - 1.16.0-3
+- seabios-virtio-blk-use-larger-default-request-size.patch [bz#2101787]
+- Resolves: bz#2101787
+  ([rhel.8.7] Loading a kernel/initrd is sometimes very slow)
 
-* Sat Jan 22 2022 Fedora Release Engineering <releng@fedoraproject.org> - 1.15.0-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_36_Mass_Rebuild
+* Mon May 30 2022 Jon Maloy <jmaloy@redhat.com> - 1.16.0-2
+- seabios-shortcut-skip-unbootable-disks-optimitation.patch [bz#2073012]
+- seabios-pci-refactor-the-pci_config_-functions.patch [bz#2083884]
+- seabios-reset-force-standard-PCI-configuration-access.patch [bz#2083884]
+- Resolves: bz#2073012
+  (Guest whose os is installed multiple disks but boot partition is installed on single disk can't boot into OS on RHEL 8 [rhel-8.7.0])
+- Resolves: bz#2083884
+  (qemu reboot problem with seabios 1.16.0)
 
-* Wed Dec 08 2021 Gerd Hoffmann <kraxel@redhat.com> - 1.15.0-1
-- Update to 1.15.0
+* Tue Apr 26 2022 Paweł Poławski <ppolawsk@redhat.com> - 1.16.0-1
+- Rebase to upstream 1.16 tag [bz#2066828]
+- Resolves: bz#2066828
+  (rebase seabios to 1.16 release)
 
-* Thu Oct 07 2021 Cole Robinson <crobinso@redhat.com> - 1.14.0-6
-- Fix build with binutils 2.36
+* Thu Dec 16 2021 Jon Maloy <jmaloy@redhat.com> - 1.15.0-1.el8
+- Rebase to 1.15 (bz#2018392)
+- Resolves: bz#2018392
 
-* Fri Jul 23 2021 Fedora Release Engineering <releng@fedoraproject.org> - 1.14.0-5
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_35_Mass_Rebuild
+* Thu Dec 16 2021 Jon Maloy <jmaloy@redhat.com> - 1.15.0-1.el8
+- pci-reserve-resources-for-pcie-pci-bridge-to-fix-reg.patch [bz#2001921]
+- pci: let firmware reserve IO for pcie-pci-bridge.patch [bz#2001921]
+- Resolves: bz#2001921
 
-* Fri Jun 18 2021 Cole Robinson <crobinso@redhat.com> - 1.14.0-4
-- Install vgabios-ati and bios-microvm
+* Tue Aug 11 2020 Miroslav Rezanina <mrezanin@redhat.com> - 1.14.0-1.el8
+- Rebase to 1.14 (bz#1809772)
+- Resolves: bz#1809772
+  (rebase seabios for RHEL AV-8.3.0)
 
-* Wed Jun 02 2021 Cole Robinson <crobinso@redhat.com> - 1.14.0-3
-- Fix boot from nvme (bz 1963255)
+* Tue Jan 21 2020 Miroslav Rezanina <mrezanin@redhat.com> - 1.13.0-1.el8
+- Rebase to 1.13 (bz#1793377)
+- Resolves: bz#1793377
+  (rebase seabios to 1.13)
 
-* Wed Jan 27 2021 Fedora Release Engineering <releng@fedoraproject.org> - 1.14.0-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_34_Mass_Rebuild
+* Tue Aug 20 2019 Danilo Cesar Lemes de Paula <ddepaula@redhat.com> - 1.12.0-5.el8
+- seabios-add-get_keystroke_full-helper.patch [bz#1693031]
+- seabios-bootmenu-add-support-for-more-than-9-entries.patch [bz#1693031]
+- Resolves: bz#1693031
+  (On systems with more than 10 available boot devices, keys are uninintuitive)
 
-* Tue Nov 24 2020 Cole Robinson <aintdiscole@gmail.com> - 1.14.0-1
-- Update to 1.14.0
+* Fri Aug 02 2019 Danilo Cesar Lemes de Paula <ddepaula@redhat.com> - 1.12.0-4.el8
+- seabios-tpm-Check-for-TPM-related-ACPI-tables-before-attempt.patch [bz#1705212]
+- seabios-usb-ehci-Clear-pipe-token-on-pipe-reallocate.patch [bz#1705212]
+- Resolves: bz#1705212
+  (Backport 1.12.1 patches to RHEL-AV 8.1.0)
 
-* Wed Jul 29 2020 Fedora Release Engineering <releng@fedoraproject.org> - 1.13.0-3
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_33_Mass_Rebuild
+* Tue Jul 09 2019 Miroslav Rezanina <mrezanin@redhat.com> - 1.12.0-3.el8
+- seabios-rh-add-configs-for-ramfb-and-bochs-display.patch [bz#1724098]
+- Resolves: bz#1724098
+  (enable device: bochs-display (seabios))
 
-* Thu Jan 30 2020 Fedora Release Engineering <releng@fedoraproject.org> - 1.13.0-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_32_Mass_Rebuild
+* Mon Jan 21 2019 Miroslav Rezanina <mrezanin@redhat.com> - 1.12.0-1.el8
+- Rebase to 1.12.0 [bz#1666134]
+- Resolves: bz#1666134
+  (Rebase seabios for RHEL-AV release in virt:8.0.0 stream)
 
-* Mon Dec 09 2019 Cole Robinson <aintdiscole@gmail.com> - 1.13.0-1
-- Update to 1.13.0
+* Fri Dec 07 2018 Danilo C. L. de Paula <ddepaula@redhat.com> - 1.11.1-3.el8
+- Resolves: bz#1613465
+  (Fix seabios package)
 
-* Fri Jul 26 2019 Fedora Release Engineering <releng@fedoraproject.org> - 1.12.1-3
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_31_Mass_Rebuild
+* Fri Aug 24 2018 Danilo C. L. de Paula <ddepaula@redhat.com> - 1.11.1-2.el8
+- Resolves: bz#1607349
+  (Serial Graphics Adapter show error seabios version)
 
-* Thu Jul 11 2019 Cole Robinson <aintdiscole@gmail.com> - 1.12.1-2
-- Add config.vga-ati from qemu 4.1
+* Thu Jul 12 2018 Danilo C. L. de Paula <ddepaula@redhat.com> - 1.11.1-1.el8
+- Rebasing seabios 1.11.1
 
-* Wed Mar 27 2019 Cole Robinson <aintdiscole@gmail.com> - 1.12.1-1
-- Update to 1.12.1 for qemu 4.0
+* Mon May 21 2018 Danilo C. L. de Paula <ddepaula@redhat.com> - 1.11.0-2.el8
+- Syncronizing exploded tree with dist-git
 
-* Sat Feb 02 2019 Fedora Release Engineering <releng@fedoraproject.org> - 1.12.0-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_30_Mass_Rebuild
-
-* Sat Nov 17 2018 Cole Robinson <crobinso@redhat.com> - 1.12.0-1
-- Rebase to version 1.12.0 for qemu-3.1.0
-
-* Tue Jul 24 2018 Cole Robinson <crobinso@redhat.com> - 1.11.2-1
-- Rebased to version 1.11.2
-- Add BuildRequires: gcc (bz #1606326)
-
-* Sat Jul 14 2018 Fedora Release Engineering <releng@fedoraproject.org> - 1.11.1-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_29_Mass_Rebuild
-
-* Thu Mar 22 2018 Cole Robinson <crobinso@redhat.com> - 1.11.1-1
-- Rebased to version 1.11.1
-
-* Mon Mar 19 2018 Paolo Bonzini <pbonzini@redhat.com> - 1.11.0-2
-- Build with Python 3
-
-* Fri Feb 09 2018 Fedora Release Engineering <releng@fedoraproject.org> - 1.11.0-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_28_Mass_Rebuild
+* Mon Nov 20 2017 Danilo C. L. de Paula <ddepaula@redhat.com> - 1.11.0-1.el8
+- Creating RHEL-8.0 initial branch based on 1.11.0
+- Resolves: bz#1515300
+- (Prepare seabios for RHEL-8.0)
 
 * Fri Nov 17 2017 Paolo Bonzini <pbonzini@redhat.com> - 1.11.0-1
 - Rebased to version 1.11.0

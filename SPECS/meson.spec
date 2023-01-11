@@ -6,13 +6,13 @@
 %bcond_with check
 
 Name:           meson
-Version:        0.59.4
-Release:        1%{?dist}
+Version:        0.58.2
+Release:        2%{?dist}
 Summary:        High productivity build system
 
 License:        ASL 2.0
 URL:            https://mesonbuild.com/
-Source:         https://github.com/mesonbuild/meson/releases/download/%{version_no_tilde .}/meson-0.59.4.tar.gz
+Source:         https://github.com/mesonbuild/meson/releases/download/%{version}/%{name}-%{version}.tar.gz
 
 BuildArch:      noarch
 
@@ -20,6 +20,7 @@ BuildRequires:  python3-devel
 BuildRequires:  python3-setuptools
 Requires:       python%{python3_version}dist(setuptools)
 Requires:       ninja-build
+Requires:       python3-devel
 
 %if %{with check}
 BuildRequires:  ninja-build
@@ -63,7 +64,6 @@ BuildRequires:  pkgconfig(gobject-introspection-1.0)
 BuildRequires:  gtk-doc
 BuildRequires:  itstool
 BuildRequires:  pkgconfig(zlib)
-BuildRequires:  zlib-static
 BuildRequires:  python3dist(cython)
 BuildRequires:  pkgconfig(sdl2)
 BuildRequires:  %{_bindir}/pcap-config
@@ -79,7 +79,7 @@ support for modern software development tools and practices, such as
 unit tests, coverage reports, Valgrind, CCache and the like.
 
 %prep
-%autosetup -p1 -n meson-0.59.4
+%autosetup -p1
 # Macro should not change when we are redefining bindir
 sed -i -e "/^%%__meson /s| .*$| %{_bindir}/%{name}|" data/macros.%{name}
 
@@ -111,204 +111,39 @@ export MESON_PRINT_TEST_OUTPUT=1
 %dir %{_datadir}/polkit-1/actions
 %{_datadir}/polkit-1/actions/com.mesonbuild.install.policy
 
+
 %changelog
-* Thu Oct 28 2021 Kalev Lember <klember@redhat.com> - 0.59.4-1
-- Update to 0.59.4
+* Tue Nov 16 2021 Tomas Pelka <tpelka@redhat.com> - 0.58.2-2
+- Bump release and rebuild in -candidate target to fix gating issues
+  Resolves: rhbz#2006519
 
-* Sat Oct 23 2021 Kalev Lember <klember@redhat.com> - 0.59.3-1
-- Update to 0.59.3
+* Mon Oct 18 2021 Eduardo Lima (Etrunko) <etrunko@redhat.com> - 0.58.2-1
+- Update meson to 0.58-2
+  Resolves: rhbz#2006519
 
-* Sat Aug 21 2021 Kalev Lember <klember@redhat.com> - 0.59.1-1
-- Update to 0.59.1
+* Tue Dec 15 2020 Danilo C. L. de Paula <ddepaula@redhat.com> - 0.55.3-3
+- build: use PIE objects for static libraries
+  Resolves: rhbz#1899620
+  (meson builds QEMU with PIC objects instead of PIE)
 
-* Tue Aug 17 2021 Adam Williamson <awilliam@redhat.com> - 0.59.0-2
-- Backport PR #9027 to fix a bug that broke some test suites (#1994006)
+* Thu Oct 15 2020 Danilo C. L. de Paula <ddepaula@redhat.com> - 0.55.3-2
+- Add python3-devel dependency, as asked by the BZ..
+- Resolves: rhbz#1872692
 
-* Fri Jul 23 2021 Marc-André Lureau <marcandre.lureau@redhat.com> - 0.59.0-1
-- new version
+* Thu Oct 08 2020 Danilo de Paula <ddepaula@redhat.com> - 0.55.3-1
+- Update to 0.55.3, based on upstream Fedora
+- Resolves: rhbz#1872692
 
-* Thu Jul 22 2021 Fedora Release Engineering <releng@fedoraproject.org> - 0.58.0-5
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_35_Mass_Rebuild
-
-* Thu Jun 03 2021 Python Maint <python-maint@redhat.com> - 0.58.0-4
-- Rebuilt for Python 3.10
-
-* Tue May 25 2021 Ondrej Holy <oholy@redhat.com> - 0.58.0-3
-- Backport upstream patch to fix environment variable regression
-
-* Thu May 20 2021 Kalev Lember <klember@redhat.com> - 0.58.0-2
-- Backport upstream patch to fix gtkdoc generation
-
-* Wed May 05 2021 Marc-André Lureau <marcandre.lureau@redhat.com> - 0.58.0-1
-- new version
-
-* Sun Apr 11 2021 Kalev Lember <klember@redhat.com> - 0.57.2-1
-- Update to 0.57.2
-
-* Fri Mar 05 2021 Igor Raits <ignatenkobrain@fedoraproject.org> - 0.57.1-1
-- Update to 0.57.1
-
-* Tue Jan 26 2021 Fedora Release Engineering <releng@fedoraproject.org> - 0.56.2-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_34_Mass_Rebuild
-
-* Thu Jan 21 2021 Kalev Lember <klember@redhat.com> - 0.56.2-1
-- Update to 0.56.2
-
-* Tue Nov 10 2020 Zbigniew Jędrzejewski-Szmek <zbyszek@in.waw.pl> - 0.56.0-1
-- Update to latest version (#1889242)
-
-* Fri Nov 06 2020 Jeff Law <law@redhat.com> - 0.55.3-2
-- Avoid bogus volatile in gnome modules support code caught by gcc-11
-
-* Fri Sep 11 2020 Kalev Lember <klember@redhat.com> - 0.55.3-1
-- Update to 0.55.3
-
-* Thu Sep 10 2020 Kalev Lember <klember@redhat.com> - 0.55.2-1
-- Update to 0.55.2
-
-* Thu Aug 20 2020 Kalev Lember <klember@redhat.com> - 0.55.1-1
-- Update to 0.55.1
-
-* Tue Jul 28 2020 Fedora Release Engineering <releng@fedoraproject.org> - 0.55.0-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_33_Mass_Rebuild
-
-* Sun Jul 12 2020 Igor Raits <ignatenkobrain@fedoraproject.org> - 0.55.0-1
-- Update to 0.55.0
-
-* Mon Jul 06 2020 Igor Raits <ignatenkobrain@fedoraproject.org> - 0.55.0~rc2-1
-- Update to 0.55.0rc2
-
-* Fri Jul 03 2020 Igor Raits <ignatenkobrain@fedoraproject.org> - 0.55.0~rc1-1
-- Update to 0.55.0rc1
-
-* Thu Jun 18 2020 Igor Raits <ignatenkobrain@fedoraproject.org> - 0.54.3-2
-- Use verbose mode for meson compile
-
-* Mon Jun 15 2020 Kalev Lember <klember@redhat.com> - 0.54.3-1
-- Update to 0.54.3
-
-* Mon Jun 15 2020 Igor Raits <ignatenkobrain@fedoraproject.org> - 0.54.2-3
-- Switch to meson compile / meson install
-
-* Fri May 22 2020 Miro Hrončok <mhroncok@redhat.com> - 0.54.2-2
-- Rebuilt for Python 3.9
-
-* Fri May 15 2020 Kalev Lember <klember@redhat.com> - 0.54.2-1
-- Update to 0.54.2
-
-* Thu May 07 2020 Igor Raits <ignatenkobrain@fedoraproject.org> - 0.54.1-1
-- Update to 0.54.1
-
-* Mon Mar 30 2020 - Ernestas Kulik <ekulik@redhat.com> - 0.54.0-1
-- Update to 0.54.0
-
-* Sat Mar 14 2020 - Ernestas Kulik <ekulik@redhat.com> - 0.53.2-1.git88e40c7
-- Update to snapshot of 0.53.2 with D fixes
-
-* Fri Feb 07 2020 - Ernestas Kulik <ekulik@redhat.com> - 0.53.1-1
-- Update to 0.53.1
-
-* Wed Jan 29 2020 Fedora Release Engineering <releng@fedoraproject.org> - 0.52.1-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_32_Mass_Rebuild
-
-* Thu Dec 26 2019 Björn Esser <besser82@fedoraproject.org> - 0.52.1-1
-- Update to 0.52.1
-
-* Wed Oct 09 2019 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.52.0-1
-- Update to 0.52.0
-
-* Thu Oct 03 2019 Miro Hrončok <mhroncok@redhat.com> - 0.51.2-2
-- Rebuilt for Python 3.8.0rc1 (#1748018)
-
-* Mon Aug 26 2019 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.51.2-1
-- Update to 0.51.2
-
-* Thu Aug 15 2019 Miro Hrončok <mhroncok@redhat.com> - 0.51.1-3
-- Rebuilt for Python 3.8
-
-* Thu Jul 25 2019 Fedora Release Engineering <releng@fedoraproject.org> - 0.51.1-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_31_Mass_Rebuild
-
-* Wed Jul 10 2019 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.51.1-1
-- Update to 0.51.1
-
-* Mon Jun 17 10:03:21 CEST 2019 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.51.0-1
-- Update to 0.51
-
-* Wed Apr 17 2019 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.50.1-1
-- Update to 0.50.1
-
-* Mon Apr 15 2019 Adam Williamson <awilliam@redhat.com> - 0.50.0-4
-- Backport patch to revert ld binary method change (#1699099)
-
-* Mon Apr 08 2019 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.50.0-3
-- Drop -Db_ndebug=true and just fix it instead
-
-* Mon Mar 25 2019 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.50.0-2
-- Set -Db_ndebug=true
-
-* Sun Mar 10 2019 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.50.0-1
-- Update to 0.50.0
-
-* Mon Feb 04 2019 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.49.2-1
+* Mon Feb 04 2019 Stephen Gallagher <sgallagh@redhat.com> - 0.49.2-1
 - Update to 0.49.2
+- Drop upstreamed patch
+- Resolves: rhbz#1666733
 
-* Fri Feb 01 2019 Fedora Release Engineering <releng@fedoraproject.org> - 0.49.1-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_30_Mass_Rebuild
+* Mon Dec 10 2018 Stephen Gallagher <sgallagh@redhat.com> - 0.45.1-3
+- Backport patch to fix gnome.mkenums_simple() when used with file() arguments
 
-* Wed Jan 23 2019 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.49.1-1
-- Update to 0.49.1
-
-* Sun Dec 09 2018 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.49.0-1
-- Update to 0.49.0
-
-* Sat Nov 17 2018 Kalev Lember <klember@redhat.com> - 0.48.2-1
-- Update to 0.48.2
-
-* Sun Oct 21 2018 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.48.1-1
-- Update to 0.48.1
-
-* Wed Sep 26 2018 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.48.0-2
-- Add missing dependency on setuptools
-
-* Tue Sep 25 2018 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.48.0-1
-- Update to 0.48.0
-
-* Sat Aug 25 2018 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.47.2-1
-- Update to 0.47.2
-
-* Wed Jul 25 2018 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.47.1-5
-- Backport more patches for "feature" option type
-
-* Tue Jul 24 2018 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.47.1-4
-- Don't sneak auto-features patch yet
-
-* Tue Jul 24 2018 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.47.1-3
-- Macros improvements
-
-* Fri Jul 13 2018 Fedora Release Engineering <releng@fedoraproject.org> - 0.47.1-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_29_Mass_Rebuild
-
-* Tue Jul 10 2018 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.47.1-1
-- Update to 0.47.1
-
-* Mon Jul 02 2018 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.47.0-1
-- Update to 0.47.0
-
-* Thu Jun 28 2018 Miro Hrončok <mhroncok@redhat.com> - 0.46.1-3
-- Fix error on Python 3.7 (#1596230)
-
-* Mon Jun 18 2018 Miro Hrončok <mhroncok@redhat.com> - 0.46.1-2
-- Rebuilt for Python 3.7
-
-* Thu May 17 2018 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.46.1-1
-- Update to 0.46.1
-
-* Fri May 04 2018 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.46.0-2
-- Backport upstream fixes
-
-* Tue Apr 24 2018 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.46.0-1
-- Update to 0.46.0
+* Mon Aug 13 2018 Troy Dawson <tdawson@redhat.com> - 0.45.1-2
+- Add Requires python3-devel
 
 * Wed Mar 21 2018 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.45.1-1
 - Update to 0.45.1

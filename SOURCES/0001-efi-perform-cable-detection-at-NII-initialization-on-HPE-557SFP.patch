@@ -1,0 +1,119 @@
+From 2de005e9ac399f7064968a2611f266dc86a96700 Mon Sep 17 00:00:00 2001
+From: Laszlo Ersek <lersek@redhat.com>
+Date: Fri, 24 Jul 2020 19:15:28 +0200
+Subject: [PATCH] [efi] perform cable detection at NII initialization on HPE
+ 557SFP+
+
+Commit c0b61bad99ba ("[efi] Work around bugs in Emulex NII driver",
+2015-08-17) added PXE_OPFLAGS_INITIALIZE_DETECT_CABLE to nii_open() for
+working around Emulex NII driver bugs.
+
+That broke some Mellanox drivers, so commit 6324227dcaa8 ("[efi] Skip
+cable detection at initialisation where possible", 2017-03-19) predicated
+PXE_OPFLAGS_INITIALIZE_DETECT_CABLE on the NII driver's *inability* to
+report link status.
+
+This in turn breaks the NII driver on (some?) HPE 557SFP+ cards, as those
+drivers are capable of reporting link status, but they still need cable
+detection.
+
+So check for this card (through PCI vendor / device / subsys vendor /
+subsys device identifiers), and opt for cable detection regardless of link
+status reporting.
+
+Bugzilla: https://bugzilla.redhat.com/show_bug.cgi?id=1740827
+Signed-off-by: Laszlo Ersek <lersek@redhat.com>
+---
+ src/drivers/net/efi/nii.c | 43 ++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 40 insertions(+), 3 deletions(-)
+
+diff --git a/src/drivers/net/efi/nii.c b/src/drivers/net/efi/nii.c
+index 2d87e0c63f14..0cf065e0818f 100644
+--- a/src/drivers/net/efi/nii.c
++++ b/src/drivers/net/efi/nii.c
+@@ -193,6 +193,9 @@ struct nii_nic {
+ 
+ 	/** Mapping list */
+ 	struct list_head mappings;
++
++	/** quirk needed for HPE 557SFP+ */
++	int quirk_hpe557sfpp;
+ };
+ 
+ /** Maximum number of received packets per poll */
+@@ -219,6 +222,7 @@ static int nii_pci_open ( struct nii_nic *nii ) {
+ 	int bar;
+ 	EFI_STATUS efirc;
+ 	int rc;
++	uint16_t vid, did, subsys_vid, subsys_did;
+ 
+ 	/* Locate PCI I/O protocol */
+ 	if ( ( rc = efi_locate_device ( device, &efi_pci_io_protocol_guid,
+@@ -255,7 +259,7 @@ static int nii_pci_open ( struct nii_nic *nii ) {
+ 			rc = -EEFI ( efirc );
+ 			DBGC ( nii, "NII %s could not get BAR %d attributes: "
+ 			       "%s\n", nii->dev.name, bar, strerror ( rc ) );
+-			goto err_get_bar_attributes;
++			goto err_pci;
+ 		}
+ 		if ( desc.acpi->ResType == ACPI_ADDRESS_SPACE_TYPE_MEM ) {
+ 			nii->mem_bar = bar;
+@@ -276,9 +280,36 @@ static int nii_pci_open ( struct nii_nic *nii ) {
+ 		DBGC ( nii, "no I/O BAR\n" );
+ 	}
+ 
++	/* Check if HPE 557SFP+ quirk is needed */
++	if ( ( efirc = nii->pci_io->Pci.Read ( nii->pci_io,
++					       EfiPciIoWidthUint16,
++					       PCI_VENDOR_ID, 1,
++					       &vid ) ) != 0 ||
++	     ( efirc = nii->pci_io->Pci.Read ( nii->pci_io,
++					       EfiPciIoWidthUint16,
++					       PCI_DEVICE_ID, 1,
++					       &did ) ) != 0 ||
++	     ( efirc = nii->pci_io->Pci.Read ( nii->pci_io,
++					       EfiPciIoWidthUint16,
++					       PCI_SUBSYSTEM_VENDOR_ID, 1,
++					       &subsys_vid ) ) != 0 ||
++	     ( efirc = nii->pci_io->Pci.Read ( nii->pci_io,
++					       EfiPciIoWidthUint16,
++					       PCI_SUBSYSTEM_ID, 1,
++					       &subsys_did ) ) != 0 ) {
++		rc = -EEFI ( efirc );
++		DBGC ( nii, "NII %s could not read PCI config space: %s\n",
++		       nii->dev.name, strerror ( rc ) );
++		goto err_pci;
++	}
++
++	nii->quirk_hpe557sfpp = ( vid == 0x10df &&
++				  did == 0x0720 &&
++				  subsys_vid == 0x103c &&
++				  subsys_did == 0x803f );
+ 	return 0;
+ 
+- err_get_bar_attributes:
++ err_pci:
+ 	bs->CloseProtocol ( pci_device, &efi_pci_io_protocol_guid,
+ 			    efi_image_handle, device );
+  err_open:
+@@ -1144,8 +1175,14 @@ static int nii_open ( struct net_device *netdev ) {
+ 	 * cable detection at this point if any only if the driver is
+ 	 * not capable of reporting link status changes at runtime via
+ 	 * PXE_OPCODE_GET_STATUS.
++	 *
++	 * HPE 557SFP+ seems to break with
++	 * PXE_OPFLAGS_INITIALIZE_DO_NOT_DETECT_CABLE, but works with
++	 * PXE_OPFLAGS_INITIALIZE_DETECT_CABLE, so ignore link status reporting
++	 * for that NIC, and always request cable detection.
+ 	 */
+-	flags = ( nii->media ? PXE_OPFLAGS_INITIALIZE_DO_NOT_DETECT_CABLE
++	flags = ( ( ! nii->quirk_hpe557sfpp ) && nii->media
++		  ? PXE_OPFLAGS_INITIALIZE_DO_NOT_DETECT_CABLE
+ 		  : PXE_OPFLAGS_INITIALIZE_DETECT_CABLE );
+ 	if ( ( rc = nii_initialise_flags ( nii, flags ) ) != 0 )
+ 		goto err_initialise;
+
+base-commit: b76052335788d0ad2c4b0bded116c3b02dd4bbc2
+-- 
+2.19.1.3.g30247aa5d201
+

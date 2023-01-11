@@ -11,7 +11,7 @@
 
 Name:           qemu-sanity-check
 Version:        1.1.6
-Release:        6%{?dist}
+Release:        7%{?dist}
 Summary:        Simple qemu and Linux kernel sanity checker
 License:        GPLv2+
 
@@ -43,6 +43,7 @@ BuildRequires:  cpio
 BuildRequires:  glibc-static
 
 # For testing.
+BuildRequires:  qemu
 BuildRequires:  kernel
 
 # For complicated reasons, this is required so that
@@ -121,6 +122,15 @@ as %{name} except that this package does not depend on qemu or kernel.
 make %{?_smp_mflags}
 
 
+%check
+%ifarch %{test_arches}
+make check || {
+  cat test-suite.log
+  exit 1
+}
+%endif
+
+
 %install
 make DESTDIR=$RPM_BUILD_ROOT install
 
@@ -137,6 +147,9 @@ make DESTDIR=$RPM_BUILD_ROOT install
 
 
 %changelog
+* Fri Jul 22 2022 Fedora Release Engineering <releng@fedoraproject.org> - 1.1.6-7
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_37_Mass_Rebuild
+
 * Fri Jan 21 2022 Fedora Release Engineering <releng@fedoraproject.org> - 1.1.6-6
 - Rebuilt for https://fedoraproject.org/wiki/Fedora_36_Mass_Rebuild
 

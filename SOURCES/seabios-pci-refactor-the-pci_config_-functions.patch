@@ -1,0 +1,174 @@
+From a35645ca4985b8fdd4f4d8c4d87ae05001061c53 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Volker=20R=C3=BCmelin?= <vr_qemu@t-online.de>
+Date: Sat, 2 Apr 2022 20:28:38 +0200
+Subject: [PATCH 2/3] pci: refactor the pci_config_*() functions
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RH-Author: Gerd Hoffmann <kraxel@redhat.com>
+RH-MergeRequest: 7: pci: fix reset for q35 and tcg
+RH-Commit: [1/2] 7607f8f3296435a2884902f650ce060c6be07bd1
+RH-Bugzilla: 2083884
+RH-Acked-by: Pawel Polawski <ppolawsk@redhat.com>
+RH-Acked-by: Oliver Steffen <osteffen@redhat.com>
+RH-Acked-by: Igor Mammedov <imammedo@redhat.com>
+RH-Acked-by: Laszlo Ersek <lersek@redhat.com>
+
+Split out the Standard PCI Configuration Access Mechanism
+pci_ioconfig_*() functions from the pci_config_*() functions.
+The standard PCI CAM functions will be used in the next patch.
+
+Reviewed-by: Gerd Hoffmann <kraxel@redhat.com>
+Signed-off-by: Volker Rümelin <vr_qemu@t-online.de>
+(cherry picked from commit d24f42b0d819ea473ae05b2f955b822d0126d901)
+---
+ src/hw/pci.c | 54 ++++++++++++++++++++++++++++++++++++++++------------
+ src/hw/pci.h | 12 +++++++++++-
+ 2 files changed, 53 insertions(+), 13 deletions(-)
+
+diff --git a/src/hw/pci.c b/src/hw/pci.c
+index 3df1dae4..f13cbdea 100644
+--- a/src/hw/pci.c
++++ b/src/hw/pci.c
+@@ -26,63 +26,93 @@ static u32 ioconfig_cmd(u16 bdf, u32 addr)
+     return 0x80000000 | (bdf << 8) | (addr & 0xfc);
+ }
+ 
++void pci_ioconfig_writel(u16 bdf, u32 addr, u32 val)
++{
++    outl(ioconfig_cmd(bdf, addr), PORT_PCI_CMD);
++    outl(val, PORT_PCI_DATA);
++}
++
+ void pci_config_writel(u16 bdf, u32 addr, u32 val)
+ {
+     if (!MODESEGMENT && mmconfig) {
+         writel(mmconfig_addr(bdf, addr), val);
+     } else {
+-        outl(ioconfig_cmd(bdf, addr), PORT_PCI_CMD);
+-        outl(val, PORT_PCI_DATA);
++        pci_ioconfig_writel(bdf, addr, val);
+     }
+ }
+ 
++void pci_ioconfig_writew(u16 bdf, u32 addr, u16 val)
++{
++    outl(ioconfig_cmd(bdf, addr), PORT_PCI_CMD);
++    outw(val, PORT_PCI_DATA + (addr & 2));
++}
++
+ void pci_config_writew(u16 bdf, u32 addr, u16 val)
+ {
+     if (!MODESEGMENT && mmconfig) {
+         writew(mmconfig_addr(bdf, addr), val);
+     } else {
+-        outl(ioconfig_cmd(bdf, addr), PORT_PCI_CMD);
+-        outw(val, PORT_PCI_DATA + (addr & 2));
++        pci_ioconfig_writew(bdf, addr, val);
+     }
+ }
+ 
++void pci_ioconfig_writeb(u16 bdf, u32 addr, u8 val)
++{
++    outl(ioconfig_cmd(bdf, addr), PORT_PCI_CMD);
++    outb(val, PORT_PCI_DATA + (addr & 3));
++}
++
+ void pci_config_writeb(u16 bdf, u32 addr, u8 val)
+ {
+     if (!MODESEGMENT && mmconfig) {
+         writeb(mmconfig_addr(bdf, addr), val);
+     } else {
+-        outl(ioconfig_cmd(bdf, addr), PORT_PCI_CMD);
+-        outb(val, PORT_PCI_DATA + (addr & 3));
++        pci_ioconfig_writeb(bdf, addr, val);
+     }
+ }
+ 
++u32 pci_ioconfig_readl(u16 bdf, u32 addr)
++{
++    outl(ioconfig_cmd(bdf, addr), PORT_PCI_CMD);
++    return inl(PORT_PCI_DATA);
++}
++
+ u32 pci_config_readl(u16 bdf, u32 addr)
+ {
+     if (!MODESEGMENT && mmconfig) {
+         return readl(mmconfig_addr(bdf, addr));
+     } else {
+-        outl(ioconfig_cmd(bdf, addr), PORT_PCI_CMD);
+-        return inl(PORT_PCI_DATA);
++        return pci_ioconfig_readl(bdf, addr);
+     }
+ }
+ 
++u16 pci_ioconfig_readw(u16 bdf, u32 addr)
++{
++    outl(ioconfig_cmd(bdf, addr), PORT_PCI_CMD);
++    return inw(PORT_PCI_DATA + (addr & 2));
++}
++
+ u16 pci_config_readw(u16 bdf, u32 addr)
+ {
+     if (!MODESEGMENT && mmconfig) {
+         return readw(mmconfig_addr(bdf, addr));
+     } else {
+-        outl(ioconfig_cmd(bdf, addr), PORT_PCI_CMD);
+-        return inw(PORT_PCI_DATA + (addr & 2));
++        return pci_ioconfig_readw(bdf, addr);
+     }
+ }
+ 
++u8 pci_ioconfig_readb(u16 bdf, u32 addr)
++{
++    outl(ioconfig_cmd(bdf, addr), PORT_PCI_CMD);
++    return inb(PORT_PCI_DATA + (addr & 3));
++}
++
+ u8 pci_config_readb(u16 bdf, u32 addr)
+ {
+     if (!MODESEGMENT && mmconfig) {
+         return readb(mmconfig_addr(bdf, addr));
+     } else {
+-        outl(ioconfig_cmd(bdf, addr), PORT_PCI_CMD);
+-        return inb(PORT_PCI_DATA + (addr & 3));
++        return pci_ioconfig_readb(bdf, addr);
+     }
+ }
+ 
+diff --git a/src/hw/pci.h b/src/hw/pci.h
+index 01c51f70..ee6acafc 100644
+--- a/src/hw/pci.h
++++ b/src/hw/pci.h
+@@ -32,6 +32,15 @@ static inline u16 pci_bus_devfn_to_bdf(int bus, u16 devfn) {
+          ; BDF >= 0                                             \
+          ; BDF=pci_next(BDF, (BUS)))
+ 
++// standard PCI configration access mechanism
++void pci_ioconfig_writel(u16 bdf, u32 addr, u32 val);
++void pci_ioconfig_writew(u16 bdf, u32 addr, u16 val);
++void pci_ioconfig_writeb(u16 bdf, u32 addr, u8 val);
++u32 pci_ioconfig_readl(u16 bdf, u32 addr);
++u16 pci_ioconfig_readw(u16 bdf, u32 addr);
++u8 pci_ioconfig_readb(u16 bdf, u32 addr);
++
++// PCI configuration access using either PCI CAM or PCIe ECAM
+ void pci_config_writel(u16 bdf, u32 addr, u32 val);
+ void pci_config_writew(u16 bdf, u32 addr, u16 val);
+ void pci_config_writeb(u16 bdf, u32 addr, u8 val);
+@@ -39,9 +48,10 @@ u32 pci_config_readl(u16 bdf, u32 addr);
+ u16 pci_config_readw(u16 bdf, u32 addr);
+ u8 pci_config_readb(u16 bdf, u32 addr);
+ void pci_config_maskw(u16 bdf, u32 addr, u16 off, u16 on);
+-void pci_enable_mmconfig(u64 addr, const char *name);
+ u8 pci_find_capability(u16 bdf, u8 cap_id, u8 cap);
+ int pci_next(int bdf, int bus);
++
++void pci_enable_mmconfig(u64 addr, const char *name);
+ int pci_probe_host(void);
+ void pci_reboot(void);
+ 
+-- 
+2.35.3
+

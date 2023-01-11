@@ -1,34 +1,22 @@
-%if 0%{?fedora}
-%global cross 1
-%endif
+# Resulting binary formats we want from iPXE
+%global formats rom
 
-# ROMS we want for QEMU with format PCIID:QEMUNAME
-%global qemuroms \\\
-  8086100e:e1000 \\\
-  10ec8139:rtl8139 \\\
-  1af41000:virtio \\\
-  808610d3:e1000e
+# PCI IDs (vendor,product) of the ROMS we want for QEMU
+#
+#    pcnet32: 0x1022 0x2000
+#   ne2k_pci: 0x10ec 0x8029
+#      e1000: 0x8086 0x100e
+#    rtl8139: 0x10ec 0x8139
+# virtio-net: 0x1af4 0x1000
+#   eepro100: 0x8086 0x1209
+#     e1000e: 0x8086 0x10d3
+#    vmxnet3: 0x15ad 0x07b0
+%global qemuroms 10222000 10ec8029 8086100e 10ec8139 1af41000 80861209 808610d3 15ad07b0
 
-%if 0%{?fedora}
-# Fedora specific roms
-%global qemuroms %{qemuroms} \\\
-  10222000:pcnet \\\
-  10ec8029:ne2k_pci \\\
-  80861209:eepro100 \\\
-  15ad07b0:vmxnet3
-%endif
-
-# We only build the ROMs if on an x86 build host. The resulting
+# We only build the ROMs if on an EFI build host. The resulting
 # binary RPM will be noarch, so other archs will still be able
 # to use the binary ROMs.
-#
-# We do cross-compilation for 32->64-bit, but not for other arches
-# because EDK II does not support big-endian hosts.
-%if 0%{?cross}
-%global buildarches %{ix86} x86_64
-%else
-%global buildarches x86_64
-%endif
+%global buildarches x86_64 aarch64
 
 # debugging firmwares does not go the same way as a normal program.
 # moreover, all architectures providing debuginfo for a single noarch
@@ -45,63 +33,77 @@
 #
 # And then change these two:
 
-%global hash 4bd064de
-%global date 20200823
+%global hash 133f4c47
+%global date 20181214
 
 Name:    ipxe
 Version: %{date}
-Release: 8.git%{hash}%{?dist}
+Release: 9.git%{hash}%{?dist}
 Summary: A network boot loader
 
+Group:   System Environment/Base
 License: GPLv2 with additional permissions and BSD
 URL:     http://ipxe.org/
 
 Source0: %{name}-%{version}-git%{hash}.tar.xz
+Source1: script.ipxe
 
 # Enable IPv6 for qemu's config
 # Sent upstream: http://lists.ipxe.org/pipermail/ipxe-devel/2015-November/004494.html
 Patch0001: 0001-build-customize-configuration.patch
 Patch0002: 0002-Use-spec-compliant-timeouts.patch
+Patch0003: 0003-Strip-802.1Q-VLAN-0-priority-tags.patch
+Patch0004: ipxe-vlan-cmds.patch
+Patch0005: 0001-efi-perform-cable-detection-at-NII-initialization-on-HPE-557SFP.patch
+Patch0006: ipxe-ping-cmd.patch
+Patch0007: 0001-arm-Provide-dummy-implementation-for-in-out-s-b-w-l.patch
 
 %ifarch %{buildarches}
 BuildRequires: perl-interpreter
 BuildRequires: perl-Getopt-Long
-%if 0%{?fedora} >= 33 || 0%{?rhel} >= 9
-BuildRequires: perl-FindBin
-BuildRequires: perl-lib
-%endif
-BuildRequires: syslinux
 BuildRequires: mtools
-BuildRequires: xorriso
+BuildRequires: mkisofs
 BuildRequires: edk2-tools
 BuildRequires: xz-devel
-BuildRequires: gcc
-
 BuildRequires: binutils-devel
-%if 0%{?cross}
-BuildRequires: binutils-x86_64-linux-gnu gcc-x86_64-linux-gnu
 %endif
-BuildRequires: make
+%ifarch x86_64
+BuildRequires: syslinux
+%endif
 
 Obsoletes: gpxe <= 1.0.1
 
-%package bootimgs
-Summary: Network boot loader images in bootable USB, CD, floppy and GRUB formats
+%ifarch x86_64
+%package rhcert
+Summary: Redhat hwcert custom ipxe image
+Group: Development/Tools
 BuildArch: noarch
+
+%package bootimgs-x86
+Summary: X86 Network boot loader images in bootable USB, CD, floppy and GRUB formats
+Group:   Development/Tools
+BuildArch: noarch
+Provides: %{name}-bootimgs = %{version}-%{release}
+Obsoletes: %{name}-bootimgs < 20181214-9.git133f4c47
 Obsoletes: gpxe-bootimgs <= 1.0.1
 
 %package roms
 Summary: Network boot loader roms in .rom format
+Group:  Development/Tools
 Requires: %{name}-roms-qemu = %{version}-%{release}
 BuildArch: noarch
 Obsoletes: gpxe-roms <= 1.0.1
 
 %package roms-qemu
 Summary: Network boot loader roms supported by QEMU, .rom format
+Group:  Development/Tools
 BuildArch: noarch
 Obsoletes: gpxe-roms-qemu <= 1.0.1
 
-%description bootimgs
+%description rhcert
+Custom ipxe image for use in hardware certification and validation
+
+%description bootimgs-x86
 iPXE is an open source network bootloader. It provides a direct
 replacement for proprietary PXE ROMs, with many extra features such as
 DNS, HTTP, iSCSI, etc.
@@ -116,7 +118,6 @@ DNS, HTTP, iSCSI, etc.
 
 This package contains the iPXE roms in .rom format.
 
-
 %description roms-qemu
 iPXE is an open source network bootloader. It provides a direct
 replacement for proprietary PXE ROMs, with many extra features such as
@@ -124,6 +125,20 @@ DNS, HTTP, iSCSI, etc.
 
 This package contains the iPXE ROMs for devices emulated by QEMU, in
 .rom format.
+%endif
+
+%ifarch aarch64
+%package bootimgs-aarch64
+Summary: AArch64 Network boot loader images in bootable USB and GRUB formats
+Group:   Development/Tools
+BuildArch: noarch
+
+%description bootimgs-aarch64
+iPXE is an open source network bootloader. It provides a direct
+replacement for proprietary PXE ROMs, with many extra features such as
+DNS, HTTP, iSCSI, etc.
+
+This package contains the iPXE ARM64 boot images in USB and GRUB formats.
 %endif
 
 %description
@@ -134,26 +149,30 @@ DNS, HTTP, iSCSI, etc.
 %prep
 %setup -q -n %{name}-%{version}-git%{hash}
 %autopatch -p1
-
-
-%build
-%ifarch %{buildarches}
-cd src
-
+pushd src
 # ath9k drivers are too big for an Option ROM, and ipxe devs say it doesn't
 # make sense anyways
 # http://lists.ipxe.org/pipermail/ipxe-devel/2012-March/001290.html
 rm -rf drivers/net/ath/ath9k
 
+cp %{SOURCE1} .
+popd
+
+
+%build
+cd src
+
 make_ipxe() {
     make %{?_smp_mflags} \
         NO_WERROR=1 V=1 \
         GITVERSION=%{hash} \
-%if 0%{?cross}
-        CROSS_COMPILE=x86_64-linux-gnu- \
-%endif
         "$@"
 }
+
+%ifarch x86_64
+
+make_ipxe bin-x86_64-efi/ipxe.efi EMBED=script.ipxe
+mv bin-x86_64-efi/ipxe.efi bin-x86_64-efi/ipxe-rhcert.efi
 
 make_ipxe bin-i386-efi/ipxe.efi bin-x86_64-efi/ipxe.efi \
     bin-x86_64-efi/snponly.efi
@@ -164,9 +183,7 @@ make_ipxe ISOLINUX_BIN=/usr/share/syslinux/isolinux.bin \
 
 # build roms with efi support for qemu
 mkdir bin-combined
-for romstr in %{qemuroms}; do
-  rom=$(echo "$romstr" | cut -d ":" -f 1)
-
+for rom in %{qemuroms}; do
   make_ipxe CONFIG=qemu bin/${rom}.rom
   make_ipxe CONFIG=qemu bin-x86_64-efi/${rom}.efidrv
   vid="0x${rom%%????}"
@@ -187,50 +204,60 @@ done
 
 %endif
 
+%ifarch aarch64
+make_ipxe bin-arm64-efi/snponly.efi
+%if 0%{?fedora}
+make_ipxe bin-arm64-efi/ipxe.efi
+%endif
+%endif
+
 %install
-%ifarch %{buildarches}
+%ifarch x86_64
 mkdir -p %{buildroot}/%{_datadir}/%{name}/
 mkdir -p %{buildroot}/%{_datadir}/%{name}.efi/
 pushd src/bin/
 
 cp -a undionly.kpxe ipxe.{iso,usb,dsk,lkrn} %{buildroot}/%{_datadir}/%{name}/
 
-for img in *.rom; do
-  if [ -e $img ]; then
-    cp -a $img %{buildroot}/%{_datadir}/%{name}/
-    echo %{_datadir}/%{name}/$img >> ../../rom.list
+for fmt in %{formats};do
+ for img in *.${fmt};do
+      if [ -e $img ]; then
+   cp -a $img %{buildroot}/%{_datadir}/%{name}/
+   echo %{_datadir}/%{name}/$img >> ../../${fmt}.list
   fi
+ done
 done
 popd
 
 cp -a src/bin-i386-efi/ipxe.efi %{buildroot}/%{_datadir}/%{name}/ipxe-i386.efi
 cp -a src/bin-x86_64-efi/ipxe.efi %{buildroot}/%{_datadir}/%{name}/ipxe-x86_64.efi
+cp -a src/bin-x86_64-efi/ipxe-rhcert.efi %{buildroot}/%{_datadir}/%{name}/ipxe-x86_64-rhcert.efi
 cp -a src/bin-x86_64-efi/snponly.efi %{buildroot}/%{_datadir}/%{name}/ipxe-snponly-x86_64.efi
 
-mkdir -p %{buildroot}%{_datadir}/%{name}/qemu/
-
-for romstr in %{qemuroms}; do
-  # the roms supported by qemu will be packaged separatedly
-  # remove from the main rom list and add them to qemu.list
-  rom=$(echo "$romstr" | cut -d ":" -f 1)
-  qemuname=$(echo "$romstr" | cut -d ":" -f 2)
-  sed -i -e "/\/${rom}.rom/d" rom.list
-  echo %{_datadir}/%{name}/${rom}.rom >> qemu.rom.list
-
+# the roms supported by qemu will be packaged separatedly
+# remove from the main rom list and add them to qemu.list
+for fmt in rom ;do
+ for rom in %{qemuroms} ; do
+  sed -i -e "/\/${rom}.${fmt}/d" ${fmt}.list
+  echo %{_datadir}/%{name}/${rom}.${fmt} >> qemu.${fmt}.list
+ done
+done
+for rom in %{qemuroms}; do
   cp src/bin-combined/${rom}.rom %{buildroot}/%{_datadir}/%{name}.efi/
   echo %{_datadir}/%{name}.efi/${rom}.rom >> qemu.rom.list
-
-  # Set up symlinks with expected qemu firmware names
-  ln -s ../../ipxe/${rom}.rom %{buildroot}%{_datadir}/%{name}/qemu/pxe-${qemuname}.rom
-  ln -s ../../ipxe.efi/${rom}.rom %{buildroot}%{_datadir}/%{name}/qemu/efi-${qemuname}.rom
 done
-
-# endif buildarches
 %endif
 
+%ifarch aarch64
+mkdir -p %{buildroot}/%{_datadir}/%{name}/arm64-efi
+cp -a src/bin-arm64-efi/snponly.efi %{buildroot}/%{_datadir}/%{name}/arm64-efi/snponly.efi
+%if 0%{?fedora}
+cp -a src/bin-arm64-efi/ipxe.efi %{buildroot}/%{_datadir}/%{name}/arm64-efi/ipxe.efi
+%endif
+%endif
 
-%ifarch %{buildarches}
-%files bootimgs
+%ifarch x86_64
+%files bootimgs-x86
 %dir %{_datadir}/%{name}
 %{_datadir}/%{name}/ipxe.iso
 %{_datadir}/%{name}/ipxe.usb
@@ -249,73 +276,58 @@ done
 %files roms-qemu -f qemu.rom.list
 %dir %{_datadir}/%{name}
 %dir %{_datadir}/%{name}.efi
-%{_datadir}/%{name}/qemu
 %doc COPYING COPYING.GPLv2 COPYING.UBDL
+
+%files rhcert
+%dir %{_datadir}/%{name}
+%{_datadir}/%{name}/ipxe-x86_64-rhcert.efi
+%endif
+
+%ifarch aarch64
+%files bootimgs-aarch64
+%dir %{_datadir}/%{name}
+%dir %{_datadir}/%{name}/arm64-efi
+%if 0%{?fedora}
+%{_datadir}/%{name}/arm64-efi/ipxe.efi
+%endif
+%{_datadir}/%{name}/arm64-efi/snponly.efi
 %endif
 
 %changelog
-* Thu Jan 20 2022 Fedora Release Engineering <releng@fedoraproject.org> - 20200823-8.git4bd064de
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_36_Mass_Rebuild
+* Tue Mar 01 2022 Yaakov Selkowitz <yselkowi@redhat.com> - 20181214-9.git133f4c47
+- Add ARM 64 EFI artifacts (bz 2059350)
 
-* Sat Jul 24 2021 Cole Robinson <crobinso@redhat.com> - 20200823-7.git4bd064de
-- Add snponly build (bz 1981799)
+* Fri Feb 19 2021 Jarod Wilson <jarod@redhat.com> - 20181210-8.git133f4c47
+- combine BIOS and EFI roms using utils/catrom.pl [lersek] (bz 1926561)
 
-* Thu Jul 22 2021 Fedora Release Engineering <releng@fedoraproject.org> - 20200823-6.git4bd064de
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_35_Mass_Rebuild
+* Tue Jan 26 2021 Jarod Wilson <jarod@redhat.com> - 20181210-7.git133f4c47
+- Build ping command (bz 1913719)
 
-* Wed Jul 07 2021 Cole Robinson <crobinso@redhat.com> - 20200823-5.git4bd064de
-- Generate qemu compatible rom filenames
+* Mon Jul 27 2020 Neil Horman <nhorman@redhat.com> - 20181210-6.git133f4c47
+- Add quirk for link detect on HP 557SFP cards (bz 1740827)
 
-* Mon Jun 14 2021 Jiri Kucera <jkucera@redhat.com> - 20200823-4.git4bd064de
-- Replace genisoimage by xorriso
+* Tue Jan 7 2020 Neil Horman <nhorman@redhat.com> - 20181210-5.git133f4c47
+- Add rhcert subpackage (bz 1756012)
 
-* Tue Feb 23 2021 Cole Robinson <aintdiscole@gmail.com> - 20200823-3.git4bd064de
-- combine BIOS and EFI roms using "util/catrom.pl"
+* Fri Dec 13 2019 Neil Horman <nhorman@redhat.com> - 20181210-4.git133f4c47
+- Add snponly.efi image (bz 1776929)
 
-* Tue Jan 26 2021 Fedora Release Engineering <releng@fedoraproject.org> - 20200823-2.git4bd064de
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_34_Mass_Rebuild
+* Tue Aug 13 2019 Danilo de Paula <ddepaula@redhat.com> - 20181210-3.git133f4c47
+- Release bump
 
-* Tue Sep 15 2020 Cole Robinson <aintdiscole@gmail.com> - 20200823-1.git4bd064de.git
-- Update to newer git snapshot, synced with qemu.git
-- Re-enable HTTPS support, with edk2 fix included (bz 1820836)
+* Thu Jul 25 2019 Danilo de Paula <ddepaula@redhat.com> - 20181210-2.git133f4c47
+- Resolves rhbz#1723702
+  (virtio rom near 256k boundary)
 
-* Fri Sep 04 2020 Merlin Mathesius <mmathesi@redhat.com> - 20190125-9.git36a4c85f
-- Workaound fatal GCC 9 compilation/link errors
-- Fix conditionals for perl BuildRequires
+* Fri Dec 14 2018 Neil Horman <nhorman@redhat.com> - 20181210-1.git133f4c47
+- Update to latest upstream
+- Add vlan cmds
 
-* Mon Aug 17 2020 Cole Robinson <aintdiscole@gmail.com> - 20190125-8.git36a4c85f
-- Revert HTTPS support, causes boot hangs with UEFI (bz 1869102)
+* Fri Nov 16 2018 Danilo C. L. de Paula <ddepaula@redhat.com> - 20170710-6.git0600d3ae
+- rebuilt
 
-* Tue Aug 11 2020 Cole Robinson <aintdiscole@gmail.com> - 20190125-7.git36a4c85f
-- Enable HTTPS support (bug 1820836)
-
-* Wed Jul 29 2020 Richard W.M. Jones <rjones@redhat.com> - 20190125-6.git36a4c85f
-- Explicitly BR perl-FindBin and perl-lib.
-
-* Tue Jul 28 2020 Fedora Release Engineering <releng@fedoraproject.org> - 20190125-5.git36a4c85f
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_33_Mass_Rebuild
-
-* Wed Jan 29 2020 Fedora Release Engineering <releng@fedoraproject.org> - 20190125-4.git36a4c85f
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_32_Mass_Rebuild
-
-* Thu Jul 25 2019 Fedora Release Engineering <releng@fedoraproject.org> - 20190125-3.git36a4c85f
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_31_Mass_Rebuild
-
-* Tue Jul 16 2019 Paolo Bonzini <pbonxini@redhat.com> - 20190125-2.git36a4c85f
-- Allow removing IA32 EFI images from combined oproms
-- Check that the ROMs fit in 256K and pad them
-
-* Tue Feb 12 2019 Daniel P. Berrangé <berrange@redhat.com> - 20190125-1.git36a4c85f
-- Update to latest git snapshot
-
-* Fri Feb 01 2019 Fedora Release Engineering <releng@fedoraproject.org> - 20170710-6.git0600d3ae
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_30_Mass_Rebuild
-
-* Mon Jul 23 2018 Daniel P. Berrangé <berrange@redhat.com> - 20170710-5.git0600d3ae
-- mkisofs tool moved to genisoimage RPM
-
-* Fri Jul 13 2018 Fedora Release Engineering <releng@fedoraproject.org> - 20170710-4.git0600d3ae
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_29_Mass_Rebuild
+* Thu Jul 12 2018 Danilo - 20170710-5.git0600d3ae
+- Bumping release number and rebuilding ipxe for RHEL-8.0
 
 * Wed Feb 07 2018 Fedora Release Engineering <releng@fedoraproject.org> - 20170710-3.git0600d3ae
 - Rebuilt for https://fedoraproject.org/wiki/Fedora_28_Mass_Rebuild

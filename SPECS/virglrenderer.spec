@@ -1,9 +1,9 @@
-%global gitdate 20210420
-%global gitversion 36391559
+%global gitdate 20230104
+%global gitversion 88b9fe3b
 
 Name:		virglrenderer
-Version:	0.9.1
-Release:	3.%{gitdate}git%{gitversion}%{?dist}
+Version:	0.10.4
+Release:	1.%{gitdate}git%{gitversion}%{?dist}
 
 Summary:	Virgl Rendering library.
 License:	MIT
@@ -20,6 +20,7 @@ BuildRequires:	mesa-libgbm-devel
 BuildRequires:	mesa-libEGL-devel
 BuildRequires:	python3
 BuildRequires:	libdrm-devel
+BuildRequires:  libva-devel
 
 %description
 The virgil3d rendering library is a library used by
@@ -47,7 +48,7 @@ driver to test virgl rendering without GL.
 %prep
 %setup -q -n %{name}-%{gitdate}
 %build
-%meson
+%meson -Dvideo=true
 %meson_build
 
 %install
@@ -69,6 +70,22 @@ driver to test virgl rendering without GL.
 %{_bindir}/virgl_test_server
 
 %changelog
+* Wed Jan 04 2023 Marc-André Lureau <marcandre.lureau@redhat.com> - 0.10.4-1.20230104git88b9fe3b
+- new version
+
+* Mon Sep 12 2022 Marc-André Lureau <marcandre.lureau@redhat.com> - 0.10.1-1.20220912git19dc97a2
+- new version, fixes upstream #286 "Virglrenderer 0.10.1 broke Firefox WebGL rendering in VM"
+  Fixes: https://bugzilla.redhat.com/show_bug.cgi?id=2125160
+
+* Tue Sep 06 2022 Marc-André Lureau <marcandre.lureau@redhat.com> - 0.10.0-2.20220906git62cb845b
+- new version, fixes upstream #285 "0.10.0 has issues with fedora 36, hangs the VM"
+
+* Mon Sep 05 2022 Marc-André Lureau <marcandre.lureau@redhat.com> - 0.10.0-1.20220905gitf70a6640
+- new version
+
+* Sat Jul 23 2022 Fedora Release Engineering <releng@fedoraproject.org> - 0.9.1-4.20210420git36391559
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_37_Mass_Rebuild
+
 * Sat Jan 22 2022 Fedora Release Engineering <releng@fedoraproject.org> - 0.9.1-3.20210420git36391559
 - Rebuilt for https://fedoraproject.org/wiki/Fedora_36_Mass_Rebuild
 

@@ -1,0 +1,16 @@
+diff --git a/src/Makefile b/src/Makefile
+index 44a95ad..6fd050d 100644
+--- a/src/Makefile
++++ b/src/Makefile
+@@ -4,9 +4,9 @@ libdir ?= $(prefix)/lib
+ libdevdir ?= $(prefix)/lib
+ 
+ CFLAGS ?= -g -fomit-frame-pointer -O2
+-override CFLAGS += -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare\
++override CFLAGS += -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -fPIC\
+ 	-Iinclude/ -include ../config-host.h
+-SO_CFLAGS=-fPIC $(CFLAGS)
++SO_CFLAGS=$(CFLAGS)
+ L_CFLAGS=$(CFLAGS)
+ LINK_FLAGS=
+ LINK_FLAGS+=$(LDFLAGS)

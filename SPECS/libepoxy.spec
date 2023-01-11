@@ -1,21 +1,18 @@
 Summary: epoxy runtime library
 Name: libepoxy
-Version: 1.5.10
+Version: 1.5.8
 Release: 1%{?dist}
 License: MIT
 URL: https://github.com/anholt/libepoxy
-Source0: https://download.gnome.org/sources/%{name}/1.5/%{name}-%{version}.tar.xz
+Source0: %{url}/releases/download/%{version}/%{name}-%{version}.tar.xz
 
-BuildRequires: meson
-BuildRequires: gcc
-BuildRequires: pkgconfig(gl)
-BuildRequires: pkgconfig(egl)
-BuildRequires: libGL-devel
-BuildRequires: libEGL-devel
-BuildRequires: libX11-devel
-BuildRequires: pkgconfig(glesv2)
-BuildRequires: python3
-BuildRequires: xorg-x11-server-Xvfb mesa-dri-drivers
+BuildRequires:  meson
+BuildRequires:  gcc
+BuildRequires:  pkgconfig(gl)
+BuildRequires:  pkgconfig(egl)
+BuildRequires:  pkgconfig(glesv2)
+BuildRequires:  python3
+BuildRequires:  xorg-x11-server-Xvfb mesa-dri-drivers
 
 %description
 A library for handling OpenGL function pointer management.
@@ -44,6 +41,8 @@ developing applications that use %{name}.
 xvfb-run -d -s "-screen 0 640x480x24" ninja -C %{_vpath_builddir} test || \
     (cat %{_vpath_builddir}/meson-logs/testlog.txt ; exit 1)
 
+%ldconfig_scriptlets
+
 %files
 %license COPYING
 %doc README.md
@@ -55,60 +54,11 @@ xvfb-run -d -s "-screen 0 640x480x24" ninja -C %{_vpath_builddir} test || \
 %{_libdir}/pkgconfig/epoxy.pc
 
 %changelog
-* Fri Mar 18 2022 David King <amigadave@amigadave.com> - 1.5.10-1
-- Update to 1.5.10
+* Tue Jun 29 2021 Olivier Fourdan <ofourdan@redhat.com> - 1.5.8-1
+- libepoxy 1.5.8 (rhbz#1976780)
 
-* Thu Jan 20 2022 Fedora Release Engineering <releng@fedoraproject.org> - 1.5.9-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_36_Mass_Rebuild
-
-* Sun Aug 15 2021 Kalev Lember <klember@redhat.com> - 1.5.9-1
-- Update to 1.5.9
-
-* Thu Jul 22 2021 Fedora Release Engineering <releng@fedoraproject.org> - 1.5.8-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_35_Mass_Rebuild
-
-* Wed May 26 2021 Kalev Lember <klember@redhat.com> - 1.5.8-1
-- Update to 1.5.8
-
-* Fri Apr 30 2021 Kalev Lember <klember@redhat.com> - 1.5.7-1
-- Update to 1.5.7
-
-* Fri Apr 30 2021 Kalev Lember <klember@redhat.com> - 1.5.6-1
-- Update to 1.5.6
-- Remove ldconfig_scriptlets use
-
-* Tue Jan 26 2021 Fedora Release Engineering <releng@fedoraproject.org> - 1.5.5-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_34_Mass_Rebuild
-
-* Tue Jan 05 2021 Kalev Lember <klember@redhat.com> - 1.5.5-1
-- Update to 1.5.5
-
-* Tue Jul 28 2020 Fedora Release Engineering <releng@fedoraproject.org> - 1.5.4-3
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_33_Mass_Rebuild
-
-* Wed Jan 29 2020 Fedora Release Engineering <releng@fedoraproject.org> - 1.5.4-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_32_Mass_Rebuild
-
-* Wed Nov 27 2019 Kalev Lember <klember@redhat.com> - 1.5.4-1
-- Update to 1.5.4
-
-* Fri Oct 25 2019 Peter Robinson <pbrobinson@gmail.com> - 1.5.3-5
-- Rebuild for libglvnd 1.2, drop work-arounds
-
-* Thu Aug 22 2019 Rex Dieter <rdieter@fedoraproject.org> - 1.5.3-4
-- epoxy.pc: -Requires.private: gl egl (#1744320)
-
-* Thu Jul 25 2019 Fedora Release Engineering <releng@fedoraproject.org> - 1.5.3-3
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_31_Mass_Rebuild
-
-* Fri Feb 01 2019 Fedora Release Engineering <releng@fedoraproject.org> - 1.5.3-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_30_Mass_Rebuild
-
-* Fri Oct 05 2018 Kalev Lember <klember@redhat.com> - 1.5.3-1
-- Update to 1.5.3
-
-* Fri Jul 13 2018 Fedora Release Engineering <releng@fedoraproject.org> - 1.5.2-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_29_Mass_Rebuild
+* Tue Nov 19 2019 Adam Jackson <ajax@redhat.com> - 1.5.3-1
+- libepoxy 1.5.3
 
 * Sun May 20 2018 Kalev Lember <klember@redhat.com> - 1.5.2-1
 - Update to 1.5.2

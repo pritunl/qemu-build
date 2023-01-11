@@ -1,8 +1,17 @@
-diff -rupN ipxe-20190125-git36a4c85f/src/config/local/general.h ipxe-20190125-git36a4c85f.new/src/config/local/general.h
---- ipxe-20190125-git36a4c85f/src/config/local/general.h	1970-01-01 01:00:00.000000000 +0100
-+++ ipxe-20190125-git36a4c85f.new/src/config/local/general.h	2019-02-01 16:40:42.725293033 +0000
-@@ -0,0 +1,4 @@
+From: Paolo Bonzini <pbonzini@redhat.com>
+Date: Tue, 17 Nov 2015 11:56:06 -0500
+Subject: [PATCH ipxe] build: customize configuration
+
+diff --git a/src/config/local/general.h b/src/config/local/general.h
+index 5814511..47d0e1a 100644
+--- a/src/config/local/general.h
++++ b/src/config/local/general.h
+@@ -0,0 +1,5 @@
++#undef ROM_BANNER_TIMEOUT
++#define ROM_BANNER_TIMEOUT     0
++
 +/* Enable IPv6. */
 +#define NET_PROTO_IPV6
-+/* Enable HTTPS */
-+#define DOWNLOAD_PROTO_HTTPS
+-- 
+2.9.3
+

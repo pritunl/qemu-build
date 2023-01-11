@@ -1,0 +1,50 @@
+From daf5bb8573c22dc133b4f7a8a07a174dbb30a2c5 Mon Sep 17 00:00:00 2001
+From: Gerd Hoffmann <kraxel@redhat.com>
+Date: Mon, 28 Jul 2014 12:14:11 +0200
+Subject: smbios: set bios vendor/version fields to Seabios/0.5.1
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Message-id: <1406549651-26021-2-git-send-email-kraxel@redhat.com>
+Patchwork-id: 60264
+O-Subject: [RHEL-7.1 seabios PATCH 1/1] smbios: set bios vendor/version fields to Seabios/0.5.1
+Bugzilla: 1123299
+RH-Acked-by: Miroslav Rezanina <mrezanin@redhat.com>
+RH-Acked-by: Laszlo Ersek <lersek@redhat.com>
+RH-Acked-by: Paolo Bonzini <pbonzini@redhat.com>
+
+Mimic rhel6/seabios commit 1389643dad35a63362cd7d8357693f01175ef473.
+Affects all 6.x and 7.0 machine types.
+
+Note: 7.1+ machine types will switch over to the new-style smbios
+handling in qemu 2.1 + seabios 1.7.5 (and ovmf), where seabios will
+fill in the actual version information instead of the bogous 0.5.1
+which we are using here for backward compatibility reasons.
+
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+
+(cherry picked from commit cc21704fcfbc62af6789e1362eb05a2dc2b56cbf)
+Signed-off-by: Paweł Poławski <ppolawsk@redhat.com>
+---
+ src/fw/smbios.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/fw/smbios.c b/src/fw/smbios.c
+index 730b6898..cb6fc03f 100644
+--- a/src/fw/smbios.c
++++ b/src/fw/smbios.c
+@@ -174,8 +174,8 @@ smbios_init_type_0(void *start)
+     p->header.length = sizeof(struct smbios_type_0);
+     p->header.handle = 0;
+ 
+-    load_str_field_with_default(0, vendor_str, BUILD_APPNAME);
+-    load_str_field_with_default(0, bios_version_str, BUILD_APPNAME);
++    load_str_field_with_default(0, vendor_str, "Seabios");
++    load_str_field_with_default(0, bios_version_str, "0.5.1");
+ 
+     p->bios_starting_address_segment = 0xe800;
+ 
+-- 
+2.31.1
+

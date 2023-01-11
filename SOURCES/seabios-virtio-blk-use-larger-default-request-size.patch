@@ -1,0 +1,42 @@
+From 88e527d9fbbbe8d05e45f6db8a151d22e7f973d3 Mon Sep 17 00:00:00 2001
+From: Gerd Hoffmann <kraxel@redhat.com>
+Date: Thu, 30 Jun 2022 17:28:40 +0200
+Subject: [PATCH] virtio-blk: use larger default request size
+
+RH-Author: Gerd Hoffmann <kraxel@redhat.com>
+RH-MergeRequest: 8: virtio-blk: use larger default request size
+RH-Commit: [1/1] df68a35a0d02fb91f61eca9e9342ae5f13f99803
+RH-Bugzilla: 2101787
+RH-Acked-by: Oliver Steffen <osteffen@redhat.com>
+RH-Acked-by: Pawel Polawski <ppolawsk@redhat.com>
+RH-Acked-by: Miroslav Rezanina <mrezanin@redhat.com>
+
+Bump default from 8 to 64 blocks.  Using 8 by default leads
+to requests being splitted on qemu, which slows down boot.
+
+Some (temporary) debug logging added showed that almost all
+requests on a standard fedora install are less than 64 blocks,
+so that should bring us back to 1.15 performance levels.
+
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+(cherry picked from commit 46de2eec93bffa0706e6229c0da2919763c8eb04)
+---
+ src/hw/virtio-blk.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/hw/virtio-blk.c b/src/hw/virtio-blk.c
+index 929ba887..9b4a05a4 100644
+--- a/src/hw/virtio-blk.c
++++ b/src/hw/virtio-blk.c
+@@ -95,7 +95,7 @@ virtio_blk_op(struct disk_op_s *op, int write)
+         blk_num_max = (u16)max_io_size / vdrive->drive.blksize;
+     else
+         /* default blk_num_max if hardware doesnot advise a proper value */
+-        blk_num_max = 8;
++        blk_num_max = 64;
+ 
+     if (op->count <= blk_num_max) {
+         virtio_blk_op_one_segment(vdrive, write, sg);
+-- 
+2.31.1
+

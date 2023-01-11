@@ -1,0 +1,159 @@
+From a7e5f1d8f1f874434f8b3e6d6eac784d5e3e3971 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Volker=20R=C3=BCmelin?= <vr_qemu@t-online.de>
+Date: Sat, 2 Apr 2022 20:28:39 +0200
+Subject: [PATCH 3/3] reset: force standard PCI configuration access
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RH-Author: Gerd Hoffmann <kraxel@redhat.com>
+RH-MergeRequest: 7: pci: fix reset for q35 and tcg
+RH-Commit: [2/2] 693fbb9148c81f344dc9f64e7a36e51b42ee1a95
+RH-Bugzilla: 2083884
+RH-Acked-by: Pawel Polawski <ppolawsk@redhat.com>
+RH-Acked-by: Oliver Steffen <osteffen@redhat.com>
+RH-Acked-by: Igor Mammedov <imammedo@redhat.com>
+RH-Acked-by: Laszlo Ersek <lersek@redhat.com>
+
+After a reset of a QEMU -machine q35 guest, the PCI Express
+Enhanced Configuration Mechanism is disabled and the variable
+mmconfig no longer matches the configuration register PCIEXBAR
+of the Q35 chipset. Until the variable mmconfig is reset to 0,
+all pci_config_*() functions no longer work.
+
+The variable mmconfig is located in one of the read-only C-F
+segments. To reset it the pci_config_*() functions are needed,
+but they do not work.
+
+Replace all pci_config_*() calls with Standard PCI Configuration
+Mechanism pci_ioconfig_*() calls until mmconfig is overwritten
+with 0 by a fresh copy of the BIOS.
+
+This fixes
+
+In resume (status=0)
+In 32bit resume
+Attempting a hard reboot
+Unable to unlock ram - bridge not found
+
+and a reset loop with QEMU -accel tcg.
+
+Signed-off-by: Volker Rümelin <vr_qemu@t-online.de>
+(cherry picked from commit 01774004c7f7fdc9c1e8f1715f70d3b913f8d491)
+---
+ src/fw/shadow.c | 14 +++++++-------
+ src/hw/pci.c    | 27 +++++++++++++++++++++++++++
+ src/hw/pci.h    |  6 ++++++
+ 3 files changed, 40 insertions(+), 7 deletions(-)
+
+diff --git a/src/fw/shadow.c b/src/fw/shadow.c
+index 4c627a8f..8930616e 100644
+--- a/src/fw/shadow.c
++++ b/src/fw/shadow.c
+@@ -32,8 +32,8 @@ __make_bios_writable_intel(u16 bdf, u32 pam0)
+ {
+     // Read in current PAM settings from pci config space
+     union pamdata_u pamdata;
+-    pamdata.data32[0] = pci_config_readl(bdf, ALIGN_DOWN(pam0, 4));
+-    pamdata.data32[1] = pci_config_readl(bdf, ALIGN_DOWN(pam0, 4) + 4);
++    pamdata.data32[0] = pci_ioconfig_readl(bdf, ALIGN_DOWN(pam0, 4));
++    pamdata.data32[1] = pci_ioconfig_readl(bdf, ALIGN_DOWN(pam0, 4) + 4);
+     u8 *pam = &pamdata.data8[pam0 & 0x03];
+ 
+     // Make ram from 0xc0000-0xf0000 writable
+@@ -46,8 +46,8 @@ __make_bios_writable_intel(u16 bdf, u32 pam0)
+     pam[0] = 0x30;
+ 
+     // Write PAM settings back to pci config space
+-    pci_config_writel(bdf, ALIGN_DOWN(pam0, 4), pamdata.data32[0]);
+-    pci_config_writel(bdf, ALIGN_DOWN(pam0, 4) + 4, pamdata.data32[1]);
++    pci_ioconfig_writel(bdf, ALIGN_DOWN(pam0, 4), pamdata.data32[0]);
++    pci_ioconfig_writel(bdf, ALIGN_DOWN(pam0, 4) + 4, pamdata.data32[1]);
+ 
+     if (!ram_present)
+         // Copy bios.
+@@ -59,7 +59,7 @@ __make_bios_writable_intel(u16 bdf, u32 pam0)
+ static void
+ make_bios_writable_intel(u16 bdf, u32 pam0)
+ {
+-    int reg = pci_config_readb(bdf, pam0);
++    int reg = pci_ioconfig_readb(bdf, pam0);
+     if (!(reg & 0x10)) {
+         // QEMU doesn't fully implement the piix shadow capabilities -
+         // if ram isn't backing the bios segment when shadowing is
+@@ -125,8 +125,8 @@ make_bios_writable(void)
+     // At this point, statically allocated variables can't be written,
+     // so do this search manually.
+     int bdf;
+-    foreachbdf(bdf, 0) {
+-        u32 vendev = pci_config_readl(bdf, PCI_VENDOR_ID);
++    pci_ioconfig_foreachbdf(bdf, 0) {
++        u32 vendev = pci_ioconfig_readl(bdf, PCI_VENDOR_ID);
+         u16 vendor = vendev & 0xffff, device = vendev >> 16;
+         if (vendor == PCI_VENDOR_ID_INTEL
+             && device == PCI_DEVICE_ID_INTEL_82441) {
+diff --git a/src/hw/pci.c b/src/hw/pci.c
+index f13cbdea..8eda84b2 100644
+--- a/src/hw/pci.c
++++ b/src/hw/pci.c
+@@ -157,6 +157,33 @@ u8 pci_find_capability(u16 bdf, u8 cap_id, u8 cap)
+     return 0;
+ }
+ 
++// Helper function for pci_ioconfig_foreachbdf() macro - return next device
++int pci_ioconfig_next(int bdf, int bus)
++{
++    if (pci_bdf_to_fn(bdf) == 0
++        && (pci_ioconfig_readb(bdf, PCI_HEADER_TYPE) & 0x80) == 0)
++        // Last found device wasn't a multi-function device - skip to
++        // the next device.
++        bdf += 8;
++    else
++        bdf += 1;
++
++    for (;;) {
++        if (pci_bdf_to_bus(bdf) != bus)
++            return -1;
++
++        u16 v = pci_ioconfig_readw(bdf, PCI_VENDOR_ID);
++        if (v != 0x0000 && v != 0xffff)
++            // Device is present.
++            return bdf;
++
++        if (pci_bdf_to_fn(bdf) == 0)
++            bdf += 8;
++        else
++            bdf += 1;
++    }
++}
++
+ // Helper function for foreachbdf() macro - return next device
+ int
+ pci_next(int bdf, int bus)
+diff --git a/src/hw/pci.h b/src/hw/pci.h
+index ee6acafc..b2f5baf4 100644
+--- a/src/hw/pci.h
++++ b/src/hw/pci.h
+@@ -27,6 +27,11 @@ static inline u16 pci_bus_devfn_to_bdf(int bus, u16 devfn) {
+     return (bus << 8) | devfn;
+ }
+ 
++#define pci_ioconfig_foreachbdf(BDF, BUS)                               \
++    for (BDF=pci_ioconfig_next(pci_bus_devfn_to_bdf((BUS), 0)-1, (BUS)) \
++         ; BDF >= 0                                                     \
++         ; BDF=pci_ioconfig_next(BDF, (BUS)))
++
+ #define foreachbdf(BDF, BUS)                                    \
+     for (BDF=pci_next(pci_bus_devfn_to_bdf((BUS), 0)-1, (BUS))  \
+          ; BDF >= 0                                             \
+@@ -39,6 +44,7 @@ void pci_ioconfig_writeb(u16 bdf, u32 addr, u8 val);
+ u32 pci_ioconfig_readl(u16 bdf, u32 addr);
+ u16 pci_ioconfig_readw(u16 bdf, u32 addr);
+ u8 pci_ioconfig_readb(u16 bdf, u32 addr);
++int pci_ioconfig_next(int bdf, int bus);
+ 
+ // PCI configuration access using either PCI CAM or PCIe ECAM
+ void pci_config_writel(u16 bdf, u32 addr, u32 val);
+-- 
+2.35.3
+
