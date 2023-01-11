@@ -1,0 +1,176 @@
+From f0d41555cc5b42bd284c8ee1f3b419c612a9a8ca Mon Sep 17 00:00:00 2001
+From: Gerd Hoffmann <kraxel@redhat.com>
+Date: Fri, 2 Dec 2022 14:10:06 +0100
+Subject: [PATCH 28/32] OvmfPkg/PlatformPei: remove mFeatureControlValue
+
+Use PlatformInfoHob->FeatureControlValue instead.
+OnMpServicesAvailable() will find PlatformInfoHob using
+GetFirstGuidHob() and pass a pointer to the WriteFeatureControl
+callback.
+
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+Tested-by: Tom Lendacky <thomas.lendacky@amd.com>
+Acked-by: Ard Biesheuvel <ardb@kernel.org>
+(cherry picked from commit f6a196c7eb34affff0cfe1864e126953096885e1)
+---
+ OvmfPkg/Include/Library/PlatformInitLib.h |  2 ++
+ OvmfPkg/PlatformPei/Platform.h            |  2 +-
+ OvmfPkg/PlatformPei/FeatureControl.c      | 44 ++++++++++++++++-------
+ OvmfPkg/PlatformPei/Platform.c            |  2 +-
+ 4 files changed, 36 insertions(+), 14 deletions(-)
+
+diff --git a/OvmfPkg/Include/Library/PlatformInitLib.h b/OvmfPkg/Include/Library/PlatformInitLib.h
+index c5234bf26d45..da7ed76041d2 100644
+--- a/OvmfPkg/Include/Library/PlatformInitLib.h
++++ b/OvmfPkg/Include/Library/PlatformInitLib.h
+@@ -48,6 +48,8 @@ typedef struct {
+ 
+   UINT32               S3AcpiReservedMemoryBase;
+   UINT32               S3AcpiReservedMemorySize;
++
++  UINT64               FeatureControlValue;
+ } EFI_HOB_PLATFORM_INFO;
+ #pragma pack()
+ 
+diff --git a/OvmfPkg/PlatformPei/Platform.h b/OvmfPkg/PlatformPei/Platform.h
+index 86f603ff649c..1cf44844a781 100644
+--- a/OvmfPkg/PlatformPei/Platform.h
++++ b/OvmfPkg/PlatformPei/Platform.h
+@@ -70,7 +70,7 @@ MemTypeInfoInitialization (
+ 
+ VOID
+ InstallFeatureControlCallback (
+-  VOID
++  IN OUT EFI_HOB_PLATFORM_INFO  *PlatformInfoHob
+   );
+ 
+ VOID
+diff --git a/OvmfPkg/PlatformPei/FeatureControl.c b/OvmfPkg/PlatformPei/FeatureControl.c
+index 5864ee0c214d..d8a398cd5565 100644
+--- a/OvmfPkg/PlatformPei/FeatureControl.c
++++ b/OvmfPkg/PlatformPei/FeatureControl.c
+@@ -8,6 +8,7 @@
+ **/
+ 
+ #include <Library/DebugLib.h>
++#include <Library/HobLib.h>
+ #include <Library/PeiServicesLib.h>
+ #include <Library/QemuFwCfgLib.h>
+ #include <Ppi/MpServices.h>
+@@ -16,11 +17,6 @@
+ 
+ #include "Platform.h"
+ 
+-//
+-// The value to be written to the Feature Control MSR, retrieved from fw_cfg.
+-//
+-STATIC UINT64  mFeatureControlValue;
+-
+ /**
+   Write the Feature Control MSR on an Application Processor or the Boot
+   Processor.
+@@ -38,10 +34,22 @@ WriteFeatureControl (
+   IN OUT VOID  *WorkSpace
+   )
+ {
++  EFI_HOB_PLATFORM_INFO  *PlatformInfoHob = WorkSpace;
++
+   if (TdIsEnabled ()) {
+-    TdVmCall (TDVMCALL_WRMSR, (UINT64)MSR_IA32_FEATURE_CONTROL, mFeatureControlValue, 0, 0, 0);
++    TdVmCall (
++      TDVMCALL_WRMSR,
++      (UINT64)MSR_IA32_FEATURE_CONTROL,
++      PlatformInfoHob->FeatureControlValue,
++      0,
++      0,
++      0
++      );
+   } else {
+-    AsmWriteMsr64 (MSR_IA32_FEATURE_CONTROL, mFeatureControlValue);
++    AsmWriteMsr64 (
++      MSR_IA32_FEATURE_CONTROL,
++      PlatformInfoHob->FeatureControlValue
++      );
+   }
+ }
+ 
+@@ -67,6 +75,15 @@ OnMpServicesAvailable (
+ {
+   EFI_PEI_MP_SERVICES_PPI  *MpServices;
+   EFI_STATUS               Status;
++  EFI_HOB_PLATFORM_INFO    *PlatformInfoHob;
++  EFI_HOB_GUID_TYPE        *GuidHob;
++
++  GuidHob = GetFirstGuidHob (&gUefiOvmfPkgPlatformInfoGuid);
++  if (GuidHob == NULL) {
++    return EFI_UNSUPPORTED;
++  }
++
++  PlatformInfoHob = (EFI_HOB_PLATFORM_INFO *)GET_GUID_HOB_DATA (GuidHob);
+ 
+   DEBUG ((DEBUG_VERBOSE, "%a: %a\n", gEfiCallerBaseName, __FUNCTION__));
+ 
+@@ -80,7 +97,7 @@ OnMpServicesAvailable (
+                              WriteFeatureControl, // Procedure
+                              FALSE,               // SingleThread
+                              0,                   // TimeoutInMicroSeconds: inf.
+-                             NULL                 // ProcedureArgument
++                             PlatformInfoHob      // ProcedureArgument
+                              );
+   if (EFI_ERROR (Status) && (Status != EFI_NOT_STARTED)) {
+     DEBUG ((DEBUG_ERROR, "%a: StartupAllAps(): %r\n", __FUNCTION__, Status));
+@@ -90,7 +107,7 @@ OnMpServicesAvailable (
+   //
+   // Now write the MSR on the BSP too.
+   //
+-  WriteFeatureControl (NULL);
++  WriteFeatureControl (PlatformInfoHob);
+   return EFI_SUCCESS;
+ }
+ 
+@@ -107,7 +124,7 @@ STATIC CONST EFI_PEI_NOTIFY_DESCRIPTOR  mMpServicesNotify = {
+ 
+ VOID
+ InstallFeatureControlCallback (
+-  VOID
++  IN OUT EFI_HOB_PLATFORM_INFO  *PlatformInfoHob
+   )
+ {
+   EFI_STATUS            Status;
+@@ -119,7 +136,7 @@ InstallFeatureControlCallback (
+              &FwCfgItem,
+              &FwCfgSize
+              );
+-  if (EFI_ERROR (Status) || (FwCfgSize != sizeof mFeatureControlValue)) {
++  if (EFI_ERROR (Status) || (FwCfgSize != sizeof (PlatformInfoHob->FeatureControlValue))) {
+     //
+     // Nothing to do.
+     //
+@@ -127,7 +144,10 @@ InstallFeatureControlCallback (
+   }
+ 
+   QemuFwCfgSelectItem (FwCfgItem);
+-  QemuFwCfgReadBytes (sizeof mFeatureControlValue, &mFeatureControlValue);
++  QemuFwCfgReadBytes (
++    sizeof (PlatformInfoHob->FeatureControlValue),
++    &(PlatformInfoHob->FeatureControlValue)
++    );
+ 
+   Status = PeiServicesNotifyPpi (&mMpServicesNotify);
+   if (EFI_ERROR (Status)) {
+diff --git a/OvmfPkg/PlatformPei/Platform.c b/OvmfPkg/PlatformPei/Platform.c
+index ee72b4ef24aa..d324ae95f8f5 100644
+--- a/OvmfPkg/PlatformPei/Platform.c
++++ b/OvmfPkg/PlatformPei/Platform.c
+@@ -409,7 +409,7 @@ InitializePlatform (
+   }
+ 
+   IntelTdxInitialize ();
+-  InstallFeatureControlCallback ();
++  InstallFeatureControlCallback (PlatformInfoHob);
+ 
+   return EFI_SUCCESS;
+ }
+-- 
+2.38.1
+

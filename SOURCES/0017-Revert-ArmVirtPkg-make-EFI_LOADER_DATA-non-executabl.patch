@@ -1,0 +1,29 @@
+From 79d7efa44192acd8b7c2a693bd8bf6e1e964f708 Mon Sep 17 00:00:00 2001
+From: Gerd Hoffmann <kraxel@redhat.com>
+Date: Mon, 28 Nov 2022 14:30:57 +0100
+Subject: [PATCH 17/18] Revert "ArmVirtPkg: make EFI_LOADER_DATA
+ non-executable"
+
+This reverts commit 2997ae38739756ecba9b0de19e86032ebc689ef9.
+
+Fedora grub is apparently still broken ...
+---
+ ArmVirtPkg/ArmVirt.dsc.inc | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ArmVirtPkg/ArmVirt.dsc.inc b/ArmVirtPkg/ArmVirt.dsc.inc
+index 462073517a22..34575585adbb 100644
+--- a/ArmVirtPkg/ArmVirt.dsc.inc
++++ b/ArmVirtPkg/ArmVirt.dsc.inc
+@@ -368,7 +368,7 @@ [PcdsFixedAtBuild.common]
+   # reserved ones, with the exception of LoaderData regions, of which OS loaders
+   # (i.e., GRUB) may assume that its contents are executable.
+   #
+-  gEfiMdeModulePkgTokenSpaceGuid.PcdDxeNxMemoryProtectionPolicy|0xC000000000007FD5
++  gEfiMdeModulePkgTokenSpaceGuid.PcdDxeNxMemoryProtectionPolicy|0xC000000000007FD1
+ 
+ [Components.common]
+   #
+-- 
+2.38.1
+

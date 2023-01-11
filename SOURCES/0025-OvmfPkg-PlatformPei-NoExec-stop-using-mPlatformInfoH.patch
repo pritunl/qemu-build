@@ -1,0 +1,54 @@
+From 6c10dc63b0753d9e241274d1cac62c0af406256e Mon Sep 17 00:00:00 2001
+From: Gerd Hoffmann <kraxel@redhat.com>
+Date: Fri, 2 Dec 2022 14:10:03 +0100
+Subject: [PATCH 25/32] OvmfPkg/PlatformPei: NoExec: stop using
+ mPlatformInfoHob
+
+Stop using the mPlatformInfoHob global variable in NoexecDxeInitialization()
+function.  Pass a pointer to the PlatformInfoHob instead.
+
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+Tested-by: Tom Lendacky <thomas.lendacky@amd.com>
+Acked-by: Ard Biesheuvel <ardb@kernel.org>
+(cherry picked from commit 7dbb8a24d1a3403f85d959bc1234b9f4a92bfbf0)
+---
+ OvmfPkg/PlatformPei/Platform.c | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/OvmfPkg/PlatformPei/Platform.c b/OvmfPkg/PlatformPei/Platform.c
+index c0273091326c..8307a80617fc 100644
+--- a/OvmfPkg/PlatformPei/Platform.c
++++ b/OvmfPkg/PlatformPei/Platform.c
+@@ -87,16 +87,17 @@ MemMapInitialization (
+   ASSERT_RETURN_ERROR (PcdStatus);
+ }
+ 
++STATIC
+ VOID
+ NoexecDxeInitialization (
+-  VOID
++  IN OUT EFI_HOB_PLATFORM_INFO  *PlatformInfoHob
+   )
+ {
+   RETURN_STATUS  Status;
+ 
+-  Status = PlatformNoexecDxeInitialization (&mPlatformInfoHob);
++  Status = PlatformNoexecDxeInitialization (PlatformInfoHob);
+   if (!RETURN_ERROR (Status)) {
+-    Status = PcdSetBoolS (PcdSetNxForStack, mPlatformInfoHob.PcdSetNxForStack);
++    Status = PcdSetBoolS (PcdSetNxForStack, PlatformInfoHob->PcdSetNxForStack);
+     ASSERT_RETURN_ERROR (Status);
+   }
+ }
+@@ -387,7 +388,7 @@ InitializePlatform (
+     PeiFvInitialization (&mPlatformInfoHob);
+     MemTypeInfoInitialization (&mPlatformInfoHob);
+     MemMapInitialization (&mPlatformInfoHob);
+-    NoexecDxeInitialization ();
++    NoexecDxeInitialization (&mPlatformInfoHob);
+     UPDATE_BOOLEAN_PCD_FROM_FW_CFG (PcdResizeXterm);
+   }
+ 
+-- 
+2.38.1
+
