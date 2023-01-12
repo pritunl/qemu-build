@@ -1,0 +1,66 @@
+From bd087c3d2766b81b25ea7bbe425b55023fd12545 Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Wed, 15 May 2019 07:35:45 +0530
+Subject: [PATCH 159/169] glusterd: add an op-version check
+
+Problem: "gluster v status" is hung in heterogenous cluster
+when issued from a non-upgraded node.
+
+Cause: commit 34e010d64 fixes the txn-opinfo mem leak
+in op-sm framework by not setting the txn-opinfo if some
+conditions are true. When vol status is issued from a
+non-upgraded node, command is hanging in its upgraded peer
+as the upgraded node setting the txn-opinfo based on new
+conditions where as non-upgraded nodes are following diff
+conditions.
+
+Fix: Add an op-version check, so that all the nodes follow
+same set of conditions to set txn-opinfo.
+
+upstream patch: https://review.gluster.org/#/c/glusterfs/+/22730/
+
+BUG: 1707246
+
+> fixes: bz#1710159
+> Change-Id: Ie1f353212c5931ddd1b728d2e6949dfe6225c4ab
+> Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+
+Change-Id: Ie1f353212c5931ddd1b728d2e6949dfe6225c4ab
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172307
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-op-sm.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-op-sm.c b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+index 94a5e1f..d0c1a2c 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-op-sm.c
++++ b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+@@ -8158,9 +8158,12 @@ glusterd_op_sm()
+     glusterd_op_sm_event_type_t event_type = GD_OP_EVENT_NONE;
+     xlator_t *this = NULL;
+     glusterd_op_info_t txn_op_info;
++    glusterd_conf_t *priv = NULL;
+ 
+     this = THIS;
+     GF_ASSERT(this);
++    priv = this->private;
++    GF_ASSERT(priv);
+ 
+     ret = synclock_trylock(&gd_op_sm_lock);
+     if (ret) {
+@@ -8238,7 +8241,8 @@ glusterd_op_sm()
+                            "Unable to clear "
+                            "transaction's opinfo");
+             } else {
+-                if (!(event_type == GD_OP_EVENT_STAGE_OP &&
++                if ((priv->op_version < GD_OP_VERSION_6_0) ||
++                    !(event_type == GD_OP_EVENT_STAGE_OP &&
+                       opinfo.state.state == GD_OP_STATE_STAGED &&
+                       opinfo.skip_locking)) {
+                     ret = glusterd_set_txn_opinfo(&event->txn_id, &opinfo);
+-- 
+1.8.3.1
+

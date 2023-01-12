@@ -1,0 +1,80 @@
+From d7795a592883cfb01da76b6905a7c9eb1e912bef Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawa@redhat.com>
+Date: Tue, 28 May 2019 08:28:29 +0530
+Subject: [PATCH 147/169] glusterd: bulkvoldict thread is not handling all
+ volumes
+
+Problem: In commit ac70f66c5805e10b3a1072bd467918730c0aeeb4 I
+         missed one condition to populate volume dictionary in
+         multiple threads while brick_multiplex is enabled.Due
+         to that glusterd is not sending volume dictionary for
+         all volumes to peer.
+
+Solution: Update the condition in code as well as update test case
+          also to avoid the issue
+
+> Change-Id: I06522dbdfee4f7e995d9cc7b7098fdf35340dc52
+> fixes: bz#1711250
+> Cherry pick from commit 4a5fb52eb1c5387a0fb8bfa1253e5227c7c255e8
+> Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/22739/
+
+BUG: 1711249
+Change-Id: I06522dbdfee4f7e995d9cc7b7098fdf35340dc52
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/171589
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/glusterd/bug-1699339.t          | 16 ++++++++++------
+ xlators/mgmt/glusterd/src/glusterd-utils.c |  2 +-
+ 2 files changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/tests/bugs/glusterd/bug-1699339.t b/tests/bugs/glusterd/bug-1699339.t
+index 3e950f4..bb8d4f4 100644
+--- a/tests/bugs/glusterd/bug-1699339.t
++++ b/tests/bugs/glusterd/bug-1699339.t
+@@ -52,18 +52,22 @@ done
+ 
+ TEST kill_glusterd 1
+ 
+-vol1=$(printf "%s-vol%02d" $V0 1)
++TESTS_EXPECTED_IN_LOOP=4
++for i in `seq 1 3 15`
++do
++vol1=$(printf "%s-vol%02d" $V0 $i)
+ TEST $CLI_2 volume set $vol1 performance.readdir-ahead on
+-vol2=$(printf "%s-vol%02d" $V0 2)
+-TEST $CLI_2 volume set $vol2 performance.readdir-ahead on
++done
+ 
+ # Bring back 1st glusterd
+ TEST $glusterd_1
+ EXPECT_WITHIN $PROBE_TIMEOUT 2 peer_count
+ 
++TESTS_EXPECTED_IN_LOOP=4
++for i in `seq 1 3 15`
++do
++vol1=$(printf "%s-vol%02d" $V0 $i)
+ EXPECT_WITHIN $PROBE_TIMEOUT "on" volinfo_field_1 $vol1 performance.readdir-ahead
+-
+-vol_name=$(printf "%s-vol%02d" $V0 2)
+-EXPECT_WITHIN $PROBE_TIMEOUT "on" volinfo_field_1 $vol2 performance.readdir-ahead
++done
+ 
+ cleanup
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index efa5a86..8f1525e 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -3542,7 +3542,7 @@ glusterd_add_volumes_to_export_dict(dict_t **peer_data)
+             if ((i + 1) != totthread) {
+                 arg->end = ((i + 1) * vol_per_thread_limit);
+             } else {
+-                arg->end = ((i * vol_per_thread_limit) + endindex);
++                arg->end = (((i + 1) * vol_per_thread_limit) + endindex);
+             }
+             th_ret = gf_thread_create_detached(
+                 &th_id, glusterd_add_bulk_volumes_create_thread, arg,
+-- 
+1.8.3.1
+

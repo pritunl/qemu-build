@@ -1,0 +1,114 @@
+From 693fcf327eace37fe698953b90050d67fc840ac6 Mon Sep 17 00:00:00 2001
+From: Anuradha Talur <atalur@commvault.com>
+Date: Wed, 24 Apr 2019 12:06:23 -0700
+Subject: [PATCH 155/169] cloudsync: Make readdirp return stat info of all the
+ dirents
+
+This change got missed while the initial changes were sent.
+Should have been a part of :
+	https://review.gluster.org/#/c/glusterfs/+/21757/
+
+Gist of the change:
+	Function that fills in stat info for dirents is
+invoked in readdirp in posix when cloudsync populates xdata
+request with GF_CS_OBJECT_STATUS.
+
+backport of:https://review.gluster.org/#/c/glusterfs/+/22616/
+
+> Change-Id: Ide0c4e80afb74cd2120f74ba934ed40123152d69
+> updates: bz#1642168
+> Signed-off-by: Anuradha Talur <atalur@commvault.com>
+
+Change-Id: I77de3f9d8ae01a0280a9d1753f94d74b5e5ce2fd
+Signed-off-by: Susant Palai <spalai@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172193
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/features/cloudsync/src/cloudsync-fops-c.py |  2 +-
+ xlators/features/cloudsync/src/cloudsync.c         | 35 ++++++++++++++++++++++
+ xlators/storage/posix/src/posix-inode-fd-ops.c     |  2 ++
+ 3 files changed, 38 insertions(+), 1 deletion(-)
+
+diff --git a/xlators/features/cloudsync/src/cloudsync-fops-c.py b/xlators/features/cloudsync/src/cloudsync-fops-c.py
+index a7a2201..8878b70 100755
+--- a/xlators/features/cloudsync/src/cloudsync-fops-c.py
++++ b/xlators/features/cloudsync/src/cloudsync-fops-c.py
+@@ -285,7 +285,7 @@ loc_stat_op_fop_template = ['lookup', 'stat', 'discover', 'access', 'setattr',
+ 
+ # These fops need a separate implementation
+ special_fops = ['statfs', 'setxattr', 'unlink', 'getxattr',
+-                'truncate', 'fstat', 'readv']
++                'truncate', 'fstat', 'readv', 'readdirp']
+ 
+ def gen_defaults():
+     for name in ops:
+diff --git a/xlators/features/cloudsync/src/cloudsync.c b/xlators/features/cloudsync/src/cloudsync.c
+index 8026b05..26e512c 100644
+--- a/xlators/features/cloudsync/src/cloudsync.c
++++ b/xlators/features/cloudsync/src/cloudsync.c
+@@ -280,6 +280,40 @@ out:
+ }
+ 
+ int32_t
++cs_readdirp(call_frame_t *frame, xlator_t *this, fd_t *fd, size_t size,
++            off_t off, dict_t *xdata)
++{
++    int ret = 0;
++    int op_errno = ENOMEM;
++
++    if (!xdata) {
++        xdata = dict_new();
++        if (!xdata) {
++            gf_msg(this->name, GF_LOG_ERROR, 0, ENOMEM,
++                   "failed to create "
++                   "dict");
++            goto err;
++        }
++    }
++
++    ret = dict_set_uint32(xdata, GF_CS_OBJECT_STATUS, 1);
++    if (ret) {
++        gf_msg(this->name, GF_LOG_ERROR, 0, 0,
++               "dict_set failed key:"
++               " %s",
++               GF_CS_OBJECT_STATUS);
++        goto err;
++    }
++
++    STACK_WIND(frame, default_readdirp_cbk, FIRST_CHILD(this),
++               FIRST_CHILD(this)->fops->readdirp, fd, size, off, xdata);
++    return 0;
++err:
++    STACK_UNWIND_STRICT(readdirp, frame, -1, op_errno, NULL, NULL);
++    return 0;
++}
++
++int32_t
+ cs_truncate_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+                 int32_t op_ret, int32_t op_errno, struct iatt *prebuf,
+                 struct iatt *postbuf, dict_t *xdata)
+@@ -2026,6 +2060,7 @@ cs_notify(xlator_t *this, int event, void *data, ...)
+ 
+ struct xlator_fops cs_fops = {
+     .stat = cs_stat,
++    .readdirp = cs_readdirp,
+     .truncate = cs_truncate,
+     .seek = cs_seek,
+     .statfs = cs_statfs,
+diff --git a/xlators/storage/posix/src/posix-inode-fd-ops.c b/xlators/storage/posix/src/posix-inode-fd-ops.c
+index 065fced..2c19ce1 100644
+--- a/xlators/storage/posix/src/posix-inode-fd-ops.c
++++ b/xlators/storage/posix/src/posix-inode-fd-ops.c
+@@ -5472,6 +5472,8 @@ posix_readdirp_fill(xlator_t *this, fd_t *fd, gf_dirent_t *entries,
+             continue;
+         }
+ 
++        posix_update_iatt_buf(&stbuf, -1, hpath, dict);
++
+         if (!inode)
+             inode = inode_find(itable, stbuf.ia_gfid);
+ 
+-- 
+1.8.3.1
+

@@ -1,0 +1,41 @@
+From 82d7c8e057b9e22d13ca89f2a75e65a42878b7c3 Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Tue, 2 Apr 2019 10:45:15 +0530
+Subject: [PATCH 092/124] logging: Fix GF_LOG_OCCASSIONALLY API
+
+GF_LOG_OCCASSIONALLY doesn't log on the first instance rather at every
+42nd iterations which isn't effective as in some cases we might not have
+the code flow hitting the same log for as many as 42 times and we'd end
+up suppressing the log.
+
+>upstream fix : https://review.gluster.org/#/c/glusterfs/+/22475/
+>Fixes: bz#1694925
+>Change-Id: Iee293281d25a652b64df111d59b13de4efce06fa
+>Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+
+BUG: 1691620
+Change-Id: Iee293281d25a652b64df111d59b13de4efce06fa
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167822
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/glusterfs/logging.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libglusterfs/src/glusterfs/logging.h b/libglusterfs/src/glusterfs/logging.h
+index c81e19b..3655b1d 100644
+--- a/libglusterfs/src/glusterfs/logging.h
++++ b/libglusterfs/src/glusterfs/logging.h
+@@ -300,7 +300,7 @@ _gf_log_eh(const char *function, const char *fmt, ...)
+ 
+ /* Log once in GF_UNIVERSAL_ANSWER times */
+ #define GF_LOG_OCCASIONALLY(var, args...)                                      \
+-    if (!(var++ % GF_UNIVERSAL_ANSWER)) {                                      \
++    if (var++ == 0 || !((var - 1) % GF_UNIVERSAL_ANSWER)) {                    \
+         gf_log(args);                                                          \
+     }
+ 
+-- 
+1.8.3.1
+

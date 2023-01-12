@@ -1,0 +1,2155 @@
+From aab8a587360214432c4a2ab59134411f1d38c509 Mon Sep 17 00:00:00 2001
+From: karthik-us <ksubrahm@redhat.com>
+Date: Wed, 9 Dec 2020 10:46:31 +0530
+Subject: [PATCH 515/517] cluster/afr: Heal directory rename without
+ rmdir/mkdir
+
+Problem1:
+When a directory is renamed while a brick
+is down entry-heal always did an rm -rf on that directory on
+the sink on old location and did mkdir and created the directory
+hierarchy again in the new location. This is inefficient.
+
+Problem2:
+Renamedir heal order may lead to a scenario where directory in
+the new location could be created before deleting it from old
+location leading to 2 directories with same gfid in posix.
+
+Fix:
+As part of heal, if oldlocation is healed first and is not present in
+source-brick always rename it into a hidden directory inside the
+sink-brick so that when heal is triggered in new-location shd can
+rename it from this hidden directory to the new-location.
+
+If new-location heal is triggered first and it detects that the
+directory already exists in the brick, then it should skip healing the
+directory until it appears in the hidden directory.
+
+Credits: Ravi for rename-data-loss.t script
+
+Upstream patch details:
+> Fixes: #1211
+> Change-Id: I0cba2006f35cd03d314d18211ce0bd530e254843
+> Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+Upstream patch: https://review.gluster.org/#/c/glusterfs/+/24373/
+
+BUG: 1640148
+Change-Id: I0cba2006f35cd03d314d18211ce0bd530e254843
+Signed-off-by: karthik-us <ksubrahm@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/220660
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Ravishankar Narayanankutty <ravishankar@redhat.com>
+---
+ tests/afr.rc                                    |  16 +
+ tests/basic/afr/afr-anon-inode-no-quorum.t      |  63 ++++
+ tests/basic/afr/afr-anon-inode.t                | 114 ++++++
+ tests/basic/afr/entry-self-heal-anon-dir-off.t  | 464 ++++++++++++++++++++++++
+ tests/basic/afr/rename-data-loss.t              |  72 ++++
+ tests/bugs/replicate/bug-1744548-heal-timeout.t |   6 +-
+ tests/features/trash.t                          |  74 ++--
+ xlators/cluster/afr/src/afr-common.c            |  46 ++-
+ xlators/cluster/afr/src/afr-dir-read.c          |  12 +-
+ xlators/cluster/afr/src/afr-self-heal-common.c  | 182 ++++++++++
+ xlators/cluster/afr/src/afr-self-heal-entry.c   | 206 +++++++++--
+ xlators/cluster/afr/src/afr-self-heal-name.c    |  33 +-
+ xlators/cluster/afr/src/afr-self-heal.h         |   5 +
+ xlators/cluster/afr/src/afr-self-heald.c        | 178 ++++++++-
+ xlators/cluster/afr/src/afr-self-heald.h        |   2 +-
+ xlators/cluster/afr/src/afr.c                   |  40 +-
+ xlators/cluster/afr/src/afr.h                   |  11 +
+ xlators/mgmt/glusterd/src/glusterd-volgen.c     |  39 ++
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c |   6 +
+ 19 files changed, 1442 insertions(+), 127 deletions(-)
+ create mode 100644 tests/basic/afr/afr-anon-inode-no-quorum.t
+ create mode 100644 tests/basic/afr/afr-anon-inode.t
+ create mode 100644 tests/basic/afr/entry-self-heal-anon-dir-off.t
+ create mode 100644 tests/basic/afr/rename-data-loss.t
+
+diff --git a/tests/afr.rc b/tests/afr.rc
+index 35f352d..2417899 100644
+--- a/tests/afr.rc
++++ b/tests/afr.rc
+@@ -105,3 +105,19 @@ function get_quorum_type()
+         local repl_id="$3"
+         cat $m/.meta/graphs/active/$v-replicate-$repl_id/private|grep quorum-type|awk '{print $3}'
+ }
++
++function afr_private_key_value()
++{
++        local v=$1
++        local m=$2
++        local replica_id=$3
++        local key=$4
++#xargs at the end will strip leading spaces
++        grep -E "^${key} = " $m/.meta/graphs/active/${v}-replicate-${replica_id}/private | cut -f2 -d'=' | xargs
++}
++
++function afr_anon_entry_count()
++{
++    local b=$1
++    ls $b/.glusterfs-anonymous-inode* | wc -l
++}
+diff --git a/tests/basic/afr/afr-anon-inode-no-quorum.t b/tests/basic/afr/afr-anon-inode-no-quorum.t
+new file mode 100644
+index 0000000..896ba0c
+--- /dev/null
++++ b/tests/basic/afr/afr-anon-inode-no-quorum.t
+@@ -0,0 +1,63 @@
++#!/bin/bash
++
++#Test that anon-inode entry is not cleaned up as long as there exists at least
++#one valid entry
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../afr.rc
++
++cleanup;
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 replica 2 $H0:$B0/${V0}{0,1}
++TEST $CLI volume heal $V0 disable
++TEST $CLI volume set $V0 performance.write-behind off
++TEST $CLI volume set $V0 performance.read-ahead off
++TEST $CLI volume set $V0 performance.readdir-ahead off
++TEST $CLI volume set $V0 performance.open-behind off
++TEST $CLI volume set $V0 performance.stat-prefetch off
++TEST $CLI volume set $V0 performance.io-cache off
++TEST $CLI volume set $V0 performance.quick-read off
++TEST $CLI volume set $V0 cluster.entry-self-heal off
++TEST $CLI volume start $V0
++
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0
++
++TEST touch $M0/a $M0/b
++
++gfid_a=$(gf_gfid_xattr_to_str $(gf_get_gfid_xattr $B0/${V0}0/a))
++gfid_b=$(gf_gfid_xattr_to_str $(gf_get_gfid_xattr $B0/${V0}0/b))
++TEST kill_brick $V0 $H0 $B0/${V0}0
++TEST mv $M0/a $M0/a-new
++TEST mv $M0/b $M0/b-new
++
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 0
++TEST ! ls $M0/a
++TEST ! ls $M0/b
++anon_inode_name=$(ls -a $B0/${V0}0 | grep glusterfs-anonymous-inode)
++TEST stat $B0/${V0}0/$anon_inode_name/$gfid_a
++TEST stat $B0/${V0}0/$anon_inode_name/$gfid_b
++#Make sure index heal doesn't happen after enabling heal
++TEST setfattr -x trusted.afr.$V0-client-0 $B0/${V0}1
++TEST rm -f $B0/${V0}1/.glusterfs/indices/xattrop/*
++TEST $CLI volume heal $V0 enable
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "Y" glustershd_up_status
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 1
++TEST $CLI volume heal $V0
++#Allow time for a scan
++sleep 5
++TEST stat $B0/${V0}0/$anon_inode_name/$gfid_a
++TEST stat $B0/${V0}0/$anon_inode_name/$gfid_b
++inum_b=$(STAT_INO $B0/${V0}0/$anon_inode_name/$gfid_b)
++TEST rm -f $M0/a-new
++TEST stat $M0/b-new
++
++TEST $CLI volume heal $V0
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" afr_anon_entry_count $B0/${V0}0
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" afr_anon_entry_count $B0/${V0}1
++EXPECT "$inum_b" STAT_INO $B0/${V0}0/b-new
++
++cleanup
+diff --git a/tests/basic/afr/afr-anon-inode.t b/tests/basic/afr/afr-anon-inode.t
+new file mode 100644
+index 0000000..f4cf37a
+--- /dev/null
++++ b/tests/basic/afr/afr-anon-inode.t
+@@ -0,0 +1,114 @@
++#!/bin/bash
++#Tests that afr-anon-inode test cases work fine as expected
++#These are cases where in entry-heal/name-heal we dont know entry for an inode
++#so these inodes are kept in a special directory
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../afr.rc
++
++cleanup;
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 replica 3 $H0:$B0/${V0}{0..2}
++TEST $CLI volume set $V0 performance.quick-read off
++TEST $CLI volume set $V0 performance.io-cache off
++TEST $CLI volume set $V0 performance.write-behind off
++TEST $CLI volume set $V0 performance.stat-prefetch off
++TEST $CLI volume set $V0 performance.read-ahead off
++TEST $CLI volume set $V0 performance.open-behind off
++TEST $CLI volume start $V0
++TEST $GFS --volfile-id=$V0 --volfile-server=$H0 $M0;
++EXPECT "^1$" afr_private_key_value $V0 $M0 0 "use-anonymous-inode"
++TEST $CLI volume set $V0 cluster.use-anonymous-inode no
++EXPECT_WITHIN $CONFIG_UPDATE_TIMEOUT "^0$" afr_private_key_value $V0 $M0 0 "use-anonymous-inode"
++TEST $CLI volume set $V0 cluster.use-anonymous-inode yes
++EXPECT_WITHIN $CONFIG_UPDATE_TIMEOUT "^1$" afr_private_key_value $V0 $M0 0 "use-anonymous-inode"
++TEST mkdir -p $M0/d1/b $M0/d2/a
++TEST kill_brick $V0 $H0 $B0/${V0}0
++TEST mv $M0/d2/a $M0/d1
++TEST mv $M0/d1/b $M0/d2
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" get_pending_heal_count $V0
++anon_inode_name=$(ls -a $B0/${V0}0 | grep glusterfs-anonymous-inode)
++TEST [[ -d $B0/${V0}1/$anon_inode_name ]]
++TEST [[ -d $B0/${V0}2/$anon_inode_name ]]
++anon_gfid=$(gf_get_gfid_xattr $B0/${V0}0/$anon_inode_name)
++EXPECT "$anon_gfid" gf_get_gfid_xattr $B0/${V0}1/$anon_inode_name
++EXPECT "$anon_gfid" gf_get_gfid_xattr $B0/${V0}2/$anon_inode_name
++
++TEST ! ls $M0/$anon_inode_name
++EXPECT "^4$" echo $(ls -a $M0 | wc -l)
++
++#Test purging code path by shd
++TEST $CLI volume heal $V0 disable
++TEST mkdir $M0/l0 $M0/l1 $M0/l2
++TEST touch $M0/del-file $M0/del-file-nolink $M0/l0/file
++TEST ln $M0/del-file $M0/del-file-link
++TEST ln $M0/l0/file $M0/l1/file-link1
++TEST ln $M0/l0/file $M0/l2/file-link2
++TEST mkdir -p $M0/del-recursive-dir/d1
++
++TEST kill_brick $V0 $H0 $B0/${V0}0
++TEST rm -f $M0/del-file $M0/del-file-nolink
++TEST rm -rf $M0/del-recursive-dir
++TEST mv $M0/d1/a $M0/d2
++TEST mv $M0/l0/file $M0/l0/renamed-file
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status $V0 0
++
++nolink_gfid=$(gf_gfid_xattr_to_str $(gf_get_gfid_xattr $B0/${V0}0/del-file-nolink))
++link_gfid=$(gf_gfid_xattr_to_str $(gf_get_gfid_xattr $B0/${V0}0/del-file))
++dir_gfid=$(gf_gfid_xattr_to_str $(gf_get_gfid_xattr $B0/${V0}0/del-recursive-dir))
++rename_dir_gfid=$(gf_gfid_xattr_to_str $(gf_get_gfid_xattr $B0/${V0}0/d1/a))
++rename_file_gfid=$(gf_gfid_xattr_to_str $(gf_get_gfid_xattr $B0/${V0}0/l0/file))
++TEST ! stat $M0/del-file
++TEST stat $B0/${V0}0/$anon_inode_name/$link_gfid
++TEST ! stat $M0/del-file-nolink
++TEST ! stat $B0/${V0}0/$anon_inode_name/$nolink_gfid
++TEST ! stat $M0/del-recursive-dir
++TEST stat $B0/${V0}0/$anon_inode_name/$dir_gfid
++TEST ! stat $M0/d1/a
++TEST stat $B0/${V0}0/$anon_inode_name/$rename_dir_gfid
++TEST ! stat $M0/l0/file
++TEST stat $B0/${V0}0/$anon_inode_name/$rename_file_gfid
++
++TEST kill_brick $V0 $H0 $B0/${V0}1
++TEST mv $M0/l1/file-link1 $M0/l1/renamed-file-link1
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status $V0 1
++TEST ! stat $M0/l1/file-link1
++TEST stat $B0/${V0}1/$anon_inode_name/$rename_file_gfid
++
++TEST kill_brick $V0 $H0 $B0/${V0}2
++TEST mv $M0/l2/file-link2 $M0/l2/renamed-file-link2
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status $V0 2
++TEST ! stat $M0/l2/file-link2
++TEST stat $B0/${V0}2/$anon_inode_name/$rename_file_gfid
++
++#Simulate only anon-inodes present in all bricks
++TEST rm -f $M0/l0/renamed-file $M0/l1/renamed-file-link1 $M0/l2/renamed-file-link2
++
++#Test that shd doesn't cleanup anon-inodes when some bricks are down
++TEST kill_brick $V0 $H0 $B0/${V0}1
++TEST $CLI volume heal $V0 enable
++$CLI volume heal $V0
++sleep 5 #Allow time for completion of one scan
++TEST stat $B0/${V0}0/$anon_inode_name/$link_gfid
++TEST stat $B0/${V0}0/$anon_inode_name/$rename_dir_gfid
++TEST stat $B0/${V0}0/$anon_inode_name/$dir_gfid
++rename_dir_inum=$(STAT_INO $B0/${V0}0/$anon_inode_name/$rename_dir_gfid)
++
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status $V0 1
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" get_pending_heal_count $V0
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" afr_anon_entry_count $B0/${V0}0
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" afr_anon_entry_count $B0/${V0}1
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" afr_anon_entry_count $B0/${V0}2
++
++#Test that rename indeed happened instead of rmdir/mkdir
++renamed_dir_inum=$(STAT_INO $B0/${V0}0/d2/a)
++EXPECT "$rename_dir_inum" echo $renamed_dir_inum
++cleanup;
+diff --git a/tests/basic/afr/entry-self-heal-anon-dir-off.t b/tests/basic/afr/entry-self-heal-anon-dir-off.t
+new file mode 100644
+index 0000000..0803a08
+--- /dev/null
++++ b/tests/basic/afr/entry-self-heal-anon-dir-off.t
+@@ -0,0 +1,464 @@
++#!/bin/bash
++
++#This file checks if missing entry self-heal and entry self-heal are working
++#as expected.
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../afr.rc
++
++cleanup;
++
++function get_file_type {
++        stat -c "%a:%F:%g:%t:%T:%u" $1
++}
++
++function diff_dirs {
++        diff <(ls $1 | sort) <(ls $2 | sort)
++}
++
++function heal_status {
++        local f1_path="${1}/${3}"
++        local f2_path="${2}/${3}"
++        local insync=""
++        diff_dirs $f1_path $f2_path
++        if [ $? -eq 0 ];
++        then
++                insync="Y"
++        else
++                insync="N"
++        fi
++        local xattr11=$(get_hex_xattr trusted.afr.$V0-client-0 $f1_path)
++        local xattr12=$(get_hex_xattr trusted.afr.$V0-client-1 $f1_path)
++        local xattr21=$(get_hex_xattr trusted.afr.$V0-client-0 $f2_path)
++        local xattr22=$(get_hex_xattr trusted.afr.$V0-client-1 $f2_path)
++        local dirty1=$(get_hex_xattr trusted.afr.dirty $f1_path)
++        local dirty2=$(get_hex_xattr trusted.afr.dirty $f2_path)
++        if [ -z $xattr11 ]; then xattr11="000000000000000000000000"; fi
++        if [ -z $xattr12 ]; then xattr12="000000000000000000000000"; fi
++        if [ -z $xattr21 ]; then xattr21="000000000000000000000000"; fi
++        if [ -z $xattr22 ]; then xattr22="000000000000000000000000"; fi
++        if [ -z $dirty1 ]; then dirty1="000000000000000000000000"; fi
++        if [ -z $dirty2 ]; then dirty2="000000000000000000000000"; fi
++        echo ${insync}${xattr11}${xattr12}${xattr21}${xattr22}${dirty1}${dirty2}
++}
++
++function is_heal_done {
++        local zero_xattr="000000000000000000000000"
++        if [ "$(heal_status $@)" == "Y${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}" ];
++        then
++                echo "Y"
++        else
++                echo "N"
++        fi
++}
++
++function print_pending_heals {
++        local result=":"
++        for i in "$@";
++        do
++                if [ "N" == $(is_heal_done $B0/${V0}0 $B0/${V0}1 $i) ];
++                then
++                        result="$result:$i"
++                fi
++        done
++#To prevent any match for EXPECT_WITHIN, print a char non-existent in file-names
++        if [ $result == ":" ]; then result="~"; fi
++        echo $result
++}
++
++zero_xattr="000000000000000000000000"
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 replica 2 $H0:$B0/${V0}{0,1}
++TEST $CLI volume heal $V0 disable
++TEST $CLI volume set $V0 cluster.use-anonymous-inode off
++TEST $CLI volume set $V0 performance.write-behind off
++TEST $CLI volume set $V0 performance.read-ahead off
++TEST $CLI volume set $V0 performance.readdir-ahead off
++TEST $CLI volume set $V0 performance.open-behind off
++TEST $CLI volume set $V0 performance.stat-prefetch off
++TEST $CLI volume set $V0 performance.io-cache off
++TEST $CLI volume set $V0 performance.quick-read off
++TEST $CLI volume set $V0 cluster.data-self-heal on
++TEST $CLI volume set $V0 cluster.metadata-self-heal on
++TEST $CLI volume set $V0 cluster.entry-self-heal on
++TEST $CLI volume start $V0
++
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 --use-readdirp=no $M0
++cd $M0
++#_me_ is dir on which missing entry self-heal happens, _heal is where dir self-heal happens
++#spb is split-brain, fool is all fool
++
++#source_self_accusing means there exists source and a sink which self-accuses.
++#This simulates failures where fops failed on the bricks without it going down.
++#Something like EACCESS/EDQUOT etc
++
++TEST mkdir spb_heal spb spb_me_heal spb_me fool_heal fool_me v1_fool_heal v1_fool_me source_creations_heal source_deletions_heal source_creations_me source_deletions_me v1_dirty_me v1_dirty_heal source_self_accusing
++TEST mkfifo source_deletions_heal/fifo
++TEST mknod  source_deletions_heal/block b 4 5
++TEST mknod  source_deletions_heal/char c 1 5
++TEST touch  source_deletions_heal/file
++TEST ln -s  source_deletions_heal/file source_deletions_heal/slink
++TEST mkdir  source_deletions_heal/dir1
++TEST mkdir  source_deletions_heal/dir1/dir2
++
++TEST mkfifo source_deletions_me/fifo
++TEST mknod  source_deletions_me/block b 4 5
++TEST mknod  source_deletions_me/char c 1 5
++TEST touch  source_deletions_me/file
++TEST ln -s  source_deletions_me/file source_deletions_me/slink
++TEST mkdir  source_deletions_me/dir1
++TEST mkdir  source_deletions_me/dir1/dir2
++
++TEST mkfifo source_self_accusing/fifo
++TEST mknod  source_self_accusing/block b 4 5
++TEST mknod  source_self_accusing/char c 1 5
++TEST touch  source_self_accusing/file
++TEST ln -s  source_self_accusing/file source_self_accusing/slink
++TEST mkdir  source_self_accusing/dir1
++TEST mkdir  source_self_accusing/dir1/dir2
++
++TEST kill_brick $V0 $H0 $B0/${V0}0
++
++TEST touch spb_heal/0 spb/0 spb_me_heal/0 spb_me/0 fool_heal/0 fool_me/0 v1_fool_heal/0 v1_fool_me/0 v1_dirty_heal/0 v1_dirty_me/0
++TEST rm -rf source_deletions_heal/fifo source_deletions_heal/block source_deletions_heal/char source_deletions_heal/file source_deletions_heal/slink source_deletions_heal/dir1
++TEST rm -rf source_deletions_me/fifo source_deletions_me/block source_deletions_me/char source_deletions_me/file source_deletions_me/slink source_deletions_me/dir1
++TEST rm -rf source_self_accusing/fifo source_self_accusing/block source_self_accusing/char source_self_accusing/file source_self_accusing/slink source_self_accusing/dir1
++
++#Test that the files are deleted
++TEST ! stat $B0/${V0}1/source_deletions_heal/fifo
++TEST ! stat $B0/${V0}1/source_deletions_heal/block
++TEST ! stat $B0/${V0}1/source_deletions_heal/char
++TEST ! stat $B0/${V0}1/source_deletions_heal/file
++TEST ! stat $B0/${V0}1/source_deletions_heal/slink
++TEST ! stat $B0/${V0}1/source_deletions_heal/dir1
++TEST ! stat $B0/${V0}1/source_deletions_me/fifo
++TEST ! stat $B0/${V0}1/source_deletions_me/block
++TEST ! stat $B0/${V0}1/source_deletions_me/char
++TEST ! stat $B0/${V0}1/source_deletions_me/file
++TEST ! stat $B0/${V0}1/source_deletions_me/slink
++TEST ! stat $B0/${V0}1/source_deletions_me/dir1
++TEST ! stat $B0/${V0}1/source_self_accusing/fifo
++TEST ! stat $B0/${V0}1/source_self_accusing/block
++TEST ! stat $B0/${V0}1/source_self_accusing/char
++TEST ! stat $B0/${V0}1/source_self_accusing/file
++TEST ! stat $B0/${V0}1/source_self_accusing/slink
++TEST ! stat $B0/${V0}1/source_self_accusing/dir1
++
++
++TEST mkfifo source_creations_heal/fifo
++TEST mknod  source_creations_heal/block b 4 5
++TEST mknod  source_creations_heal/char c 1 5
++TEST touch  source_creations_heal/file
++TEST ln -s  source_creations_heal/file source_creations_heal/slink
++TEST mkdir  source_creations_heal/dir1
++TEST mkdir  source_creations_heal/dir1/dir2
++
++TEST mkfifo source_creations_me/fifo
++TEST mknod  source_creations_me/block b 4 5
++TEST mknod  source_creations_me/char c 1 5
++TEST touch  source_creations_me/file
++TEST ln -s  source_creations_me/file source_creations_me/slink
++TEST mkdir  source_creations_me/dir1
++TEST mkdir  source_creations_me/dir1/dir2
++
++$CLI volume stop $V0
++
++#simulate fool fool scenario for fool_* dirs
++setfattr -x trusted.afr.$V0-client-0 $B0/${V0}1/{fool_heal,fool_me}
++setfattr -n trusted.afr.dirty -v 0x000000000000000000000001 $B0/${V0}1/{fool_heal,fool_me}
++setfattr -n trusted.afr.$V0-client-1 -v 0x000000000000000000000001 $B0/${V0}1/{v1_fool_heal,v1_fool_me}
++
++#Simulate v1-dirty(self-accusing but no pending ops on others) scenario for v1-dirty
++setfattr -x trusted.afr.$V0-client-0 $B0/${V0}1/v1_dirty_{heal,me}
++setfattr -n trusted.afr.$V0-client-1 -v 0x000000000000000000000001 $B0/${V0}1/v1_dirty_{heal,me}
++
++$CLI volume start $V0 force
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 1
++TEST kill_brick $V0 $H0 $B0/${V0}1
++
++TEST touch spb_heal/1 spb/0 spb_me_heal/1 spb_me/0 fool_heal/1 fool_me/1 v1_fool_heal/1 v1_fool_me/1
++
++$CLI volume stop $V0
++
++#simulate fool fool scenario for fool_* dirs
++setfattr -x trusted.afr.$V0-client-1 $B0/${V0}0/{fool_heal,fool_me}
++setfattr -n trusted.afr.dirty -v 0x000000000000000000000001 $B0/${V0}1/{fool_heal,fool_me}
++setfattr -n trusted.afr.$V0-client-0 -v 0x000000000000000000000001 $B0/${V0}1/{v1_fool_heal,v1_fool_me}
++
++#simulate self-accusing for source_self_accusing
++TEST setfattr -n trusted.afr.$V0-client-0 -v 0x000000000000000000000006 $B0/${V0}0/source_self_accusing
++
++$CLI volume start $V0 force
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 0
++
++# Check if conservative merges happened correctly on _me_ dirs
++TEST stat spb_me_heal/1
++TEST stat $B0/${V0}0/spb_me_heal/1
++TEST stat $B0/${V0}1/spb_me_heal/1
++
++TEST stat spb_me_heal/0
++TEST stat $B0/${V0}0/spb_me_heal/0
++TEST stat $B0/${V0}1/spb_me_heal/0
++
++TEST stat fool_me/1
++TEST stat $B0/${V0}0/fool_me/1
++TEST stat $B0/${V0}1/fool_me/1
++
++TEST stat fool_me/0
++TEST stat $B0/${V0}0/fool_me/0
++TEST stat $B0/${V0}1/fool_me/0
++
++TEST stat v1_fool_me/0
++TEST stat $B0/${V0}0/v1_fool_me/0
++TEST stat $B0/${V0}1/v1_fool_me/0
++
++TEST stat v1_fool_me/1
++TEST stat $B0/${V0}0/v1_fool_me/1
++TEST stat $B0/${V0}1/v1_fool_me/1
++
++TEST stat v1_dirty_me/0
++TEST stat $B0/${V0}0/v1_dirty_me/0
++TEST stat $B0/${V0}1/v1_dirty_me/0
++
++#Check if files that have gfid-mismatches in _me_ are giving EIO
++TEST ! stat spb_me/0
++
++#Check if stale files are deleted on access
++TEST ! stat source_deletions_me/fifo
++TEST ! stat $B0/${V0}0/source_deletions_me/fifo
++TEST ! stat $B0/${V0}1/source_deletions_me/fifo
++TEST ! stat source_deletions_me/block
++TEST ! stat $B0/${V0}0/source_deletions_me/block
++TEST ! stat $B0/${V0}1/source_deletions_me/block
++TEST ! stat source_deletions_me/char
++TEST ! stat $B0/${V0}0/source_deletions_me/char
++TEST ! stat $B0/${V0}1/source_deletions_me/char
++TEST ! stat source_deletions_me/file
++TEST ! stat $B0/${V0}0/source_deletions_me/file
++TEST ! stat $B0/${V0}1/source_deletions_me/file
++TEST ! stat source_deletions_me/file
++TEST ! stat $B0/${V0}0/source_deletions_me/file
++TEST ! stat $B0/${V0}1/source_deletions_me/file
++TEST ! stat source_deletions_me/dir1/dir2
++TEST ! stat $B0/${V0}0/source_deletions_me/dir1/dir2
++TEST ! stat $B0/${V0}1/source_deletions_me/dir1/dir2
++TEST ! stat source_deletions_me/dir1
++TEST ! stat $B0/${V0}0/source_deletions_me/dir1
++TEST ! stat $B0/${V0}1/source_deletions_me/dir1
++
++#Test if the files created as part of access are healed correctly
++r=$(get_file_type source_creations_me/fifo)
++EXPECT "$r" get_file_type $B0/${V0}0/source_creations_me/fifo
++EXPECT "$r" get_file_type $B0/${V0}1/source_creations_me/fifo
++TEST [ -p source_creations_me/fifo ]
++
++r=$(get_file_type source_creations_me/block)
++EXPECT "$r" get_file_type $B0/${V0}0/source_creations_me/block
++EXPECT "$r" get_file_type $B0/${V0}1/source_creations_me/block
++EXPECT "^4 5$" stat -c "%t %T" $B0/${V0}1/source_creations_me/block
++EXPECT "^4 5$" stat -c "%t %T" $B0/${V0}0/source_creations_me/block
++TEST [ -b source_creations_me/block ]
++
++r=$(get_file_type source_creations_me/char)
++EXPECT "$r" get_file_type $B0/${V0}0/source_creations_me/char
++EXPECT "$r" get_file_type $B0/${V0}1/source_creations_me/char
++EXPECT "^1 5$" stat -c "%t %T" $B0/${V0}1/source_creations_me/char
++EXPECT "^1 5$" stat -c "%t %T" $B0/${V0}0/source_creations_me/char
++TEST [ -c source_creations_me/char ]
++
++r=$(get_file_type source_creations_me/file)
++EXPECT "$r" get_file_type $B0/${V0}0/source_creations_me/file
++EXPECT "$r" get_file_type $B0/${V0}1/source_creations_me/file
++TEST [ -f source_creations_me/file ]
++
++r=$(get_file_type source_creations_me/slink)
++EXPECT "$r" get_file_type $B0/${V0}0/source_creations_me/slink
++EXPECT "$r" get_file_type $B0/${V0}1/source_creations_me/slink
++TEST [ -h source_creations_me/slink ]
++
++r=$(get_file_type source_creations_me/dir1/dir2)
++EXPECT "$r" get_file_type $B0/${V0}0/source_creations_me/dir1/dir2
++EXPECT "$r" get_file_type $B0/${V0}1/source_creations_me/dir1/dir2
++TEST [ -d source_creations_me/dir1/dir2 ]
++
++r=$(get_file_type source_creations_me/dir1)
++EXPECT "$r" get_file_type $B0/${V0}0/source_creations_me/dir1
++EXPECT "$r" get_file_type $B0/${V0}1/source_creations_me/dir1
++TEST [ -d source_creations_me/dir1 ]
++
++#Trigger heal and check _heal dirs are healed properly
++#Trigger change in event generation number. That way inodes would get refreshed during lookup
++TEST kill_brick $V0 $H0 $B0/${V0}1
++$CLI volume start $V0 force
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 0
++
++TEST stat spb_heal
++TEST stat spb_me_heal
++TEST stat fool_heal
++TEST stat fool_me
++TEST stat v1_fool_heal
++TEST stat v1_fool_me
++TEST stat source_deletions_heal
++TEST stat source_deletions_me
++TEST stat source_self_accusing
++TEST stat source_creations_heal
++TEST stat source_creations_me
++TEST stat v1_dirty_heal
++TEST stat v1_dirty_me
++TEST $CLI volume stop $V0
++TEST rm -rf $B0/${V0}{0,1}/.glusterfs/indices/xattrop/*
++
++$CLI volume start $V0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 0
++
++#Create base entry in indices/xattrop
++echo "Data" > $M0/FILE
++rm -f $M0/FILE
++EXPECT "1" count_index_entries $B0/${V0}0
++EXPECT "1" count_index_entries $B0/${V0}1
++
++TEST $CLI volume stop $V0;
++
++#Create entries for fool_heal and fool_me to ensure they are fully healed and dirty xattrs erased, before triggering index heal
++create_brick_xattrop_entry $B0/${V0}0 fool_heal fool_me source_creations_heal/dir1
++
++$CLI volume start $V0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 0
++
++$CLI volume heal $V0 enable
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "Y" glustershd_up_status
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 1
++
++TEST $CLI volume heal $V0;
++EXPECT_WITHIN $HEAL_TIMEOUT "~" print_pending_heals spb_heal spb_me_heal fool_heal fool_me v1_fool_heal v1_fool_me source_deletions_heal source_deletions_me source_creations_heal source_creations_me v1_dirty_heal v1_dirty_me source_self_accusing
++
++EXPECT "Y${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}" heal_status $B0/${V0}0 $B0/${V0}1 spb_heal
++EXPECT "Y${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}" heal_status $B0/${V0}0 $B0/${V0}1 spb_me_heal
++EXPECT "Y${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}" heal_status $B0/${V0}0 $B0/${V0}1 fool_heal
++EXPECT "Y${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}" heal_status $B0/${V0}0 $B0/${V0}1 fool_me
++EXPECT "Y${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}" heal_status $B0/${V0}0 $B0/${V0}1 v1_fool_heal
++EXPECT "Y${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}" heal_status $B0/${V0}0 $B0/${V0}1 v1_fool_me
++EXPECT "Y${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}" heal_status $B0/${V0}0 $B0/${V0}1 source_deletions_heal
++EXPECT "Y${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}" heal_status $B0/${V0}0 $B0/${V0}1 source_deletions_me
++EXPECT "Y${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}" heal_status $B0/${V0}0 $B0/${V0}1 source_self_accusing
++EXPECT "Y${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}" heal_status $B0/${V0}0 $B0/${V0}1 source_creations_heal
++EXPECT "Y${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}" heal_status $B0/${V0}0 $B0/${V0}1 source_creations_me
++EXPECT "Y${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}" heal_status $B0/${V0}0 $B0/${V0}1 v1_dirty_heal
++EXPECT "Y${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}${zero_xattr}" heal_status $B0/${V0}0 $B0/${V0}1 v1_dirty_me
++
++#Don't access the files/dirs from mount point as that may cause self-heals
++# Check if conservative merges happened correctly on heal dirs
++TEST stat $B0/${V0}0/spb_heal/1
++TEST stat $B0/${V0}1/spb_heal/1
++
++TEST stat $B0/${V0}0/spb_heal/0
++TEST stat $B0/${V0}1/spb_heal/0
++
++TEST stat $B0/${V0}0/fool_heal/1
++TEST stat $B0/${V0}1/fool_heal/1
++
++TEST stat $B0/${V0}0/fool_heal/0
++TEST stat $B0/${V0}1/fool_heal/0
++
++TEST stat $B0/${V0}0/v1_fool_heal/0
++TEST stat $B0/${V0}1/v1_fool_heal/0
++
++TEST stat $B0/${V0}0/v1_fool_heal/1
++TEST stat $B0/${V0}1/v1_fool_heal/1
++
++TEST stat $B0/${V0}0/v1_dirty_heal/0
++TEST stat $B0/${V0}1/v1_dirty_heal/0
++
++#Check if files that have gfid-mismatches in spb are giving EIO
++TEST ! stat spb/0
++
++#Check if stale files are deleted on access
++TEST ! stat $B0/${V0}0/source_deletions_heal/fifo
++TEST ! stat $B0/${V0}1/source_deletions_heal/fifo
++TEST ! stat $B0/${V0}0/source_deletions_heal/block
++TEST ! stat $B0/${V0}1/source_deletions_heal/block
++TEST ! stat $B0/${V0}0/source_deletions_heal/char
++TEST ! stat $B0/${V0}1/source_deletions_heal/char
++TEST ! stat $B0/${V0}0/source_deletions_heal/file
++TEST ! stat $B0/${V0}1/source_deletions_heal/file
++TEST ! stat $B0/${V0}0/source_deletions_heal/file
++TEST ! stat $B0/${V0}1/source_deletions_heal/file
++TEST ! stat $B0/${V0}0/source_deletions_heal/dir1/dir2
++TEST ! stat $B0/${V0}1/source_deletions_heal/dir1/dir2
++TEST ! stat $B0/${V0}0/source_deletions_heal/dir1
++TEST ! stat $B0/${V0}1/source_deletions_heal/dir1
++
++#Check if stale files are deleted on access
++TEST ! stat $B0/${V0}0/source_self_accusing/fifo
++TEST ! stat $B0/${V0}1/source_self_accusing/fifo
++TEST ! stat $B0/${V0}0/source_self_accusing/block
++TEST ! stat $B0/${V0}1/source_self_accusing/block
++TEST ! stat $B0/${V0}0/source_self_accusing/char
++TEST ! stat $B0/${V0}1/source_self_accusing/char
++TEST ! stat $B0/${V0}0/source_self_accusing/file
++TEST ! stat $B0/${V0}1/source_self_accusing/file
++TEST ! stat $B0/${V0}0/source_self_accusing/file
++TEST ! stat $B0/${V0}1/source_self_accusing/file
++TEST ! stat $B0/${V0}0/source_self_accusing/dir1/dir2
++TEST ! stat $B0/${V0}1/source_self_accusing/dir1/dir2
++TEST ! stat $B0/${V0}0/source_self_accusing/dir1
++TEST ! stat $B0/${V0}1/source_self_accusing/dir1
++
++#Test if the files created as part of full self-heal correctly
++r=$(get_file_type $B0/${V0}0/source_creations_heal/fifo)
++EXPECT "$r" get_file_type $B0/${V0}1/source_creations_heal/fifo
++TEST [ -p $B0/${V0}0/source_creations_heal/fifo ]
++EXPECT "^4 5$" stat -c "%t %T" $B0/${V0}1/source_creations_heal/block
++EXPECT "^4 5$" stat -c "%t %T" $B0/${V0}0/source_creations_heal/block
++
++r=$(get_file_type $B0/${V0}0/source_creations_heal/block)
++EXPECT "$r" get_file_type $B0/${V0}1/source_creations_heal/block
++
++r=$(get_file_type $B0/${V0}0/source_creations_heal/char)
++EXPECT "$r" get_file_type $B0/${V0}1/source_creations_heal/char
++EXPECT "^1 5$" stat -c "%t %T" $B0/${V0}1/source_creations_heal/char
++EXPECT "^1 5$" stat -c "%t %T" $B0/${V0}0/source_creations_heal/char
++
++r=$(get_file_type $B0/${V0}0/source_creations_heal/file)
++EXPECT "$r" get_file_type $B0/${V0}1/source_creations_heal/file
++TEST [ -f $B0/${V0}0/source_creations_heal/file ]
++
++r=$(get_file_type source_creations_heal/file $B0/${V0}0/slink)
++EXPECT "$r" get_file_type $B0/${V0}1/source_creations_heal/file slink
++TEST [ -h $B0/${V0}0/source_creations_heal/slink ]
++
++r=$(get_file_type $B0/${V0}0/source_creations_heal/dir1/dir2)
++EXPECT "$r" get_file_type $B0/${V0}1/source_creations_heal/dir1/dir2
++TEST [ -d $B0/${V0}0/source_creations_heal/dir1/dir2 ]
++
++r=$(get_file_type $B0/${V0}0/source_creations_heal/dir1)
++EXPECT "$r" get_file_type $B0/${V0}1/source_creations_heal/dir1
++TEST [ -d $B0/${V0}0/source_creations_heal/dir1 ]
++
++cd -
++
++#Anonymous directory shouldn't be created
++TEST mkdir $M0/rename-dir
++before_rename=$(STAT_INO $B0/${V0}1/rename-dir)
++TEST kill_brick $V0 $H0 $B0/${V0}1
++TEST mv $M0/rename-dir $M0/new-name
++TEST $CLI volume start $V0 force
++#Since features.ctime is not enabled by default in downstream, the below test
++#will fail. If ctime feature is enabled, there will be trusted.glusterfs.mdata
++#xattr set which will differ for the parent in the gfid split-brain scenario
++#and when lookup is triggered, the gfid gets added to indices/xattrop leading
++#the below test to pass in upstream. Hence commenting it here.
++#'spb' is in split-brain so pending-heal-count will be 2
++#EXPECT_WITHIN $HEAL_TIMEOUT "^2$" get_pending_heal_count $V0
++after_rename=$(STAT_INO $B0/${V0}1/new-name)
++EXPECT "0" echo $(ls -a $B0/${V0}0/ | grep anonymous-inode | wc -l)
++EXPECT "0" echo $(ls -a $B0/${V0}1/ | grep anonymous-inode | wc -l)
++EXPECT_NOT "$before_rename" echo $after_rename
++cleanup
+diff --git a/tests/basic/afr/rename-data-loss.t b/tests/basic/afr/rename-data-loss.t
+new file mode 100644
+index 0000000..256ee2a
+--- /dev/null
++++ b/tests/basic/afr/rename-data-loss.t
+@@ -0,0 +1,72 @@
++#!/bin/bash
++#Self-heal tests
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../afr.rc
++
++cleanup;
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 replica 2 $H0:$B0/brick{0,1}
++TEST $CLI volume set $V0 write-behind off
++TEST $CLI volume set $V0 self-heal-daemon off
++TEST $CLI volume set $V0 data-self-heal off
++TEST $CLI volume set $V0 metadata-self-heal off
++TEST $CLI volume set $V0 entry-self-heal off
++TEST $CLI volume start $V0
++EXPECT 'Started' volinfo_field $V0 'Status'
++TEST glusterfs --volfile-id=$V0 --volfile-server=$H0 $M0;
++
++cd $M0
++TEST `echo "line1" >> file1`
++TEST mkdir dir1
++TEST mkdir dir2
++TEST mkdir -p dir1/dira/dirb
++TEST `echo "line1">>dir1/dira/dirb/file1`
++TEST mkdir delete_me
++TEST `echo "line1" >> delete_me/file1`
++
++#brick0 has witnessed the second write while brick1 is down.
++TEST kill_brick $V0 $H0 $B0/brick1
++TEST `echo "line2" >> file1`
++TEST `echo "line2" >> dir1/dira/dirb/file1`
++TEST `echo "line2" >> delete_me/file1`
++
++#Toggle the bricks that are up/down.
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 1
++TEST kill_brick $V0 $H0 $B0/brick0
++
++#Rename when the 'source' brick0 for data-selfheals is down.
++mv file1 file2
++mv dir1/dira dir2
++
++#Delete a dir when brick0 is down.
++rm -rf delete_me
++cd -
++
++#Bring everything up and trigger heal
++TEST $CLI volume set $V0 self-heal-daemon on
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "Y" glustershd_up_status
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 1
++TEST $CLI volume heal $V0
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" get_pending_heal_count $V0
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" afr_anon_entry_count $B0/brick0
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" afr_anon_entry_count $B0/brick1
++
++#Remount to avoid reading from caches
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
++TEST glusterfs --volfile-id=$V0 --volfile-server=$H0 $M0;
++EXPECT "line2" tail -1 $M0/file2
++EXPECT "line2" tail -1 $M0/dir2/dira/dirb/file1
++TEST ! stat $M0/delete_me/file1
++TEST ! stat $M0/delete_me
++
++anon_inode_name=$(ls -a $B0/brick0 | grep glusterfs-anonymous-inode)
++TEST [[ -d $B0/brick0/$anon_inode_name ]]
++TEST [[ -d $B0/brick1/$anon_inode_name ]]
++cleanup
+diff --git a/tests/bugs/replicate/bug-1744548-heal-timeout.t b/tests/bugs/replicate/bug-1744548-heal-timeout.t
+index c208112..0115350 100644
+--- a/tests/bugs/replicate/bug-1744548-heal-timeout.t
++++ b/tests/bugs/replicate/bug-1744548-heal-timeout.t
+@@ -25,14 +25,14 @@ TEST ! $CLI volume heal $V0
+ TEST $CLI volume profile $V0 start
+ TEST $CLI volume profile $V0 info clear
+ TEST $CLI volume heal $V0 enable
+-# Each brick does 3 opendirs, corresponding to dirty, xattrop and entry-changes
+-EXPECT_WITHIN $HEAL_TIMEOUT "^333$" get_cumulative_opendir_count
++# Each brick does 4 opendirs, corresponding to dirty, xattrop and entry-changes, anonymous-inode
++EXPECT_WITHIN 4 "^444$" get_cumulative_opendir_count
+ 
+ # Check that a change in heal-timeout is honoured immediately.
+ TEST $CLI volume set $V0 cluster.heal-timeout 5
+ sleep 10
+ # Two crawls must have happened.
+-EXPECT_WITHIN $HEAL_TIMEOUT "^999$" get_cumulative_opendir_count
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "^121212$" get_cumulative_opendir_count
+ 
+ # shd must not heal if it is disabled and heal-timeout is changed.
+ TEST $CLI volume heal $V0 disable
+diff --git a/tests/features/trash.t b/tests/features/trash.t
+index 472e909..da5b50b 100755
+--- a/tests/features/trash.t
++++ b/tests/features/trash.t
+@@ -94,105 +94,105 @@ wildcard_not_exists() {
+         if [ $? -eq 0 ]; then echo "Y"; else echo "N"; fi
+ }
+ 
+-# testing glusterd [1-3]
++# testing glusterd
+ TEST glusterd
+ TEST pidof glusterd
+ TEST $CLI volume info
+ 
+-# creating distributed volume [4]
++# creating distributed volume
+ TEST $CLI volume create $V0 $H0:$B0/${V0}{1,2}
+ 
+-# checking volume status [5-7]
++# checking volume status
+ EXPECT "$V0" volinfo_field $V0 'Volume Name'
+ EXPECT 'Created' volinfo_field $V0 'Status'
+ EXPECT '2' brick_count $V0
+ 
+-# test without enabling trash translator [8]
++# test without enabling trash translator
+ TEST start_vol $V0 $M0
+ 
+-# test on enabling trash translator [9-10]
++# test on enabling trash translator
+ TEST $CLI volume set $V0 features.trash on
+ EXPECT 'on' volinfo_field $V0 'features.trash'
+ 
+-# files directly under mount point [11]
++# files directly under mount point
+ create_files $M0/file1 $M0/file2
+ TEST file_exists $V0 file1 file2
+ 
+-# perform unlink [12]
++# perform unlink
+ TEST unlink_op file1
+ 
+-# perform truncate [13]
++# perform truncate
+ TEST truncate_op file2 4
+ 
+-# create files directory hierarchy and check [14]
++# create files directory hierarchy and check
+ mkdir -p $M0/1/2/3
+ create_files $M0/1/2/3/foo1 $M0/1/2/3/foo2
+ TEST file_exists $V0 1/2/3/foo1 1/2/3/foo2
+ 
+-# perform unlink [15]
++# perform unlink
+ TEST unlink_op 1/2/3/foo1
+ 
+-# perform truncate [16]
++# perform truncate
+ TEST truncate_op 1/2/3/foo2 4
+ 
+ # create a directory for eliminate pattern
+ mkdir $M0/a
+ 
+-# set the eliminate pattern [17-18]
++# set the eliminate pattern
+ TEST $CLI volume set $V0 features.trash-eliminate-path /a
+ EXPECT '/a' volinfo_field $V0 'features.trash-eliminate-path'
+ 
+-# create two files and check [19]
++# create two files and check
+ create_files $M0/a/test1 $M0/a/test2
+ TEST file_exists $V0 a/test1 a/test2
+ 
+-# remove from eliminate pattern [20]
++# remove from eliminate pattern
+ rm -f $M0/a/test1
+ EXPECT "Y" wildcard_not_exists $M0/.trashcan/a/test1*
+ 
+-# truncate from eliminate path [21-23]
++# truncate from eliminate path
+ truncate -s 2 $M0/a/test2
+ TEST [ -e $M0/a/test2 ]
+ TEST [ `ls -l $M0/a/test2 | awk '{print $5}'` -eq 2 ]
+ EXPECT "Y" wildcard_not_exists $M0/.trashcan/a/test2*
+ 
+-# set internal op on [24-25]
++# set internal op on
+ TEST $CLI volume set $V0 features.trash-internal-op on
+ EXPECT 'on' volinfo_field $V0 'features.trash-internal-op'
+ 
+-# again create two files and check [26]
++# again create two files and check
+ create_files $M0/inop1 $M0/inop2
+ TEST file_exists $V0 inop1 inop2
+ 
+-# perform unlink [27]
++# perform unlink
+ TEST unlink_op inop1
+ 
+-# perform truncate [28]
++# perform truncate
+ TEST truncate_op inop2 4
+ 
+-# remove one brick and restart the volume [28-31]
++# remove one brick and restart the volume
+ TEST $CLI volume remove-brick $V0 $H0:$B0/${V0}2 force
+ EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
+ TEST $CLI volume stop $V0
+ TEST start_vol $V0 $M0 $M0/.trashcan
+ 
+-# again create two files and check [33]
++# again create two files and check
+ create_files $M0/rebal1 $M0/rebal2
+ TEST file_exists $V0 rebal1 rebal2
+ 
+-# add one brick [34-35]
++# add one brick
+ TEST $CLI volume add-brick $V0 $H0:$B0/${V0}3
+ TEST [ -d $B0/${V0}3 ]
+ 
+ 
+-# perform rebalance [36]
++# perform rebalance
+ TEST $CLI volume rebalance $V0 start force
+ EXPECT_WITHIN $REBALANCE_TIMEOUT "0" rebalance_completed
+ 
+ #Find out which file was migrated to the new brick
+ file_name=$(ls $B0/${V0}3/rebal*| xargs basename)
+ 
+-# check whether rebalance was succesful [37-40]
++# check whether rebalance was succesful
+ EXPECT "Y" wildcard_exists $B0/${V0}3/$file_name*
+ EXPECT "Y" wildcard_exists $B0/${V0}1/.trashcan/internal_op/$file_name*
+ 
+@@ -201,52 +201,42 @@ EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
+ # force required in case rebalance is not over
+ TEST $CLI volume stop $V0 force
+ 
+-# create a replicated volume [41]
++# create a replicated volume
+ TEST $CLI volume create $V1 replica 2 $H0:$B0/${V1}{1,2}
+ 
+-# checking volume status [42-45]
++# checking volume status
+ EXPECT "$V1" volinfo_field $V1 'Volume Name'
+ EXPECT 'Replicate' volinfo_field $V1 'Type'
+ EXPECT 'Created' volinfo_field $V1 'Status'
+ EXPECT '2' brick_count $V1
+ 
+-# enable trash with options and start the replicate volume by disabling automatic self-heal [46-50]
++# enable trash with options and start the replicate volume by disabling automatic self-heal
+ TEST $CLI volume set $V1 features.trash on
+ TEST $CLI volume set $V1 features.trash-internal-op on
+ EXPECT 'on' volinfo_field $V1 'features.trash'
+ EXPECT 'on' volinfo_field $V1 'features.trash-internal-op'
+ TEST start_vol $V1 $M1 $M1/.trashcan
+ 
+-# mount and check for trash directory [51]
++# mount and check for trash directory
+ TEST [ -d $M1/.trashcan/internal_op ]
+ 
+-# create a file and check [52]
++# create a file and check
+ touch $M1/self
+ TEST [ -e $B0/${V1}1/self -a -e $B0/${V1}2/self ]
+ 
+-# kill one brick and delete the file from mount point [53-54]
++# kill one brick and delete the file from mount point
+ kill_brick $V1 $H0 $B0/${V1}1
+ EXPECT_WITHIN ${PROCESS_UP_TIMEOUT} "1" online_brick_count
+ rm -f $M1/self
+ EXPECT "Y" wildcard_exists $B0/${V1}2/.trashcan/self*
+ 
+-# force start the volume and trigger the self-heal manually [55-57]
+-TEST $CLI volume start $V1 force
+-EXPECT_WITHIN $PROCESS_UP_TIMEOUT "2" online_brick_count
+-EXPECT_WITHIN $PROCESS_UP_TIMEOUT "Y" glustershd_up_status
+-# Since we created the file under root of the volume, it will be
+-# healed automatically
+-
+-# check for the removed file in trashcan [58]
+-EXPECT_WITHIN $HEAL_TIMEOUT "Y" wildcard_exists $B0/${V1}1/.trashcan/internal_op/self*
+-
+-# check renaming of trash directory through cli [59-62]
++# check renaming of trash directory through cli
+ TEST $CLI volume set $V0 trash-dir abc
+ TEST start_vol $V0 $M0 $M0/abc
+ TEST [ -e $M0/abc -a ! -e $M0/.trashcan ]
+ EXPECT "Y" wildcard_exists $B0/${V0}1/abc/internal_op/rebal*
+ 
+-# ensure that rename and delete operation on trash directory fails [63-65]
++# ensure that rename and delete operation on trash directory fails
+ rm -rf $M0/abc/internal_op
+ TEST [ -e $M0/abc/internal_op ]
+ rm -rf $M0/abc/
+diff --git a/xlators/cluster/afr/src/afr-common.c b/xlators/cluster/afr/src/afr-common.c
+index 90b4f14..6f2da11 100644
+--- a/xlators/cluster/afr/src/afr-common.c
++++ b/xlators/cluster/afr/src/afr-common.c
+@@ -47,6 +47,41 @@ afr_quorum_errno(afr_private_t *priv)
+     return ENOTCONN;
+ }
+ 
++gf_boolean_t
++afr_is_private_directory(afr_private_t *priv, uuid_t pargfid, const char *name,
++                         pid_t pid)
++{
++    if (!__is_root_gfid(pargfid)) {
++        return _gf_false;
++    }
++
++    if (strcmp(name, GF_REPLICATE_TRASH_DIR) == 0) {
++        /*For backward compatibility /.landfill is private*/
++        return _gf_true;
++    }
++
++    if (pid == GF_CLIENT_PID_GSYNCD) {
++        /*geo-rep needs to create/sync private directory on slave because
++         * it appears in changelog*/
++        return _gf_false;
++    }
++
++    if (pid == GF_CLIENT_PID_GLFS_HEAL || pid == GF_CLIENT_PID_SELF_HEALD) {
++        if (strcmp(name, priv->anon_inode_name) == 0) {
++            /* anonymous-inode dir is private*/
++            return _gf_true;
++        }
++    } else {
++        if (strncmp(name, AFR_ANON_DIR_PREFIX, strlen(AFR_ANON_DIR_PREFIX)) ==
++            0) {
++            /* anonymous-inode dir prefix is private for geo-rep to work*/
++            return _gf_true;
++        }
++    }
++
++    return _gf_false;
++}
++
+ int
+ afr_fav_child_reset_sink_xattrs(void *opaque);
+ 
+@@ -3301,11 +3336,10 @@ afr_lookup(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *xattr_req)
+         return 0;
+     }
+ 
+-    if (__is_root_gfid(loc->parent->gfid)) {
+-        if (!strcmp(loc->name, GF_REPLICATE_TRASH_DIR)) {
+-            op_errno = EPERM;
+-            goto out;
+-        }
++    if (afr_is_private_directory(this->private, loc->parent->gfid, loc->name,
++                                 frame->root->pid)) {
++        op_errno = EPERM;
++        goto out;
+     }
+ 
+     local = AFR_FRAME_INIT(frame, op_errno);
+@@ -4832,6 +4866,7 @@ afr_priv_dump(xlator_t *this)
+                        priv->background_self_heal_count);
+     gf_proc_dump_write("healers", "%d", priv->healers);
+     gf_proc_dump_write("read-hash-mode", "%d", priv->hash_mode);
++    gf_proc_dump_write("use-anonymous-inode", "%d", priv->use_anon_inode);
+     if (priv->quorum_count == AFR_QUORUM_AUTO) {
+         gf_proc_dump_write("quorum-type", "auto");
+     } else if (priv->quorum_count == 0) {
+@@ -5792,6 +5827,7 @@ afr_priv_destroy(afr_private_t *priv)
+     GF_FREE(priv->local);
+     GF_FREE(priv->pending_key);
+     GF_FREE(priv->children);
++    GF_FREE(priv->anon_inode);
+     GF_FREE(priv->child_up);
+     GF_FREE(priv->child_latency);
+     LOCK_DESTROY(&priv->lock);
+diff --git a/xlators/cluster/afr/src/afr-dir-read.c b/xlators/cluster/afr/src/afr-dir-read.c
+index 6307b63..d64b6a9 100644
+--- a/xlators/cluster/afr/src/afr-dir-read.c
++++ b/xlators/cluster/afr/src/afr-dir-read.c
+@@ -158,8 +158,8 @@ afr_validate_read_subvol(inode_t *inode, xlator_t *this, int par_read_subvol)
+ }
+ 
+ static void
+-afr_readdir_transform_entries(gf_dirent_t *subvol_entries, int subvol,
+-                              gf_dirent_t *entries, fd_t *fd)
++afr_readdir_transform_entries(call_frame_t *frame, gf_dirent_t *subvol_entries,
++                              int subvol, gf_dirent_t *entries, fd_t *fd)
+ {
+     int ret = -1;
+     gf_dirent_t *entry = NULL;
+@@ -177,8 +177,8 @@ afr_readdir_transform_entries(gf_dirent_t *subvol_entries, int subvol,
+ 
+     list_for_each_entry_safe(entry, tmp, &subvol_entries->list, list)
+     {
+-        if (__is_root_gfid(fd->inode->gfid) &&
+-            !strcmp(entry->d_name, GF_REPLICATE_TRASH_DIR)) {
++        if (afr_is_private_directory(priv, fd->inode->gfid, entry->d_name,
++                                     frame->root->pid)) {
+             continue;
+         }
+ 
+@@ -222,8 +222,8 @@ afr_readdir_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+     }
+ 
+     if (op_ret >= 0)
+-        afr_readdir_transform_entries(subvol_entries, (long)cookie, &entries,
+-                                      local->fd);
++        afr_readdir_transform_entries(frame, subvol_entries, (long)cookie,
++                                      &entries, local->fd);
+ 
+     AFR_STACK_UNWIND(readdir, frame, op_ret, op_errno, &entries, xdata);
+ 
+diff --git a/xlators/cluster/afr/src/afr-self-heal-common.c b/xlators/cluster/afr/src/afr-self-heal-common.c
+index 9b6575f..0a8a7fd 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-common.c
++++ b/xlators/cluster/afr/src/afr-self-heal-common.c
+@@ -2753,3 +2753,185 @@ afr_choose_source_by_policy(afr_private_t *priv, unsigned char *sources,
+ out:
+     return source;
+ }
++
++static int
++afr_anon_inode_mkdir_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
++                         int32_t op_ret, int32_t op_errno, inode_t *inode,
++                         struct iatt *buf, struct iatt *preparent,
++                         struct iatt *postparent, dict_t *xdata)
++{
++    afr_local_t *local = frame->local;
++    int i = (long)cookie;
++
++    local->replies[i].valid = 1;
++    local->replies[i].op_ret = op_ret;
++    local->replies[i].op_errno = op_errno;
++    if (op_ret == 0) {
++        local->op_ret = 0;
++        local->replies[i].poststat = *buf;
++        local->replies[i].preparent = *preparent;
++        local->replies[i].postparent = *postparent;
++    }
++    if (xdata) {
++        local->replies[i].xdata = dict_ref(xdata);
++    }
++
++    syncbarrier_wake(&local->barrier);
++    return 0;
++}
++
++int
++afr_anon_inode_create(xlator_t *this, int child, inode_t **linked_inode)
++{
++    call_frame_t *frame = NULL;
++    afr_local_t *local = NULL;
++    afr_private_t *priv = this->private;
++    unsigned char *mkdir_on = alloca0(priv->child_count);
++    unsigned char *lookup_on = alloca0(priv->child_count);
++    loc_t loc = {0};
++    int32_t op_errno = 0;
++    int32_t child_op_errno = 0;
++    struct iatt iatt = {0};
++    dict_t *xdata = NULL;
++    uuid_t anon_inode_gfid = {0};
++    int mkdir_count = 0;
++    int i = 0;
++
++    /*Try to mkdir everywhere and return success if the dir exists on 'child'
++     */
++
++    if (!priv->use_anon_inode) {
++        op_errno = EINVAL;
++        goto out;
++    }
++
++    frame = afr_frame_create(this, &op_errno);
++    if (op_errno) {
++        goto out;
++    }
++    local = frame->local;
++    if (!local->child_up[child]) {
++        /*Other bricks may need mkdir so don't error out yet*/
++        child_op_errno = ENOTCONN;
++    }
++    gf_uuid_parse(priv->anon_gfid_str, anon_inode_gfid);
++    for (i = 0; i < priv->child_count; i++) {
++        if (!local->child_up[i])
++            continue;
++
++        if (priv->anon_inode[i]) {
++            mkdir_on[i] = 0;
++        } else {
++            mkdir_on[i] = 1;
++            mkdir_count++;
++        }
++    }
++
++    if (mkdir_count == 0) {
++        *linked_inode = inode_find(this->itable, anon_inode_gfid);
++        if (*linked_inode) {
++            op_errno = 0;
++            goto out;
++        }
++    }
++
++    loc.parent = inode_ref(this->itable->root);
++    loc.name = priv->anon_inode_name;
++    loc.inode = inode_new(this->itable);
++    if (!loc.inode) {
++        op_errno = ENOMEM;
++        goto out;
++    }
++
++    xdata = dict_new();
++    if (!xdata) {
++        op_errno = ENOMEM;
++        goto out;
++    }
++
++    op_errno = -dict_set_gfuuid(xdata, "gfid-req", anon_inode_gfid, _gf_true);
++    if (op_errno) {
++        goto out;
++    }
++
++    if (mkdir_count == 0) {
++        memcpy(lookup_on, local->child_up, priv->child_count);
++        goto lookup;
++    }
++
++    AFR_ONLIST(mkdir_on, frame, afr_anon_inode_mkdir_cbk, mkdir, &loc, 0755, 0,
++               xdata);
++
++    for (i = 0; i < priv->child_count; i++) {
++        if (!mkdir_on[i]) {
++            continue;
++        }
++
++        if (local->replies[i].op_ret == 0) {
++            priv->anon_inode[i] = 1;
++            iatt = local->replies[i].poststat;
++        } else if (local->replies[i].op_ret < 0 &&
++                   local->replies[i].op_errno == EEXIST) {
++            lookup_on[i] = 1;
++        } else if (i == child) {
++            child_op_errno = local->replies[i].op_errno;
++        }
++    }
++
++    if (AFR_COUNT(lookup_on, priv->child_count) == 0) {
++        goto link;
++    }
++
++lookup:
++    AFR_ONLIST(lookup_on, frame, afr_selfheal_discover_cbk, lookup, &loc,
++               xdata);
++    for (i = 0; i < priv->child_count; i++) {
++        if (!lookup_on[i]) {
++            continue;
++        }
++
++        if (local->replies[i].op_ret == 0) {
++            if (gf_uuid_compare(anon_inode_gfid,
++                                local->replies[i].poststat.ia_gfid) == 0) {
++                priv->anon_inode[i] = 1;
++                iatt = local->replies[i].poststat;
++            } else {
++                if (i == child)
++                    child_op_errno = EINVAL;
++                gf_msg(this->name, GF_LOG_ERROR, 0, AFR_MSG_INVALID_DATA,
++                       "%s has gfid: %s", priv->anon_inode_name,
++                       uuid_utoa(local->replies[i].poststat.ia_gfid));
++            }
++        } else if (i == child) {
++            child_op_errno = local->replies[i].op_errno;
++        }
++    }
++link:
++    if (!gf_uuid_is_null(iatt.ia_gfid)) {
++        *linked_inode = inode_link(loc.inode, loc.parent, loc.name, &iatt);
++        if (*linked_inode) {
++            op_errno = 0;
++            inode_lookup(*linked_inode);
++        } else {
++            op_errno = ENOMEM;
++        }
++        goto out;
++    }
++
++out:
++    if (xdata)
++        dict_unref(xdata);
++    loc_wipe(&loc);
++    /*child_op_errno takes precedence*/
++    if (child_op_errno == 0) {
++        child_op_errno = op_errno;
++    }
++
++    if (child_op_errno && *linked_inode) {
++        inode_unref(*linked_inode);
++        *linked_inode = NULL;
++    }
++    if (frame)
++        AFR_STACK_DESTROY(frame);
++    return -child_op_errno;
++}
+diff --git a/xlators/cluster/afr/src/afr-self-heal-entry.c b/xlators/cluster/afr/src/afr-self-heal-entry.c
+index 00b5b2d..20b07dd 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-entry.c
++++ b/xlators/cluster/afr/src/afr-self-heal-entry.c
+@@ -16,54 +16,170 @@
+ #include <glusterfs/syncop-utils.h>
+ #include <glusterfs/events.h>
+ 
+-static int
+-afr_selfheal_entry_delete(xlator_t *this, inode_t *dir, const char *name,
+-                          inode_t *inode, int child, struct afr_reply *replies)
++int
++afr_selfheal_entry_anon_inode(xlator_t *this, inode_t *dir, const char *name,
++                              inode_t *inode, int child,
++                              struct afr_reply *replies,
++                              gf_boolean_t *anon_inode)
+ {
+     afr_private_t *priv = NULL;
++    afr_local_t *local = NULL;
+     xlator_t *subvol = NULL;
+     int ret = 0;
++    int i = 0;
++    char g[64] = {0};
++    unsigned char *lookup_success = NULL;
++    call_frame_t *frame = NULL;
++    loc_t loc2 = {
++        0,
++    };
+     loc_t loc = {
+         0,
+     };
+-    char g[64];
+ 
+     priv = this->private;
+-
+     subvol = priv->children[child];
++    lookup_success = alloca0(priv->child_count);
++    uuid_utoa_r(replies[child].poststat.ia_gfid, g);
++    loc.inode = inode_new(inode->table);
++    if (!loc.inode) {
++        ret = -ENOMEM;
++        goto out;
++    }
++
++    if (replies[child].poststat.ia_type == IA_IFDIR) {
++        /* This directory may have sub-directory hierarchy which may need to
++         * be preserved for subsequent heals. So unconditionally move the
++         * directory to anonymous-inode directory*/
++        *anon_inode = _gf_true;
++        goto anon_inode;
++    }
++
++    frame = afr_frame_create(this, &ret);
++    if (!frame) {
++        ret = -ret;
++        goto out;
++    }
++    local = frame->local;
++    gf_uuid_copy(loc.gfid, replies[child].poststat.ia_gfid);
++    AFR_ONLIST(local->child_up, frame, afr_selfheal_discover_cbk, lookup, &loc,
++               NULL);
++    for (i = 0; i < priv->child_count; i++) {
++        if (local->replies[i].op_ret == 0) {
++            lookup_success[i] = 1;
++        } else if (local->replies[i].op_errno != ENOENT &&
++                   local->replies[i].op_errno != ESTALE) {
++            ret = -local->replies[i].op_errno;
++        }
++    }
++
++    if (priv->quorum_count) {
++        if (afr_has_quorum(lookup_success, this, NULL)) {
++            *anon_inode = _gf_true;
++        }
++    } else if (AFR_COUNT(lookup_success, priv->child_count) > 1) {
++        *anon_inode = _gf_true;
++    } else if (ret) {
++        goto out;
++    }
++
++anon_inode:
++    if (!*anon_inode) {
++        ret = 0;
++        goto out;
++    }
+ 
+     loc.parent = inode_ref(dir);
+     gf_uuid_copy(loc.pargfid, dir->gfid);
+     loc.name = name;
+-    loc.inode = inode_ref(inode);
+ 
+-    if (replies[child].valid && replies[child].op_ret == 0) {
+-        switch (replies[child].poststat.ia_type) {
+-            case IA_IFDIR:
+-                gf_msg(this->name, GF_LOG_WARNING, 0,
+-                       AFR_MSG_EXPUNGING_FILE_OR_DIR,
+-                       "expunging dir %s/%s (%s) on %s", uuid_utoa(dir->gfid),
+-                       name, uuid_utoa_r(replies[child].poststat.ia_gfid, g),
+-                       subvol->name);
+-                ret = syncop_rmdir(subvol, &loc, 1, NULL, NULL);
+-                break;
+-            default:
+-                gf_msg(this->name, GF_LOG_WARNING, 0,
+-                       AFR_MSG_EXPUNGING_FILE_OR_DIR,
+-                       "expunging file %s/%s (%s) on %s", uuid_utoa(dir->gfid),
+-                       name, uuid_utoa_r(replies[child].poststat.ia_gfid, g),
+-                       subvol->name);
+-                ret = syncop_unlink(subvol, &loc, NULL, NULL);
+-                break;
+-        }
++    ret = afr_anon_inode_create(this, child, &loc2.parent);
++    if (ret < 0)
++        goto out;
++
++    loc2.name = g;
++    ret = syncop_rename(subvol, &loc, &loc2, NULL, NULL);
++    if (ret < 0) {
++        gf_msg(this->name, GF_LOG_WARNING, -ret, AFR_MSG_EXPUNGING_FILE_OR_DIR,
++               "Rename to %s dir %s/%s (%s) on %s failed",
++               priv->anon_inode_name, uuid_utoa(dir->gfid), name, g,
++               subvol->name);
++    } else {
++        gf_msg(this->name, GF_LOG_WARNING, 0, AFR_MSG_EXPUNGING_FILE_OR_DIR,
++               "Rename to %s dir %s/%s (%s) on %s successful",
++               priv->anon_inode_name, uuid_utoa(dir->gfid), name, g,
++               subvol->name);
+     }
+ 
++out:
+     loc_wipe(&loc);
++    loc_wipe(&loc2);
++    if (frame) {
++        AFR_STACK_DESTROY(frame);
++    }
+ 
+     return ret;
+ }
+ 
+ int
++afr_selfheal_entry_delete(xlator_t *this, inode_t *dir, const char *name,
++                          inode_t *inode, int child, struct afr_reply *replies)
++{
++    char g[64] = {0};
++    afr_private_t *priv = NULL;
++    xlator_t *subvol = NULL;
++    int ret = 0;
++    loc_t loc = {
++        0,
++    };
++    gf_boolean_t anon_inode = _gf_false;
++
++    priv = this->private;
++    subvol = priv->children[child];
++
++    if ((!replies[child].valid) || (replies[child].op_ret < 0)) {
++        /*Nothing to do*/
++        ret = 0;
++        goto out;
++    }
++
++    if (priv->use_anon_inode) {
++        ret = afr_selfheal_entry_anon_inode(this, dir, name, inode, child,
++                                            replies, &anon_inode);
++        if (ret < 0 || anon_inode)
++            goto out;
++    }
++
++    loc.parent = inode_ref(dir);
++    loc.inode = inode_new(inode->table);
++    if (!loc.inode) {
++        ret = -ENOMEM;
++        goto out;
++    }
++    loc.name = name;
++    switch (replies[child].poststat.ia_type) {
++        case IA_IFDIR:
++            gf_msg(this->name, GF_LOG_WARNING, 0, AFR_MSG_EXPUNGING_FILE_OR_DIR,
++                   "expunging dir %s/%s (%s) on %s", uuid_utoa(dir->gfid), name,
++                   uuid_utoa_r(replies[child].poststat.ia_gfid, g),
++                   subvol->name);
++            ret = syncop_rmdir(subvol, &loc, 1, NULL, NULL);
++            break;
++        default:
++            gf_msg(this->name, GF_LOG_WARNING, 0, AFR_MSG_EXPUNGING_FILE_OR_DIR,
++                   "expunging file %s/%s (%s) on %s", uuid_utoa(dir->gfid),
++                   name, uuid_utoa_r(replies[child].poststat.ia_gfid, g),
++                   subvol->name);
++            ret = syncop_unlink(subvol, &loc, NULL, NULL);
++            break;
++    }
++
++out:
++    loc_wipe(&loc);
++    return ret;
++}
++
++int
+ afr_selfheal_recreate_entry(call_frame_t *frame, int dst, int source,
+                             unsigned char *sources, inode_t *dir,
+                             const char *name, inode_t *inode,
+@@ -76,6 +192,9 @@ afr_selfheal_recreate_entry(call_frame_t *frame, int dst, int source,
+     loc_t srcloc = {
+         0,
+     };
++    loc_t anonloc = {
++        0,
++    };
+     xlator_t *this = frame->this;
+     afr_private_t *priv = NULL;
+     dict_t *xdata = NULL;
+@@ -86,15 +205,18 @@ afr_selfheal_recreate_entry(call_frame_t *frame, int dst, int source,
+         0,
+     };
+     unsigned char *newentry = NULL;
++    char iatt_uuid_str[64] = {0};
++    char dir_uuid_str[64] = {0};
+ 
+     priv = this->private;
+     iatt = &replies[source].poststat;
++    uuid_utoa_r(iatt->ia_gfid, iatt_uuid_str);
+     if (iatt->ia_type == IA_INVAL || gf_uuid_is_null(iatt->ia_gfid)) {
+         gf_msg(this->name, GF_LOG_ERROR, 0, AFR_MSG_SELF_HEAL_FAILED,
+                "Invalid ia_type (%d) or gfid(%s). source brick=%d, "
+                "pargfid=%s, name=%s",
+-               iatt->ia_type, uuid_utoa(iatt->ia_gfid), source,
+-               uuid_utoa(dir->gfid), name);
++               iatt->ia_type, iatt_uuid_str, source,
++               uuid_utoa_r(dir->gfid, dir_uuid_str), name);
+         ret = -EINVAL;
+         goto out;
+     }
+@@ -119,14 +241,24 @@ afr_selfheal_recreate_entry(call_frame_t *frame, int dst, int source,
+ 
+     srcloc.inode = inode_ref(inode);
+     gf_uuid_copy(srcloc.gfid, iatt->ia_gfid);
+-    if (iatt->ia_type != IA_IFDIR)
+-        ret = syncop_lookup(priv->children[dst], &srcloc, 0, 0, 0, 0);
+-    if (iatt->ia_type == IA_IFDIR || ret == -ENOENT || ret == -ESTALE) {
++    ret = syncop_lookup(priv->children[dst], &srcloc, 0, 0, 0, 0);
++    if (ret == -ENOENT || ret == -ESTALE) {
+         newentry[dst] = 1;
+         ret = afr_selfheal_newentry_mark(frame, this, inode, source, replies,
+                                          sources, newentry);
+         if (ret)
+             goto out;
++    } else if (ret == 0 && iatt->ia_type == IA_IFDIR && priv->use_anon_inode) {
++        // Try rename from hidden directory
++        ret = afr_anon_inode_create(this, dst, &anonloc.parent);
++        if (ret < 0)
++            goto out;
++        anonloc.inode = inode_ref(inode);
++        anonloc.name = iatt_uuid_str;
++        ret = syncop_rename(priv->children[dst], &anonloc, &loc, NULL, NULL);
++        if (ret == -ENOENT || ret == -ESTALE)
++            ret = -1; /*This sets 'mismatch' to true*/
++        goto out;
+     }
+ 
+     mode = st_mode_from_ia(iatt->ia_prot, iatt->ia_type);
+@@ -165,6 +297,7 @@ out:
+     GF_FREE(linkname);
+     loc_wipe(&loc);
+     loc_wipe(&srcloc);
++    loc_wipe(&anonloc);
+     return ret;
+ }
+ 
+@@ -580,6 +713,11 @@ afr_selfheal_entry_dirent(call_frame_t *frame, xlator_t *this, fd_t *fd,
+ 
+     priv = this->private;
+ 
++    if (afr_is_private_directory(priv, fd->inode->gfid, name,
++                                 GF_CLIENT_PID_SELF_HEALD)) {
++        return 0;
++    }
++
+     xattr = dict_new();
+     if (!xattr)
+         return -ENOMEM;
+@@ -628,7 +766,7 @@ afr_selfheal_entry_dirent(call_frame_t *frame, xlator_t *this, fd_t *fd,
+                                           replies);
+ 
+         if ((ret == 0) && (priv->esh_granular) && parent_idx_inode) {
+-            ret = afr_shd_index_purge(subvol, parent_idx_inode, name,
++            ret = afr_shd_entry_purge(subvol, parent_idx_inode, name,
+                                       inode->ia_type);
+             /* Why is ret force-set to 0? We do not care about
+              * index purge failing for full heal as it is quite
+@@ -758,10 +896,6 @@ afr_selfheal_entry_do_subvol(call_frame_t *frame, xlator_t *this, fd_t *fd,
+             if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+                 continue;
+ 
+-            if (__is_root_gfid(fd->inode->gfid) &&
+-                !strcmp(entry->d_name, GF_REPLICATE_TRASH_DIR))
+-                continue;
+-
+             ret = afr_selfheal_entry_dirent(iter_frame, this, fd, entry->d_name,
+                                             loc.inode, subvol,
+                                             local->need_full_crawl);
+@@ -824,7 +958,7 @@ afr_selfheal_entry_granular_dirent(xlator_t *subvol, gf_dirent_t *entry,
+         /* The name indices under the pgfid index dir are guaranteed
+          * to be regular files. Hence the hardcoding.
+          */
+-        afr_shd_index_purge(subvol, parent->inode, entry->d_name, IA_IFREG);
++        afr_shd_entry_purge(subvol, parent->inode, entry->d_name, IA_IFREG);
+         ret = 0;
+         goto out;
+     }
+diff --git a/xlators/cluster/afr/src/afr-self-heal-name.c b/xlators/cluster/afr/src/afr-self-heal-name.c
+index dace071..51e3d8c 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-name.c
++++ b/xlators/cluster/afr/src/afr-self-heal-name.c
+@@ -98,21 +98,12 @@ __afr_selfheal_name_expunge(xlator_t *this, inode_t *parent, uuid_t pargfid,
+                             const char *bname, inode_t *inode,
+                             struct afr_reply *replies)
+ {
+-    loc_t loc = {
+-        0,
+-    };
+     int i = 0;
+     afr_private_t *priv = NULL;
+-    char g[64];
+     int ret = 0;
+ 
+     priv = this->private;
+ 
+-    loc.parent = inode_ref(parent);
+-    gf_uuid_copy(loc.pargfid, pargfid);
+-    loc.name = bname;
+-    loc.inode = inode_ref(inode);
+-
+     for (i = 0; i < priv->child_count; i++) {
+         if (!replies[i].valid)
+             continue;
+@@ -120,30 +111,10 @@ __afr_selfheal_name_expunge(xlator_t *this, inode_t *parent, uuid_t pargfid,
+         if (replies[i].op_ret)
+             continue;
+ 
+-        switch (replies[i].poststat.ia_type) {
+-            case IA_IFDIR:
+-                gf_msg(this->name, GF_LOG_WARNING, 0,
+-                       AFR_MSG_EXPUNGING_FILE_OR_DIR,
+-                       "expunging dir %s/%s (%s) on %s", uuid_utoa(pargfid),
+-                       bname, uuid_utoa_r(replies[i].poststat.ia_gfid, g),
+-                       priv->children[i]->name);
+-
+-                ret |= syncop_rmdir(priv->children[i], &loc, 1, NULL, NULL);
+-                break;
+-            default:
+-                gf_msg(this->name, GF_LOG_WARNING, 0,
+-                       AFR_MSG_EXPUNGING_FILE_OR_DIR,
+-                       "expunging file %s/%s (%s) on %s", uuid_utoa(pargfid),
+-                       bname, uuid_utoa_r(replies[i].poststat.ia_gfid, g),
+-                       priv->children[i]->name);
+-
+-                ret |= syncop_unlink(priv->children[i], &loc, NULL, NULL);
+-                break;
+-        }
++        ret |= afr_selfheal_entry_delete(this, parent, bname, inode, i,
++                                         replies);
+     }
+ 
+-    loc_wipe(&loc);
+-
+     return ret;
+ }
+ 
+diff --git a/xlators/cluster/afr/src/afr-self-heal.h b/xlators/cluster/afr/src/afr-self-heal.h
+index 8f6fb00..c8dc384 100644
+--- a/xlators/cluster/afr/src/afr-self-heal.h
++++ b/xlators/cluster/afr/src/afr-self-heal.h
+@@ -370,4 +370,9 @@ gf_boolean_t
+ afr_is_file_empty_on_all_children(afr_private_t *priv,
+                                   struct afr_reply *replies);
+ 
++int
++afr_selfheal_entry_delete(xlator_t *this, inode_t *dir, const char *name,
++                          inode_t *inode, int child, struct afr_reply *replies);
++int
++afr_anon_inode_create(xlator_t *this, int child, inode_t **linked_inode);
+ #endif /* !_AFR_SELFHEAL_H */
+diff --git a/xlators/cluster/afr/src/afr-self-heald.c b/xlators/cluster/afr/src/afr-self-heald.c
+index 95ac5f2..939a135 100644
+--- a/xlators/cluster/afr/src/afr-self-heald.c
++++ b/xlators/cluster/afr/src/afr-self-heald.c
+@@ -222,7 +222,7 @@ out:
+ }
+ 
+ int
+-afr_shd_index_purge(xlator_t *subvol, inode_t *inode, char *name,
++afr_shd_entry_purge(xlator_t *subvol, inode_t *inode, char *name,
+                     ia_type_t type)
+ {
+     int ret = 0;
+@@ -422,7 +422,7 @@ afr_shd_index_heal(xlator_t *subvol, gf_dirent_t *entry, loc_t *parent,
+     ret = afr_shd_selfheal(healer, healer->subvol, gfid);
+ 
+     if (ret == -ENOENT || ret == -ESTALE)
+-        afr_shd_index_purge(subvol, parent->inode, entry->d_name, val);
++        afr_shd_entry_purge(subvol, parent->inode, entry->d_name, val);
+ 
+     if (ret == 2)
+         /* If bricks crashed in pre-op after creating indices/xattrop
+@@ -798,6 +798,176 @@ afr_bricks_available_for_heal(afr_private_t *priv)
+     return _gf_true;
+ }
+ 
++static int
++afr_shd_anon_inode_cleaner(xlator_t *subvol, gf_dirent_t *entry, loc_t *parent,
++                           void *data)
++{
++    struct subvol_healer *healer = data;
++    afr_private_t *priv = healer->this->private;
++    call_frame_t *frame = NULL;
++    afr_local_t *local = NULL;
++    int ret = 0;
++    loc_t loc = {0};
++    int count = 0;
++    int i = 0;
++    int op_errno = 0;
++    struct iatt *iatt = NULL;
++    gf_boolean_t multiple_links = _gf_false;
++    unsigned char *gfid_present = alloca0(priv->child_count);
++    unsigned char *entry_present = alloca0(priv->child_count);
++    char *type = "file";
++
++    frame = afr_frame_create(healer->this, &ret);
++    if (!frame) {
++        ret = -ret;
++        goto out;
++    }
++    local = frame->local;
++    if (AFR_COUNT(local->child_up, priv->child_count) != priv->child_count) {
++        gf_msg_debug(healer->this->name, 0,
++                     "Not all bricks are up. Skipping "
++                     "cleanup of %s on %s",
++                     entry->d_name, subvol->name);
++        ret = 0;
++        goto out;
++    }
++
++    loc.inode = inode_new(parent->inode->table);
++    if (!loc.inode) {
++        ret = -ENOMEM;
++        goto out;
++    }
++    ret = gf_uuid_parse(entry->d_name, loc.gfid);
++    if (ret) {
++        ret = 0;
++        goto out;
++    }
++    AFR_ONLIST(local->child_up, frame, afr_selfheal_discover_cbk, lookup, &loc,
++               NULL);
++    for (i = 0; i < priv->child_count; i++) {
++        if (local->replies[i].op_ret == 0) {
++            count++;
++            gfid_present[i] = 1;
++            iatt = &local->replies[i].poststat;
++            if (iatt->ia_type == IA_IFDIR) {
++                type = "dir";
++            }
++
++            if (i == healer->subvol) {
++                if (local->replies[i].poststat.ia_nlink > 1) {
++                    multiple_links = _gf_true;
++                }
++            }
++        } else if (local->replies[i].op_errno != ENOENT &&
++                   local->replies[i].op_errno != ESTALE) {
++            /*We don't have complete view. Skip the entry*/
++            gf_msg_debug(healer->this->name, local->replies[i].op_errno,
++                         "Skipping cleanup of %s on %s", entry->d_name,
++                         subvol->name);
++            ret = 0;
++            goto out;
++        }
++    }
++
++    /*Inode is deleted from subvol*/
++    if (count == 1 || (iatt->ia_type != IA_IFDIR && multiple_links)) {
++        gf_msg(healer->this->name, GF_LOG_WARNING, 0,
++               AFR_MSG_EXPUNGING_FILE_OR_DIR, "expunging %s %s/%s on %s", type,
++               priv->anon_inode_name, entry->d_name, subvol->name);
++        ret = afr_shd_entry_purge(subvol, parent->inode, entry->d_name,
++                                  iatt->ia_type);
++        if (ret == -ENOENT || ret == -ESTALE)
++            ret = 0;
++    } else if (count > 1) {
++        loc_wipe(&loc);
++        loc.parent = inode_ref(parent->inode);
++        loc.name = entry->d_name;
++        loc.inode = inode_new(parent->inode->table);
++        if (!loc.inode) {
++            ret = -ENOMEM;
++            goto out;
++        }
++        AFR_ONLIST(local->child_up, frame, afr_selfheal_discover_cbk, lookup,
++                   &loc, NULL);
++        count = 0;
++        for (i = 0; i < priv->child_count; i++) {
++            if (local->replies[i].op_ret == 0) {
++                count++;
++                entry_present[i] = 1;
++                iatt = &local->replies[i].poststat;
++            } else if (local->replies[i].op_errno != ENOENT &&
++                       local->replies[i].op_errno != ESTALE) {
++                /*We don't have complete view. Skip the entry*/
++                gf_msg_debug(healer->this->name, local->replies[i].op_errno,
++                             "Skipping cleanup of %s on %s", entry->d_name,
++                             subvol->name);
++                ret = 0;
++                goto out;
++            }
++        }
++        for (i = 0; i < priv->child_count; i++) {
++            if (gfid_present[i] && !entry_present[i]) {
++                /*Entry is not anonymous on at least one subvol*/
++                gf_msg_debug(healer->this->name, 0,
++                             "Valid entry present on %s "
++                             "Skipping cleanup of %s on %s",
++                             priv->children[i]->name, entry->d_name,
++                             subvol->name);
++                ret = 0;
++                goto out;
++            }
++        }
++
++        gf_msg(healer->this->name, GF_LOG_WARNING, 0,
++               AFR_MSG_EXPUNGING_FILE_OR_DIR,
++               "expunging %s %s/%s on all subvols", type, priv->anon_inode_name,
++               entry->d_name);
++        ret = 0;
++        for (i = 0; i < priv->child_count; i++) {
++            op_errno = -afr_shd_entry_purge(priv->children[i], loc.parent,
++                                            entry->d_name, iatt->ia_type);
++            if (op_errno != ENOENT && op_errno != ESTALE) {
++                ret |= -op_errno;
++            }
++        }
++    }
++
++out:
++    if (frame)
++        AFR_STACK_DESTROY(frame);
++    loc_wipe(&loc);
++    return ret;
++}
++
++static void
++afr_cleanup_anon_inode_dir(struct subvol_healer *healer)
++{
++    int ret = 0;
++    call_frame_t *frame = NULL;
++    afr_private_t *priv = healer->this->private;
++    loc_t loc = {0};
++
++    ret = afr_anon_inode_create(healer->this, healer->subvol, &loc.inode);
++    if (ret)
++        goto out;
++
++    frame = afr_frame_create(healer->this, &ret);
++    if (!frame) {
++        ret = -ret;
++        goto out;
++    }
++
++    ret = syncop_mt_dir_scan(frame, priv->children[healer->subvol], &loc,
++                             GF_CLIENT_PID_SELF_HEALD, healer,
++                             afr_shd_anon_inode_cleaner, NULL,
++                             priv->shd.max_threads, priv->shd.wait_qlength);
++out:
++    if (frame)
++        AFR_STACK_DESTROY(frame);
++    loc_wipe(&loc);
++    return;
++}
++
+ void *
+ afr_shd_index_healer(void *data)
+ {
+@@ -854,6 +1024,10 @@ afr_shd_index_healer(void *data)
+             sleep(1);
+         } while (ret > 0);
+ 
++        if (ret == 0) {
++            afr_cleanup_anon_inode_dir(healer);
++        }
++
+         if (pre_crawl_xdata && !healer->crawl_event.heal_failed_count) {
+             afr_shd_ta_check_and_unset_xattrs(this, &loc, healer,
+                                               pre_crawl_xdata);
+diff --git a/xlators/cluster/afr/src/afr-self-heald.h b/xlators/cluster/afr/src/afr-self-heald.h
+index 1990539..acd567e 100644
+--- a/xlators/cluster/afr/src/afr-self-heald.h
++++ b/xlators/cluster/afr/src/afr-self-heald.h
+@@ -70,6 +70,6 @@ afr_shd_gfid_to_path(xlator_t *this, xlator_t *subvol, uuid_t gfid,
+                      char **path_p);
+ 
+ int
+-afr_shd_index_purge(xlator_t *subvol, inode_t *inode, char *name,
++afr_shd_entry_purge(xlator_t *subvol, inode_t *inode, char *name,
+                     ia_type_t type);
+ #endif /* !_AFR_SELF_HEALD_H */
+diff --git a/xlators/cluster/afr/src/afr.c b/xlators/cluster/afr/src/afr.c
+index bfa464f..33fe4d8 100644
+--- a/xlators/cluster/afr/src/afr.c
++++ b/xlators/cluster/afr/src/afr.c
+@@ -135,6 +135,27 @@ set_data_self_heal_algorithm(afr_private_t *priv, char *algo)
+     }
+ }
+ 
++void
++afr_handle_anon_inode_options(afr_private_t *priv, dict_t *options)
++{
++    char *volfile_id_str = NULL;
++    uuid_t anon_inode_gfid = {0};
++
++    /*If volume id is not present don't enable anything*/
++    if (dict_get_str(options, "volume-id", &volfile_id_str))
++        return;
++    GF_ASSERT(strlen(AFR_ANON_DIR_PREFIX) + strlen(volfile_id_str) <= NAME_MAX);
++    /*anon_inode_name is not supposed to change once assigned*/
++    if (!priv->anon_inode_name[0]) {
++        snprintf(priv->anon_inode_name, sizeof(priv->anon_inode_name), "%s-%s",
++                 AFR_ANON_DIR_PREFIX, volfile_id_str);
++        gf_uuid_parse(volfile_id_str, anon_inode_gfid);
++        /*Flip a bit to make sure volfile-id and anon-gfid are not same*/
++        anon_inode_gfid[0] ^= 1;
++        uuid_utoa_r(anon_inode_gfid, priv->anon_gfid_str);
++    }
++}
++
+ int
+ reconfigure(xlator_t *this, dict_t *options)
+ {
+@@ -287,6 +308,10 @@ reconfigure(xlator_t *this, dict_t *options)
+         consistent_io = _gf_false;
+     priv->consistent_io = consistent_io;
+ 
++    afr_handle_anon_inode_options(priv, options);
++
++    GF_OPTION_RECONF("use-anonymous-inode", priv->use_anon_inode, options, bool,
++                     out);
+     if (priv->shd.enabled) {
+         if ((priv->shd.enabled != enabled_old) ||
+             (timeout_old != priv->shd.timeout))
+@@ -535,7 +560,9 @@ init(xlator_t *this)
+ 
+     GF_OPTION_INIT("consistent-metadata", priv->consistent_metadata, bool, out);
+     GF_OPTION_INIT("consistent-io", priv->consistent_io, bool, out);
++    afr_handle_anon_inode_options(priv, this->options);
+ 
++    GF_OPTION_INIT("use-anonymous-inode", priv->use_anon_inode, bool, out);
+     if (priv->quorum_count != 0)
+         priv->consistent_io = _gf_false;
+ 
+@@ -547,13 +574,16 @@ init(xlator_t *this)
+         goto out;
+     }
+ 
++    priv->anon_inode = GF_CALLOC(sizeof(unsigned char), child_count,
++                                 gf_afr_mt_char);
++
+     priv->child_up = GF_CALLOC(sizeof(unsigned char), child_count,
+                                gf_afr_mt_char);
+ 
+     priv->child_latency = GF_MALLOC(sizeof(*priv->child_latency) * child_count,
+                                     gf_afr_mt_child_latency_t);
+ 
+-    if (!priv->child_up || !priv->child_latency) {
++    if (!priv->child_up || !priv->child_latency || !priv->anon_inode) {
+         ret = -ENOMEM;
+         goto out;
+     }
+@@ -1218,6 +1248,14 @@ struct volume_options options[] = {
+      .tags = {"replicate"},
+      .description = "This option exists only for backward compatibility "
+                     "and configuring it doesn't have any effect"},
++    {.key = {"use-anonymous-inode"},
++     .type = GF_OPTION_TYPE_BOOL,
++     .default_value = "no",
++     .op_version = {GD_OP_VERSION_7_0},
++     .flags = OPT_FLAG_CLIENT_OPT | OPT_FLAG_SETTABLE,
++     .tags = {"replicate"},
++     .description = "Setting this option heals directory renames efficiently"},
++
+     {.key = {NULL}},
+ };
+ 
+diff --git a/xlators/cluster/afr/src/afr.h b/xlators/cluster/afr/src/afr.h
+index 3a2b26d..6a9a763 100644
+--- a/xlators/cluster/afr/src/afr.h
++++ b/xlators/cluster/afr/src/afr.h
+@@ -40,6 +40,8 @@
+ #define AFR_TA_DOM_MODIFY "afr.ta.dom-modify"
+ 
+ #define AFR_HALO_MAX_LATENCY 99999
++#define AFR_ANON_DIR_PREFIX ".glusterfs-anonymous-inode"
++
+ 
+ #define PFLAG_PENDING (1 << 0)
+ #define PFLAG_SBRAIN (1 << 1)
+@@ -155,6 +157,7 @@ typedef struct _afr_private {
+     struct list_head ta_waitq;
+     struct list_head ta_onwireq;
+ 
++    unsigned char *anon_inode;
+     unsigned char *child_up;
+     int64_t *child_latency;
+     unsigned char *local;
+@@ -240,6 +243,11 @@ typedef struct _afr_private {
+     gf_boolean_t esh_granular;
+     gf_boolean_t consistent_io;
+     gf_boolean_t data_self_heal; /* on/off */
++    gf_boolean_t use_anon_inode;
++
++    /*For anon-inode handling */
++    char anon_inode_name[NAME_MAX + 1];
++    char anon_gfid_str[UUID_SIZE + 1];
+ } afr_private_t;
+ 
+ typedef enum {
+@@ -1341,4 +1349,7 @@ afr_selfheal_childup(xlator_t *this, afr_private_t *priv);
+ void
+ afr_fill_success_replies(afr_local_t *local, afr_private_t *priv,
+                          unsigned char *replies);
++gf_boolean_t
++afr_is_private_directory(afr_private_t *priv, uuid_t pargfid, const char *name,
++                         pid_t pid);
+ #endif /* __AFR_H__ */
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volgen.c b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+index 094a71f..1920284 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volgen.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+@@ -3867,6 +3867,38 @@ out:
+ }
+ 
+ static int
++set_volfile_id_option(volgen_graph_t *graph, glusterd_volinfo_t *volinfo,
++                      int clusters)
++{
++    xlator_t *xlator = NULL;
++    int i = 0;
++    int ret = -1;
++    glusterd_conf_t *conf = NULL;
++    xlator_t *this = NULL;
++
++    this = THIS;
++    GF_VALIDATE_OR_GOTO("glusterd", this, out);
++    conf = this->private;
++    GF_VALIDATE_OR_GOTO(this->name, conf, out);
++
++    if (conf->op_version < GD_OP_VERSION_7_1)
++        return 0;
++    xlator = first_of(graph);
++
++    for (i = 0; i < clusters; i++) {
++        ret = xlator_set_fixed_option(xlator, "volume-id",
++                                      uuid_utoa(volinfo->volume_id));
++        if (ret)
++            goto out;
++
++        xlator = xlator->next;
++    }
++
++out:
++    return ret;
++}
++
++static int
+ volgen_graph_build_afr_clusters(volgen_graph_t *graph,
+                                 glusterd_volinfo_t *volinfo)
+ {
+@@ -3906,6 +3938,13 @@ volgen_graph_build_afr_clusters(volgen_graph_t *graph,
+         clusters = -1;
+         goto out;
+     }
++
++    ret = set_volfile_id_option(graph, volinfo, clusters);
++    if (ret) {
++        clusters = -1;
++        goto out;
++    }
++
+     if (!volinfo->arbiter_count)
+         goto out;
+ 
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index 62acadf..c1ca190 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -3789,4 +3789,10 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+      .voltype = "features/cloudsync",
+      .op_version = GD_OP_VERSION_7_0,
+      .flags = VOLOPT_FLAG_CLIENT_OPT},
++
++    {.key = "cluster.use-anonymous-inode",
++     .voltype = "cluster/replicate",
++     .op_version = GD_OP_VERSION_7_1,
++     .value = "yes",
++     .flags = VOLOPT_FLAG_CLIENT_OPT},
+     {.key = NULL}};
+-- 
+1.8.3.1
+

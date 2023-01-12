@@ -1,0 +1,289 @@
+From 40ac42501d6bbff7206e753e8e988beefe74f5f4 Mon Sep 17 00:00:00 2001
+From: Krutika Dhananjay <kdhananj@redhat.com>
+Date: Fri, 5 Apr 2019 10:30:23 +0530
+Subject: [PATCH 176/178] features/shard: Fix crash during background shard
+ deletion in a specific case
+
+Consider the following case -
+1. A file gets FALLOCATE'd such that > "shard-lru-limit" number of
+   shards are created.
+2. And then it is deleted after that.
+
+The unique thing about FALLOCATE is that unlike WRITE, all of the
+participant shards are resolved and created and fallocated in a single
+batch. This means, in this case, after the first "shard-lru-limit"
+number of shards are resolved and added to lru list, as part of
+resolution of the remaining shards, some of the existing shards in lru
+list will need to be evicted. So these evicted shards will be
+inode_unlink()d as part of eviction. Now once the fop gets to the actual
+FALLOCATE stage, the lru'd-out shards get added to fsync list.
+
+2 things to note at this point:
+i. the lru'd out shards are only part of fsync list, so each holds 1 ref
+   on base shard
+ii. and the more recently used shards are part of both fsync and lru list.
+    So each of these shards holds 2 refs on base inode  - one for being
+    part of fsync list, and the other for being part of lru list.
+
+FALLOCATE completes successfully and then this very file is deleted, and
+background shard deletion launched. Here's where the ref counts get mismatched.
+First as part of inode_resolve()s during the deletion, the lru'd-out inodes
+return NULL, because they are inode_unlink()'d by now. So these inodes need to
+be freshly looked up. But as part of linking them in lookup_cbk (precisely in
+shard_link_block_inode()), inode_link() returns the lru'd-out inode object.
+And its inode ctx is still valid and ctx->base_inode valid from the last
+time it was added to list.
+
+But shard_common_lookup_shards_cbk() passes NULL in the place of base_pointer
+to __shard_update_shards_inode_list(). This means, as part of adding the lru'd out
+inode back to lru list, base inode is not ref'd since its NULL.
+
+Whereas post unlinking this shard, during shard_unlink_block_inode(),
+ctx->base_inode is accessible and is unref'd because the shard was found to be part
+of LRU list, although the matching ref didn't occur. This at some point leads to
+base_inode refcount becoming 0 and it getting destroyed and released back while some
+of its associated shards are continuing to be unlinked in parallel and the client crashes
+whenever it is accessed next.
+
+Fix is to pass base shard correctly, if available, in shard_link_block_inode().
+
+Also, the patch fixes the ret value check in tests/bugs/shard/shard-fallocate.c
+
+>Change-Id: Ibd0bc4c6952367608e10701473cbad3947d7559f
+>Updates: bz#1696136
+>Signed-off-by: Krutika Dhananjay <kdhananj@redhat.com>
+
+Upstream Patch: https://review.gluster.org/#/c/glusterfs/+/22507/
+
+BUG: 1694595
+Change-Id: Ibd0bc4c6952367608e10701473cbad3947d7559f
+Signed-off-by: Sunil Kumar Acharya <sheggodu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172856
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ tests/bugs/shard/bug-1696136.c     | 121 +++++++++++++++++++++++++++++++++++++
+ tests/bugs/shard/bug-1696136.t     |  33 ++++++++++
+ tests/bugs/shard/shard-fallocate.c |   2 +-
+ xlators/features/shard/src/shard.c |  12 +++-
+ 4 files changed, 164 insertions(+), 4 deletions(-)
+ create mode 100644 tests/bugs/shard/bug-1696136.c
+ create mode 100644 tests/bugs/shard/bug-1696136.t
+
+diff --git a/tests/bugs/shard/bug-1696136.c b/tests/bugs/shard/bug-1696136.c
+new file mode 100644
+index 0000000..b9e8d13
+--- /dev/null
++++ b/tests/bugs/shard/bug-1696136.c
+@@ -0,0 +1,121 @@
++#define _GNU_SOURCE
++#include <fcntl.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <glusterfs/api/glfs.h>
++#include <glusterfs/api/glfs-handles.h>
++
++enum fallocate_flag {
++    TEST_FALLOCATE_NONE,
++    TEST_FALLOCATE_KEEP_SIZE,
++    TEST_FALLOCATE_ZERO_RANGE,
++    TEST_FALLOCATE_PUNCH_HOLE,
++    TEST_FALLOCATE_MAX,
++};
++
++int
++get_fallocate_flag(int opcode)
++{
++    int ret = 0;
++
++    switch (opcode) {
++        case TEST_FALLOCATE_NONE:
++            ret = 0;
++            break;
++        case TEST_FALLOCATE_KEEP_SIZE:
++            ret = FALLOC_FL_KEEP_SIZE;
++            break;
++        case TEST_FALLOCATE_ZERO_RANGE:
++            ret = FALLOC_FL_ZERO_RANGE;
++            break;
++        case TEST_FALLOCATE_PUNCH_HOLE:
++            ret = FALLOC_FL_PUNCH_HOLE;
++            break;
++        default:
++            ret = -1;
++            break;
++    }
++    return ret;
++}
++
++int
++main(int argc, char *argv[])
++{
++    int ret = 1;
++    int opcode = -1;
++    off_t offset = 0;
++    size_t len = 0;
++    glfs_t *fs = NULL;
++    glfs_fd_t *fd = NULL;
++
++    if (argc != 8) {
++        fprintf(stderr,
++                "Syntax: %s <host> <volname> <opcode> <offset> <len> "
++                "<file-path> <log-file>\n",
++                argv[0]);
++        return 1;
++    }
++
++    fs = glfs_new(argv[2]);
++    if (!fs) {
++        fprintf(stderr, "glfs_new: returned NULL\n");
++        return 1;
++    }
++
++    ret = glfs_set_volfile_server(fs, "tcp", argv[1], 24007);
++    if (ret != 0) {
++        fprintf(stderr, "glfs_set_volfile_server: returned %d\n", ret);
++        goto out;
++    }
++
++    ret = glfs_set_logging(fs, argv[7], 7);
++    if (ret != 0) {
++        fprintf(stderr, "glfs_set_logging: returned %d\n", ret);
++        goto out;
++    }
++
++    ret = glfs_init(fs);
++    if (ret != 0) {
++        fprintf(stderr, "glfs_init: returned %d\n", ret);
++        goto out;
++    }
++
++    opcode = atoi(argv[3]);
++    opcode = get_fallocate_flag(opcode);
++    if (opcode < 0) {
++        fprintf(stderr, "get_fallocate_flag: invalid flag \n");
++        goto out;
++    }
++
++    offset = atoi(argv[4]);
++    len = atoi(argv[5]);
++
++    fd = glfs_open(fs, argv[6], O_RDWR);
++    if (fd == NULL) {
++        fprintf(stderr, "glfs_open: returned NULL\n");
++        goto out;
++    }
++
++    ret = glfs_fallocate(fd, opcode, offset, len);
++    if (ret < 0) {
++        fprintf(stderr, "glfs_fallocate: returned %d\n", ret);
++        goto out;
++    }
++
++    ret = glfs_unlink(fs, argv[6]);
++    if (ret < 0) {
++        fprintf(stderr, "glfs_unlink: returned %d\n", ret);
++        goto out;
++    }
++    /* Sleep for 3s to give enough time for background deletion to complete
++     * during which if the bug exists, the process will crash.
++     */
++    sleep(3);
++    ret = 0;
++
++out:
++    if (fd)
++        glfs_close(fd);
++    glfs_fini(fs);
++    return ret;
++}
+diff --git a/tests/bugs/shard/bug-1696136.t b/tests/bugs/shard/bug-1696136.t
+new file mode 100644
+index 0000000..b6dc858
+--- /dev/null
++++ b/tests/bugs/shard/bug-1696136.t
+@@ -0,0 +1,33 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../fallocate.rc
++
++cleanup
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 replica 3 $H0:$B0/${V0}{0,1,2}
++TEST $CLI volume set $V0 features.shard on
++TEST $CLI volume set $V0 features.shard-block-size 4MB
++TEST $CLI volume set $V0 features.shard-lru-limit 120
++TEST $CLI volume set $V0 performance.write-behind off
++TEST $CLI volume start $V0
++
++TEST $GFS --volfile-id=$V0 --volfile-server=$H0 $M0
++
++TEST build_tester $(dirname $0)/bug-1696136.c -lgfapi -Wall -O2
++
++# Create a file
++TEST touch $M0/file1
++
++# Fallocate a 500M file. This will make sure number of participant shards are > lru-limit
++TEST $(dirname $0)/bug-1696136 $H0 $V0 "0" "0" "536870912" /file1 `gluster --print-logdir`/glfs-$V0.log
++
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
++TEST $CLI volume stop $V0
++TEST $CLI volume delete $V0
++rm -f $(dirname $0)/bug-1696136
++
++cleanup
+diff --git a/tests/bugs/shard/shard-fallocate.c b/tests/bugs/shard/shard-fallocate.c
+index 3a784d3..45b9ce0 100644
+--- a/tests/bugs/shard/shard-fallocate.c
++++ b/tests/bugs/shard/shard-fallocate.c
+@@ -97,7 +97,7 @@ main(int argc, char *argv[])
+     }
+ 
+     ret = glfs_fallocate(fd, opcode, offset, len);
+-    if (ret <= 0) {
++    if (ret < 0) {
+         fprintf(stderr, "glfs_fallocate: returned %d\n", ret);
+         goto out;
+     }
+diff --git a/xlators/features/shard/src/shard.c b/xlators/features/shard/src/shard.c
+index fa3564a..3c4bcdc 100644
+--- a/xlators/features/shard/src/shard.c
++++ b/xlators/features/shard/src/shard.c
+@@ -2213,13 +2213,19 @@ shard_link_block_inode(shard_local_t *local, int block_num, inode_t *inode,
+     xlator_t *this = NULL;
+     inode_t *fsync_inode = NULL;
+     shard_priv_t *priv = NULL;
++    inode_t *base_inode = NULL;
+ 
+     this = THIS;
+     priv = this->private;
+-    if (local->loc.inode)
++    if (local->loc.inode) {
+         gf_uuid_copy(gfid, local->loc.inode->gfid);
+-    else
++        base_inode = local->loc.inode;
++    } else if (local->resolver_base_inode) {
++        gf_uuid_copy(gfid, local->resolver_base_inode->gfid);
++        base_inode = local->resolver_base_inode;
++    } else {
+         gf_uuid_copy(gfid, local->base_gfid);
++    }
+ 
+     shard_make_block_bname(block_num, gfid, block_bname, sizeof(block_bname));
+ 
+@@ -2232,7 +2238,7 @@ shard_link_block_inode(shard_local_t *local, int block_num, inode_t *inode,
+     LOCK(&priv->lock);
+     {
+         fsync_inode = __shard_update_shards_inode_list(
+-            linked_inode, this, local->loc.inode, block_num, gfid);
++            linked_inode, this, base_inode, block_num, gfid);
+     }
+     UNLOCK(&priv->lock);
+     if (fsync_inode)
+-- 
+1.8.3.1
+

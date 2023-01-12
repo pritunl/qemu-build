@@ -1,0 +1,41 @@
+From c0efaa98d777e4520028bf55482846b3ef5fca3a Mon Sep 17 00:00:00 2001
+From: Susant Palai <spalai@redhat.com>
+Date: Wed, 1 Apr 2020 12:14:31 +0530
+Subject: [PATCH 359/362] dht: gf_defrag_process_dir is called even if
+ gf_defrag_fix_layout has failed
+
+Currently even though gf_defrag_fix_layout fails with ENOENT or ESTALE, a
+subsequent call is made to gf_defrag_process_dir leading to rebalance failure.
+
+upstream patch: https://review.gluster.org/#/c/glusterfs/+/24225
+
+> fixes: #1102
+> Change-Id: Ib0c309fd78e89a000fed3feb4bbe2c5b48e61478
+> Signed-off-by: Susant Palai <spalai@redhat.com>
+
+BUG: 1812789
+Change-Id: Ib0c309fd78e89a000fed3feb4bbe2c5b48e61478
+Signed-off-by: Susant Palai <spalai@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/196249
+Reviewed-by: Mohit Agrawal <moagrawa@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/dht/src/dht-rebalance.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/xlators/cluster/dht/src/dht-rebalance.c b/xlators/cluster/dht/src/dht-rebalance.c
+index 559f046..f4c62b8 100644
+--- a/xlators/cluster/dht/src/dht-rebalance.c
++++ b/xlators/cluster/dht/src/dht-rebalance.c
+@@ -3939,6 +3939,7 @@ gf_defrag_fix_layout(xlator_t *this, gf_defrag_info_t *defrag, loc_t *loc,
+                 defrag->total_failures++;
+             }
+             ret = 0;
++            goto out;
+         } else {
+             gf_msg(this->name, GF_LOG_ERROR, -ret, DHT_MSG_LAYOUT_FIX_FAILED,
+                    "Setxattr failed for %s", loc->path);
+-- 
+1.8.3.1
+

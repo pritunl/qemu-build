@@ -1,0 +1,61 @@
+From 1370db202a2a60810409f74c390448bf8fbd6998 Mon Sep 17 00:00:00 2001
+From: Barak Sason Rofman <bsasonro@redhat.com>
+Date: Sun, 9 Feb 2020 15:09:30 +0200
+Subject: [PATCH 429/449] dht/rebalance - fixing failure occurace due to
+ rebalance stop
+
+Probelm description:
+When topping rebalance, the following error messages appear in the
+rebalance log file:
+[2020-01-28 14:31:42.452070] W [dht-rebalance.c:3447:gf_defrag_process_dir] 0-distrep-dht: Found error from gf_defrag_get_entry
+[2020-01-28 14:31:42.452764] E [MSGID: 109111] [dht-rebalance.c:3971:gf_defrag_fix_layout] 0-distrep-dht: gf_defrag_process_dir failed for directory: /0/1/2/3/4/5/6/7/8/9/10/11/12/13/14/15/16/17/18/19/20/21/22/23/24/25/26/27/28/29/30/31
+[2020-01-28 14:31:42.453498] E [MSGID: 109016] [dht-rebalance.c:3906:gf_defrag_fix_layout] 0-distrep-dht: Fix layout failed for /0/1/2/3/4/5/6/7/8/9/10/11/12/13/14/15/16/17/18/19/20/21/22/23/24/25/26/27/28/29/30
+
+In order to avoid seing these error messages, a modification to the
+error handling mechanism has been made.
+In addition, several log messages had been added in order to improve debugging efficiency
+
+backport of https://review.gluster.org/#/c/glusterfs/+/24103/
+>fixes: bz#1800956
+>Change-Id: Ifc82dae79ab3da9fe22ee25088a2a6b855afcfcf
+>Signed-off-by: Barak Sason Rofman <bsasonro@redhat.com>
+
+BUG: 1286171
+Change-Id: Ifc82dae79ab3da9fe22ee25088a2a6b855afcfcf
+Signed-off-by: Barak Sason Rofman <bsasonro@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202562
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/dht/src/dht-rebalance.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/xlators/cluster/dht/src/dht-rebalance.c b/xlators/cluster/dht/src/dht-rebalance.c
+index 8f31dca..88b6b54 100644
+--- a/xlators/cluster/dht/src/dht-rebalance.c
++++ b/xlators/cluster/dht/src/dht-rebalance.c
+@@ -3479,6 +3479,10 @@ gf_defrag_process_dir(xlator_t *this, gf_defrag_info_t *defrag, loc_t *loc,
+                                       migrate_data, dir_dfmeta, xattr_req,
+                                       &should_commit_hash, perrno);
+ 
++            if (defrag->defrag_status == GF_DEFRAG_STATUS_STOPPED) {
++                goto out;
++            }
++
+             if (ret) {
+                 gf_log(this->name, GF_LOG_WARNING,
+                        "Found "
+@@ -3935,6 +3939,10 @@ gf_defrag_fix_layout(xlator_t *this, gf_defrag_info_t *defrag, loc_t *loc,
+             ret = gf_defrag_fix_layout(this, defrag, &entry_loc, fix_layout,
+                                        migrate_data);
+ 
++            if (defrag->defrag_status == GF_DEFRAG_STATUS_STOPPED) {
++                goto out;
++            }
++
+             if (ret && ret != 2) {
+                 gf_msg(this->name, GF_LOG_ERROR, 0, DHT_MSG_LAYOUT_FIX_FAILED,
+                        "Fix layout failed for %s", entry_loc.path);
+-- 
+1.8.3.1
+

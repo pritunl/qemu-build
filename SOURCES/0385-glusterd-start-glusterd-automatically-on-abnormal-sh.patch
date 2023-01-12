@@ -1,0 +1,50 @@
+From 143f85f55ded7a9075408e97d05abd9568d56e7b Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Mon, 25 Nov 2019 16:35:42 +0530
+Subject: [PATCH 385/449] glusterd: start glusterd automatically on abnormal
+ shutdown
+
+If glusterd crashes or goes down abnormally, systemd should
+automatically bring the glusterd up.
+
+With this change, systemd brings glusterd up for atmost 3 times
+within time period of 1 hour. If the limit exceeds, we have to
+start the glusterd manually and reset the failure count using
+systemctl reset-failed.
+
+credits: John Strunk <jstrunk@redhat.com>
+
+> upstream patch link: https://review.gluster.org/#/c/glusterfs/+/23751/
+> fixes: bz#1776264
+> Change-Id: I312d243652fb13ba028814a2ea615b67e3b10b6a
+> Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+
+BUG: 1663557
+Change-Id: I312d243652fb13ba028814a2ea615b67e3b10b6a
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202251
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/systemd/glusterd.service.in | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/extras/systemd/glusterd.service.in b/extras/systemd/glusterd.service.in
+index f604160..b944762 100644
+--- a/extras/systemd/glusterd.service.in
++++ b/extras/systemd/glusterd.service.in
+@@ -15,6 +15,11 @@ ExecStart=@prefix@/sbin/glusterd -p @localstatedir@/run/glusterd.pid  --log-leve
+ KillMode=process
+ TimeoutSec=300
+ SuccessExitStatus=15
++Restart=on-abnormal
++RestartSec=60
++StartLimitBurst=3
++StartLimitIntervalSec=3600
++StartLimitInterval=3600
+ 
+ [Install]
+ WantedBy=multi-user.target
+-- 
+1.8.3.1
+

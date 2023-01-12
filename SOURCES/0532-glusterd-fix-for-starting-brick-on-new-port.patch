@@ -1,0 +1,79 @@
+From 2dad17fdbaab2ab2cda6a05dec9dcd2d37ea32ff Mon Sep 17 00:00:00 2001
+From: Nikhil Ladha <nladha@redhat.com>
+Date: Wed, 10 Feb 2021 15:07:32 +0530
+Subject: [PATCH 532/532] glusterd: fix for starting brick on new port
+
+The Errno set by the runner code was not correct when the bind() fails
+to assign an already occupied port in the __socket_server_bind().
+
+Fix:
+Updated the code to return the correct errno from the
+__socket_server_bind() if the bind() fails due to EADDRINUSE error. And,
+use the returned errno from runner_run() to retry allocating a new port
+to the brick process.
+
+>Fixes: #1101
+
+>Change-Id: If124337f41344a04f050754e402490529ef4ecdc
+>Signed-off-by: nik-redhat nladha@redhat.com
+
+Upstream patch: https://github.com/gluster/glusterfs/pull/2090
+
+BUG: 1865796
+
+Change-Id: If124337f41344a04f050754e402490529ef4ecdc
+Signed-off-by: nik-redhat <nladha@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/227261
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Xavi Hernandez Juan <xhernandez@redhat.com>
+---
+ rpc/rpc-transport/socket/src/socket.c      | 3 +++
+ xlators/mgmt/glusterd/src/glusterd-utils.c | 6 ++----
+ 2 files changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/rpc/rpc-transport/socket/src/socket.c b/rpc/rpc-transport/socket/src/socket.c
+index 1ee7320..96ed9f1 100644
+--- a/rpc/rpc-transport/socket/src/socket.c
++++ b/rpc/rpc-transport/socket/src/socket.c
+@@ -973,8 +973,11 @@ __socket_server_bind(rpc_transport_t *this)
+                this->myinfo.identifier, strerror(errno));
+         if (errno == EADDRINUSE) {
+             gf_log(this->name, GF_LOG_ERROR, "Port is already in use");
++            ret = -EADDRINUSE;
++            goto out;
+         }
+     }
++
+     if (AF_UNIX != SA(&this->myinfo.sockaddr)->sa_family) {
+         if (getsockname(priv->sock, SA(&this->myinfo.sockaddr),
+                         &this->myinfo.sockaddr_len) != 0) {
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index cf32bd9..bc188a2 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -2151,6 +2151,7 @@ glusterd_volume_start_glusterfs(glusterd_volinfo_t *volinfo,
+         ret = -1;
+         goto out;
+     }
++
+     /* Build the exp_path, before starting the glusterfsd even in
+        valgrind mode. Otherwise all the glusterfsd processes start
+        writing the valgrind log to the same file.
+@@ -2289,13 +2290,10 @@ retry:
+ 
+     if (wait) {
+         synclock_unlock(&priv->big_lock);
+-        errno = 0;
+         ret = runner_run(&runner);
+-        if (errno != 0)
+-            ret = errno;
+         synclock_lock(&priv->big_lock);
+ 
+-        if (ret == EADDRINUSE) {
++        if (ret == -EADDRINUSE) {
+             /* retry after getting a new port */
+             gf_msg(this->name, GF_LOG_WARNING, -ret,
+                    GD_MSG_SRC_BRICK_PORT_UNAVAIL,
+-- 
+1.8.3.1
+

@@ -1,0 +1,53 @@
+From f30fa3938f980f03d08479776037090e7fc11f42 Mon Sep 17 00:00:00 2001
+From: Ashish Pandey <aspandey@redhat.com>
+Date: Tue, 5 May 2020 18:17:49 +0530
+Subject: [PATCH 369/375] cluster/ec: Return correct error code and log message
+
+In case of readdir was send with an FD on which opendir
+was failed, this FD will be useless and we return it with error.
+For now, we are returning it with EINVAL without logging any
+message in log file.
+
+Return a correct error code and also log the message to improve thing to debug.
+
+>fixes: #1220
+>Change-Id: Iaf035254b9c5aa52fa43ace72d328be622b06169
+>Signed-off-by: Ashish Pandey <aspandey@redhat.com>
+(Backport of https://review.gluster.org/#/c/glusterfs/+/24407/)
+
+BUG: 1831403
+Change-Id: Ib5bf30c47b7491abd0ad5ca0ce52ec77945b2e53
+Signed-off-by: Ashish Pandey <aspandey@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/200209
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/ec/src/ec-dir-read.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/cluster/ec/src/ec-dir-read.c b/xlators/cluster/ec/src/ec-dir-read.c
+index 8310d4a..9924425 100644
+--- a/xlators/cluster/ec/src/ec-dir-read.c
++++ b/xlators/cluster/ec/src/ec-dir-read.c
+@@ -388,9 +388,16 @@ ec_manager_readdir(ec_fop_data_t *fop, int32_t state)
+             /* Return error if opendir has not been successfully called on
+              * any subvolume. */
+             ctx = ec_fd_get(fop->fd, fop->xl);
+-            if ((ctx == NULL) || (ctx->open == 0)) {
+-                fop->error = EINVAL;
++            if (ctx == NULL) {
++                fop->error = ENOMEM;
++            } else if (ctx->open == 0) {
++                fop->error = EBADFD;
++            }
+ 
++            if (fop->error) {
++                gf_msg(fop->xl->name, GF_LOG_ERROR, fop->error,
++                       EC_MSG_INVALID_REQUEST, "EC is not winding readdir: %s",
++                       ec_msg_str(fop));
+                 return EC_STATE_REPORT;
+             }
+ 
+-- 
+1.8.3.1
+

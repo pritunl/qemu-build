@@ -1,0 +1,120 @@
+From eb37a3b57415d2d4206ecdd2db10530366a0d1b1 Mon Sep 17 00:00:00 2001
+From: Anoop C S <anoopcs@redhat.com>
+Date: Fri, 13 Dec 2019 15:20:27 +0530
+Subject: [PATCH 342/344] Revert "hooks: remove selinux hooks"
+
+This reverts commit 421743b7cfa6a249544f6abb4cca5a612bd20ea1.
+
+Note:- We are not bringing back features.selinux but just the hooks for
+       setting SELinux context on bricks
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Iccc10428361cac59b294e1d7aa1ba8187c20029e
+BUG: 1686800
+Signed-off-by: Anoop C S <anoopcs@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/187691
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Niels de Vos <ndevos@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ configure.ac                                | 4 ++++
+ extras/hook-scripts/Makefile.am             | 2 +-
+ extras/hook-scripts/create/Makefile.am      | 1 +
+ extras/hook-scripts/create/post/Makefile.am | 6 ++++++
+ extras/hook-scripts/delete/Makefile.am      | 1 +
+ extras/hook-scripts/delete/pre/Makefile.am  | 6 ++++++
+ glusterfs.spec.in                           | 2 ++
+ 7 files changed, 21 insertions(+), 1 deletion(-)
+ create mode 100644 extras/hook-scripts/create/Makefile.am
+ create mode 100644 extras/hook-scripts/create/post/Makefile.am
+ create mode 100644 extras/hook-scripts/delete/Makefile.am
+ create mode 100644 extras/hook-scripts/delete/pre/Makefile.am
+
+diff --git a/configure.ac b/configure.ac
+index 327733e..98ee311 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -221,6 +221,10 @@ AC_CONFIG_FILES([Makefile
+                 extras/hook-scripts/add-brick/Makefile
+                 extras/hook-scripts/add-brick/pre/Makefile
+                 extras/hook-scripts/add-brick/post/Makefile
++                extras/hook-scripts/create/Makefile
++                extras/hook-scripts/create/post/Makefile
++                extras/hook-scripts/delete/Makefile
++                extras/hook-scripts/delete/pre/Makefile
+                 extras/hook-scripts/start/Makefile
+                 extras/hook-scripts/start/post/Makefile
+                 extras/hook-scripts/set/Makefile
+diff --git a/extras/hook-scripts/Makefile.am b/extras/hook-scripts/Makefile.am
+index 771b37e..26059d7 100644
+--- a/extras/hook-scripts/Makefile.am
++++ b/extras/hook-scripts/Makefile.am
+@@ -1,5 +1,5 @@
+ EXTRA_DIST = S40ufo-stop.py S56glusterd-geo-rep-create-post.sh
+-SUBDIRS = add-brick set start stop reset
++SUBDIRS = add-brick create delete set start stop reset
+ 
+ scriptsdir = $(GLUSTERD_WORKDIR)/hooks/1/gsync-create/post/
+ if USE_GEOREP
+diff --git a/extras/hook-scripts/create/Makefile.am b/extras/hook-scripts/create/Makefile.am
+new file mode 100644
+index 0000000..b083a91
+--- /dev/null
++++ b/extras/hook-scripts/create/Makefile.am
+@@ -0,0 +1 @@
++SUBDIRS = post
+diff --git a/extras/hook-scripts/create/post/Makefile.am b/extras/hook-scripts/create/post/Makefile.am
+new file mode 100644
+index 0000000..919801a
+--- /dev/null
++++ b/extras/hook-scripts/create/post/Makefile.am
+@@ -0,0 +1,6 @@
++EXTRA_DIST = S10selinux-label-brick.sh
++
++scriptsdir = $(GLUSTERD_WORKDIR)/hooks/1/create/post/
++if WITH_SERVER
++scripts_SCRIPTS = S10selinux-label-brick.sh
++endif
+diff --git a/extras/hook-scripts/delete/Makefile.am b/extras/hook-scripts/delete/Makefile.am
+new file mode 100644
+index 0000000..c98a05d
+--- /dev/null
++++ b/extras/hook-scripts/delete/Makefile.am
+@@ -0,0 +1 @@
++SUBDIRS = pre
+diff --git a/extras/hook-scripts/delete/pre/Makefile.am b/extras/hook-scripts/delete/pre/Makefile.am
+new file mode 100644
+index 0000000..93a6b85
+--- /dev/null
++++ b/extras/hook-scripts/delete/pre/Makefile.am
+@@ -0,0 +1,6 @@
++EXTRA_DIST = S10selinux-del-fcontext.sh
++
++scriptsdir = $(GLUSTERD_WORKDIR)/hooks/1/delete/pre/
++if WITH_SERVER
++scripts_SCRIPTS = S10selinux-del-fcontext.sh
++endif
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 1b975b2..012989a 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -1453,6 +1453,7 @@ exit 0
+             %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick/pre/S28Quota-enable-root-xattr-heal.sh
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/create
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/create/post
++            %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/create/post/S10selinux-label-brick.sh
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/create/pre
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/copy-file
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/copy-file/post
+@@ -1461,6 +1462,7 @@ exit 0
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/delete/post
+                             %{_sharedstatedir}/glusterd/hooks/1/delete/post/S57glusterfind-delete-post
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/delete/pre
++            %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/delete/pre/S10selinux-del-fcontext.sh
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/remove-brick
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/remove-brick/post
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/remove-brick/pre
+-- 
+1.8.3.1
+

@@ -1,0 +1,102 @@
+From 32281b4b5cf79d0ef6f0c65775bb81093e1ba479 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawa@redhat.com>
+Date: Wed, 24 Feb 2021 18:44:12 +0530
+Subject: [PATCH 536/538] dht: Ongoing IO is failed during volume shrink
+ operation (#2188)
+
+In the commit (c878174) we have introduced a check
+to avoid stale layout issue.To avoid a stale layout
+issue dht has set a key along with layout at the time
+of wind a create fop and posix validates the parent
+layout based on the key value. If layout does not match
+it throw and error.In case of volume shrink layout has
+been changed by reabalance daemon and if layout does not
+matches dht is not able to wind a create fop successfully.
+
+Solution: To avoid the issue populate a key only while
+          dht has wind a fop first time. After got an
+          error in 2nd attempt dht takes a lock and then
+          reattempt to wind a fop again.
+
+> Fixes: #2187
+> Change-Id: Ie018386e7823a11eea415496bb226ca032453a55
+> Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+> (Cherry pick from commit da6ce622b722f7d12619c5860293faf03f7cd00c
+> Reviewed on upstream link https://github.com/gluster/glusterfs/pull/2188
+
+Bug: 1924044
+Change-Id: I7670dbe2d562b83db0af3753f994653ffdd49591
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/228941
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/dht/src/dht-common.c | 41 ++++++++++++++++++++++++++----------
+ 1 file changed, 30 insertions(+), 11 deletions(-)
+
+diff --git a/xlators/cluster/dht/src/dht-common.c b/xlators/cluster/dht/src/dht-common.c
+index fe1d0ee..7425c1a 100644
+--- a/xlators/cluster/dht/src/dht-common.c
++++ b/xlators/cluster/dht/src/dht-common.c
+@@ -8526,15 +8526,32 @@ dht_create_wind_to_avail_subvol(call_frame_t *frame, xlator_t *this,
+ {
+     dht_local_t *local = NULL;
+     xlator_t *avail_subvol = NULL;
++    int lk_count = 0;
+ 
+     local = frame->local;
+ 
+     if (!dht_is_subvol_filled(this, subvol)) {
+-        gf_msg_debug(this->name, 0, "creating %s on %s", loc->path,
+-                     subvol->name);
+-
+-        dht_set_parent_layout_in_dict(loc, this, local);
+-
++        lk_count = local->lock[0].layout.parent_layout.lk_count;
++        gf_msg_debug(this->name, 0, "creating %s on %s with lock_count %d",
++                     loc->path, subvol->name, lk_count);
++        /*The function dht_set_parent_layout_in_dict sets the layout
++          in dictionary and posix_create validates a layout before
++          creating a file.In case if parent layout does not match
++          with disk layout posix xlator throw an error but in case
++          if volume is shrunk layout has been changed by rebalance daemon
++          so we need to call this function only while a function is calling
++          without taking any lock otherwise we would not able to populate a
++          layout on disk in case if layout has changed.
++        */
++        if (!lk_count) {
++            dht_set_parent_layout_in_dict(loc, this, local);
++        } else {
++            /* Delete a key to avoid layout validate if it was set by
++               previous STACK_WIND attempt when a lock was not taken
++               by dht_create
++            */
++            (void)dict_del_sizen(local->params, GF_PREOP_PARENT_KEY);
++        }
+         STACK_WIND_COOKIE(frame, dht_create_cbk, subvol, subvol,
+                           subvol->fops->create, loc, flags, mode, umask, fd,
+                           params);
+@@ -8554,12 +8571,14 @@ dht_create_wind_to_avail_subvol(call_frame_t *frame, xlator_t *this,
+ 
+             goto out;
+         }
+-
+-        gf_msg_debug(this->name, 0, "creating %s on %s", loc->path,
+-                     subvol->name);
+-
+-        dht_set_parent_layout_in_dict(loc, this, local);
+-
++        lk_count = local->lock[0].layout.parent_layout.lk_count;
++        gf_msg_debug(this->name, 0, "creating %s on %s with lk_count %d",
++                     loc->path, subvol->name, lk_count);
++        if (!lk_count) {
++            dht_set_parent_layout_in_dict(loc, this, local);
++        } else {
++            (void)dict_del_sizen(local->params, GF_PREOP_PARENT_KEY);
++        }
+         STACK_WIND_COOKIE(frame, dht_create_cbk, subvol, subvol,
+                           subvol->fops->create, loc, flags, mode, umask, fd,
+                           params);
+-- 
+1.8.3.1
+

@@ -1,0 +1,885 @@
+From fc0903de1f7565e06db9d41e6dfd62221a745d24 Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Mon, 24 Jun 2019 13:06:49 +0530
+Subject: [PATCH 260/261] ctime: Set mdata xattr on legacy files
+
+Problem:
+The files which were created before ctime enabled would not
+have "trusted.glusterfs.mdata"(stores time attributes) xattr.
+Upon fops which modifies either ctime or mtime, the xattr
+gets created with latest ctime, mtime and atime, which is
+incorrect. It should update only the corresponding time
+attribute and rest from backend
+
+Solution:
+Creating xattr with values from brick is not possible as
+each brick of replica set would have different times.
+So create the xattr upon successful lookup if the xattr
+is not created
+
+Note To Reviewers:
+The time attributes used to set xattr is got from successful
+lookup. Instead of sending the whole iatt over the wire via
+setxattr, a structure called mdata_iatt is sent. The mdata_iatt
+contains only time attributes.
+
+Backport of
+ > Patch: https://review.gluster.org/22936
+ > Change-Id: I5e535631ddef04195361ae0364336410a2895dd4
+ > fixes: bz#1593542
+
+Change-Id: I5e535631ddef04195361ae0364336410a2895dd4
+BUG: 1715422
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/176725
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Amar Tumballi Suryanarayan <amarts@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ libglusterfs/src/dict.c                        |  59 ++++++++++
+ libglusterfs/src/glusterfs/dict.h              |   5 +
+ libglusterfs/src/glusterfs/glusterfs.h         |   3 +
+ libglusterfs/src/glusterfs/iatt.h              |  20 ++++
+ libglusterfs/src/libglusterfs.sym              |   3 +
+ rpc/xdr/src/glusterfs-fops.x                   |   1 +
+ rpc/xdr/src/glusterfs3.h                       |  59 ++++++++++
+ rpc/xdr/src/glusterfs4-xdr.x                   |  12 ++
+ rpc/xdr/src/libgfxdr.sym                       |   3 +-
+ tests/basic/ctime/ctime-mdata-legacy-files.t   |  83 +++++++++++++
+ xlators/features/utime/src/utime-messages.h    |   3 +-
+ xlators/features/utime/src/utime.c             | 154 ++++++++++++++++++++++---
+ xlators/storage/posix/src/posix-inode-fd-ops.c |  17 +++
+ xlators/storage/posix/src/posix-messages.h     |   3 +-
+ xlators/storage/posix/src/posix-metadata.c     | 103 ++++++++++-------
+ xlators/storage/posix/src/posix-metadata.h     |   4 +
+ 16 files changed, 475 insertions(+), 57 deletions(-)
+ create mode 100644 tests/basic/ctime/ctime-mdata-legacy-files.t
+
+diff --git a/libglusterfs/src/dict.c b/libglusterfs/src/dict.c
+index 6917df9..d8cdda4 100644
+--- a/libglusterfs/src/dict.c
++++ b/libglusterfs/src/dict.c
+@@ -124,6 +124,7 @@ int32_t
+ is_data_equal(data_t *one, data_t *two)
+ {
+     struct iatt *iatt1, *iatt2;
++    struct mdata_iatt *mdata_iatt1, *mdata_iatt2;
+ 
+     if (!one || !two || !one->data || !two->data) {
+         gf_msg_callingfn("dict", GF_LOG_ERROR, EINVAL, LG_MSG_INVALID_ARG,
+@@ -188,6 +189,24 @@ is_data_equal(data_t *one, data_t *two)
+         */
+         return 1;
+     }
++    if (one->data_type == GF_DATA_TYPE_MDATA) {
++        if ((one->len < sizeof(struct mdata_iatt)) ||
++            (two->len < sizeof(struct mdata_iatt))) {
++            return 0;
++        }
++        mdata_iatt1 = (struct mdata_iatt *)one->data;
++        mdata_iatt2 = (struct mdata_iatt *)two->data;
++
++        if (mdata_iatt1->ia_atime != mdata_iatt2->ia_atime ||
++            mdata_iatt1->ia_mtime != mdata_iatt2->ia_mtime ||
++            mdata_iatt1->ia_ctime != mdata_iatt2->ia_ctime ||
++            mdata_iatt1->ia_atime_nsec != mdata_iatt2->ia_atime_nsec ||
++            mdata_iatt1->ia_mtime_nsec != mdata_iatt2->ia_mtime_nsec ||
++            mdata_iatt1->ia_ctime_nsec != mdata_iatt2->ia_ctime_nsec) {
++            return 0;
++        }
++        return 1;
++    }
+ 
+     if (one->len != two->len)
+         return 0;
+@@ -1078,6 +1097,7 @@ static char *data_type_name[GF_DATA_TYPE_MAX] = {
+     [GF_DATA_TYPE_PTR] = "pointer",
+     [GF_DATA_TYPE_GFUUID] = "gf-uuid",
+     [GF_DATA_TYPE_IATT] = "iatt",
++    [GF_DATA_TYPE_MDATA] = "mdata",
+ };
+ 
+ int64_t
+@@ -2666,6 +2686,45 @@ err:
+ }
+ 
+ int
++dict_set_mdata(dict_t *this, char *key, struct mdata_iatt *mdata,
++               bool is_static)
++{
++    return dict_set_bin_common(this, key, mdata, sizeof(struct mdata_iatt),
++                               is_static, GF_DATA_TYPE_MDATA);
++}
++
++int
++dict_get_mdata(dict_t *this, char *key, struct mdata_iatt *mdata)
++{
++    data_t *data = NULL;
++    int ret = -EINVAL;
++
++    if (!this || !key || !mdata) {
++        goto err;
++    }
++    ret = dict_get_with_ref(this, key, &data);
++    if (ret < 0) {
++        goto err;
++    }
++
++    VALIDATE_DATA_AND_LOG(data, GF_DATA_TYPE_MDATA, key, -EINVAL);
++    if (data->len < sizeof(struct mdata_iatt)) {
++        gf_msg("glusterfs", GF_LOG_ERROR, ENOBUFS, LG_MSG_UNDERSIZED_BUF,
++               "data value for '%s' is smaller than expected", key);
++        ret = -ENOBUFS;
++        goto err;
++    }
++
++    memcpy(mdata, data->data, min(data->len, sizeof(struct mdata_iatt)));
++
++err:
++    if (data)
++        data_unref(data);
++
++    return ret;
++}
++
++int
+ dict_set_iatt(dict_t *this, char *key, struct iatt *iatt, bool is_static)
+ {
+     return dict_set_bin_common(this, key, iatt, sizeof(struct iatt), is_static,
+diff --git a/libglusterfs/src/glusterfs/dict.h b/libglusterfs/src/glusterfs/dict.h
+index 022f564..8239c7a 100644
+--- a/libglusterfs/src/glusterfs/dict.h
++++ b/libglusterfs/src/glusterfs/dict.h
+@@ -392,6 +392,11 @@ GF_MUST_CHECK int
+ dict_set_iatt(dict_t *this, char *key, struct iatt *iatt, bool is_static);
+ GF_MUST_CHECK int
+ dict_get_iatt(dict_t *this, char *key, struct iatt *iatt);
++GF_MUST_CHECK int
++dict_set_mdata(dict_t *this, char *key, struct mdata_iatt *mdata,
++               bool is_static);
++GF_MUST_CHECK int
++dict_get_mdata(dict_t *this, char *key, struct mdata_iatt *mdata);
+ 
+ void
+ dict_dump_to_statedump(dict_t *dict, char *dict_name, char *domain);
+diff --git a/libglusterfs/src/glusterfs/glusterfs.h b/libglusterfs/src/glusterfs/glusterfs.h
+index 2cedf1a..79c93ae 100644
+--- a/libglusterfs/src/glusterfs/glusterfs.h
++++ b/libglusterfs/src/glusterfs/glusterfs.h
+@@ -229,6 +229,9 @@ enum gf_internal_fop_indicator {
+ #define VIRTUAL_QUOTA_XATTR_CLEANUP_KEY "glusterfs.quota-xattr-cleanup"
+ #define QUOTA_READ_ONLY_KEY "trusted.glusterfs.quota.read-only"
+ 
++/* ctime related */
++#define CTIME_MDATA_XDATA_KEY "set-ctime-mdata"
++
+ /* afr related */
+ #define AFR_XATTR_PREFIX "trusted.afr"
+ 
+diff --git a/libglusterfs/src/glusterfs/iatt.h b/libglusterfs/src/glusterfs/iatt.h
+index bee7a0a..f03d68b 100644
+--- a/libglusterfs/src/glusterfs/iatt.h
++++ b/libglusterfs/src/glusterfs/iatt.h
+@@ -92,6 +92,15 @@ struct old_iatt {
+     uint32_t ia_ctime_nsec;
+ };
+ 
++struct mdata_iatt {
++    int64_t ia_atime; /* last access time */
++    int64_t ia_mtime; /* last modification time */
++    int64_t ia_ctime; /* last status change time */
++    uint32_t ia_atime_nsec;
++    uint32_t ia_mtime_nsec;
++    uint32_t ia_ctime_nsec;
++};
++
+ /* 64-bit mask for valid members in struct iatt. */
+ #define IATT_TYPE 0x0000000000000001U
+ #define IATT_MODE 0x0000000000000002U
+@@ -313,6 +322,17 @@ st_mode_from_ia(ia_prot_t prot, ia_type_t type)
+     return st_mode;
+ }
+ 
++static inline void
++iatt_to_mdata(struct mdata_iatt *mdata, struct iatt *iatt)
++{
++    mdata->ia_atime = iatt->ia_atime;
++    mdata->ia_atime_nsec = iatt->ia_atime_nsec;
++    mdata->ia_mtime = iatt->ia_mtime;
++    mdata->ia_mtime_nsec = iatt->ia_mtime_nsec;
++    mdata->ia_ctime = iatt->ia_ctime;
++    mdata->ia_ctime_nsec = iatt->ia_ctime_nsec;
++}
++
+ static inline int
+ iatt_from_stat(struct iatt *iatt, struct stat *stat)
+ {
+diff --git a/libglusterfs/src/libglusterfs.sym b/libglusterfs/src/libglusterfs.sym
+index 4dca7de..b161380 100644
+--- a/libglusterfs/src/libglusterfs.sym
++++ b/libglusterfs/src/libglusterfs.sym
+@@ -380,6 +380,7 @@ dict_get_bin
+ dict_get_double
+ dict_get_gfuuid
+ dict_get_iatt
++dict_get_mdata
+ dict_get_int16
+ dict_get_int32
+ dict_get_int32n
+@@ -417,6 +418,7 @@ dict_set_dynstrn
+ dict_set_dynstr_with_alloc
+ dict_set_gfuuid
+ dict_set_iatt
++dict_set_mdata
+ dict_set_int16
+ dict_set_int32
+ dict_set_int32n
+@@ -509,6 +511,7 @@ fop_lease_stub
+ fop_link_stub
+ fop_lk_stub
+ fop_log_level
++fop_lookup_cbk_stub
+ fop_lookup_stub
+ fop_mkdir_stub
+ fop_mknod_stub
+diff --git a/rpc/xdr/src/glusterfs-fops.x b/rpc/xdr/src/glusterfs-fops.x
+index bacf0773..651f8de 100644
+--- a/rpc/xdr/src/glusterfs-fops.x
++++ b/rpc/xdr/src/glusterfs-fops.x
+@@ -245,5 +245,6 @@ enum gf_dict_data_type_t {
+         GF_DATA_TYPE_PTR,
+         GF_DATA_TYPE_GFUUID,
+         GF_DATA_TYPE_IATT,
++        GF_DATA_TYPE_MDATA,
+         GF_DATA_TYPE_MAX
+ };
+diff --git a/rpc/xdr/src/glusterfs3.h b/rpc/xdr/src/glusterfs3.h
+index 5521f4d..86b3a4c 100644
+--- a/rpc/xdr/src/glusterfs3.h
++++ b/rpc/xdr/src/glusterfs3.h
+@@ -585,6 +585,34 @@ out:
+ }
+ 
+ static inline void
++gfx_mdata_iatt_to_mdata_iatt(struct gfx_mdata_iatt *gf_mdata_iatt,
++                             struct mdata_iatt *mdata_iatt)
++{
++    if (!mdata_iatt || !gf_mdata_iatt)
++        return;
++    mdata_iatt->ia_atime = gf_mdata_iatt->ia_atime;
++    mdata_iatt->ia_atime_nsec = gf_mdata_iatt->ia_atime_nsec;
++    mdata_iatt->ia_mtime = gf_mdata_iatt->ia_mtime;
++    mdata_iatt->ia_mtime_nsec = gf_mdata_iatt->ia_mtime_nsec;
++    mdata_iatt->ia_ctime = gf_mdata_iatt->ia_ctime;
++    mdata_iatt->ia_ctime_nsec = gf_mdata_iatt->ia_ctime_nsec;
++}
++
++static inline void
++gfx_mdata_iatt_from_mdata_iatt(struct gfx_mdata_iatt *gf_mdata_iatt,
++                               struct mdata_iatt *mdata_iatt)
++{
++    if (!mdata_iatt || !gf_mdata_iatt)
++        return;
++    gf_mdata_iatt->ia_atime = mdata_iatt->ia_atime;
++    gf_mdata_iatt->ia_atime_nsec = mdata_iatt->ia_atime_nsec;
++    gf_mdata_iatt->ia_mtime = mdata_iatt->ia_mtime;
++    gf_mdata_iatt->ia_mtime_nsec = mdata_iatt->ia_mtime_nsec;
++    gf_mdata_iatt->ia_ctime = mdata_iatt->ia_ctime;
++    gf_mdata_iatt->ia_ctime_nsec = mdata_iatt->ia_ctime_nsec;
++}
++
++static inline void
+ gfx_stat_to_iattx(struct gfx_iattx *gf_stat, struct iatt *iatt)
+ {
+     if (!iatt || !gf_stat)
+@@ -721,6 +749,12 @@ dict_to_xdr(dict_t *this, gfx_dict *dict)
+                 gfx_stat_from_iattx(&xpair->value.gfx_value_u.iatt,
+                                     (struct iatt *)dpair->value->data);
+                 break;
++            case GF_DATA_TYPE_MDATA:
++                index++;
++                gfx_mdata_iatt_from_mdata_iatt(
++                    &xpair->value.gfx_value_u.mdata_iatt,
++                    (struct mdata_iatt *)dpair->value->data);
++                break;
+             case GF_DATA_TYPE_GFUUID:
+                 index++;
+                 memcpy(&xpair->value.gfx_value_u.uuid, dpair->value->data,
+@@ -787,6 +821,7 @@ xdr_to_dict(gfx_dict *dict, dict_t **to)
+     dict_t *this = NULL;
+     unsigned char *uuid = NULL;
+     struct iatt *iatt = NULL;
++    struct mdata_iatt *mdata_iatt = NULL;
+ 
+     if (!to || !dict)
+         goto out;
+@@ -854,6 +889,30 @@ xdr_to_dict(gfx_dict *dict, dict_t **to)
+                 gfx_stat_to_iattx(&xpair->value.gfx_value_u.iatt, iatt);
+                 ret = dict_set_iatt(this, key, iatt, false);
+                 break;
++            case GF_DATA_TYPE_MDATA:
++                mdata_iatt = GF_CALLOC(1, sizeof(struct mdata_iatt),
++                                       gf_common_mt_char);
++                if (!mdata_iatt) {
++                    errno = ENOMEM;
++                    gf_msg(THIS->name, GF_LOG_ERROR, ENOMEM, LG_MSG_NO_MEMORY,
++                           "failed to allocate memory. key: %s", key);
++                    ret = -1;
++                    goto out;
++                }
++                gfx_mdata_iatt_to_mdata_iatt(
++                    &xpair->value.gfx_value_u.mdata_iatt, mdata_iatt);
++                ret = dict_set_mdata(this, key, mdata_iatt, false);
++                if (ret != 0) {
++                    GF_FREE(mdata_iatt);
++                    gf_msg(THIS->name, GF_LOG_ERROR, ENOMEM,
++                           LG_MSG_DICT_SET_FAILED,
++                           "failed to set the key (%s)"
++                           " into dict",
++                           key);
++                    ret = -1;
++                    goto out;
++                }
++                break;
+             case GF_DATA_TYPE_PTR:
+             case GF_DATA_TYPE_STR_OLD:
+                 value = GF_MALLOC(xpair->value.gfx_value_u.other.other_len + 1,
+diff --git a/rpc/xdr/src/glusterfs4-xdr.x b/rpc/xdr/src/glusterfs4-xdr.x
+index bec0872..6f92b70 100644
+--- a/rpc/xdr/src/glusterfs4-xdr.x
++++ b/rpc/xdr/src/glusterfs4-xdr.x
+@@ -46,6 +46,16 @@ struct gfx_iattx {
+         unsigned int     mode;          /* type of file and rwx mode */
+ };
+ 
++struct gfx_mdata_iatt {
++        hyper      ia_atime;      /* last access time */
++        hyper      ia_mtime;      /* last modification time */
++        hyper      ia_ctime;      /* last status change time */
++
++        unsigned int     ia_atime_nsec;
++        unsigned int     ia_mtime_nsec;
++        unsigned int     ia_ctime_nsec;
++};
++
+ union gfx_value switch (gf_dict_data_type_t type) {
+         case GF_DATA_TYPE_INT:
+                 hyper value_int;
+@@ -62,6 +72,8 @@ union gfx_value switch (gf_dict_data_type_t type) {
+         case GF_DATA_TYPE_PTR:
+         case GF_DATA_TYPE_STR_OLD:
+                 opaque other<>;
++        case GF_DATA_TYPE_MDATA:
++                gfx_mdata_iatt mdata_iatt;
+ };
+ 
+ /* AUTH */
+diff --git a/rpc/xdr/src/libgfxdr.sym b/rpc/xdr/src/libgfxdr.sym
+index 22cdf30..dd4ac85 100644
+--- a/rpc/xdr/src/libgfxdr.sym
++++ b/rpc/xdr/src/libgfxdr.sym
+@@ -251,6 +251,7 @@ xdr_to_write3args
+ xdr_vector_round_up
+ xdr_gfx_read_rsp
+ xdr_gfx_iattx
++xdr_gfx_mdata_iatt
+ xdr_gfx_value
+ xdr_gfx_dict_pair
+ xdr_gfx_dict
+@@ -344,4 +345,4 @@ xdr_compound_req_v2
+ xdr_gfx_compound_req
+ xdr_compound_rsp_v2
+ xdr_gfx_compound_rsp
+-xdr_gfx_copy_file_range_req
+\ No newline at end of file
++xdr_gfx_copy_file_range_req
+diff --git a/tests/basic/ctime/ctime-mdata-legacy-files.t b/tests/basic/ctime/ctime-mdata-legacy-files.t
+new file mode 100644
+index 0000000..2e782d5
+--- /dev/null
++++ b/tests/basic/ctime/ctime-mdata-legacy-files.t
+@@ -0,0 +1,83 @@
++#!/bin/bash
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../afr.rc
++cleanup;
++
++###############################################################################
++#Replica volume
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 replica 3 $H0:$B0/${V0}{0,1,2}
++TEST $CLI volume set $V0 performance.stat-prefetch off
++TEST $CLI volume start $V0
++
++TEST glusterfs --volfile-id=$V0 --volfile-server=$H0 --entry-timeout=0 $M0;
++
++#Disable ctime and create file, file doesn't contain "trusted.glusterfs.mdata" xattr
++TEST $CLI volume set $V0 ctime off
++
++TEST "mkdir $M0/DIR"
++TEST "echo hello_world > $M0/DIR/FILE"
++
++#Verify absence of xattr
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "" check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V0}0/DIR"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "" check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V0}0/DIR/FILE"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "" check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V0}1/DIR"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "" check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V0}1/DIR/FILE"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "" check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V0}2/DIR"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "" check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V0}2/DIR/FILE"
++
++#Enable ctime
++TEST $CLI volume set $V0 ctime on
++sleep 3
++TEST stat $M0/DIR/FILE
++
++#Verify presence "trusted.glusterfs.mdata" xattr on backend
++#The lookup above should have created xattr
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.glusterfs.mdata' check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V0}0/DIR"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.glusterfs.mdata' check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V0}0/DIR/FILE"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.glusterfs.mdata' check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V0}1/DIR"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.glusterfs.mdata' check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V0}1/DIR/FILE"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.glusterfs.mdata' check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V0}2/DIR"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.glusterfs.mdata' check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V0}2/DIR/FILE"
++
++###############################################################################
++#Disperse Volume
++
++TEST $CLI volume create $V1 disperse 3 redundancy 1  $H0:$B0/${V1}{0,1,2}
++TEST $CLI volume set $V1 performance.stat-prefetch off
++TEST $CLI volume start $V1
++
++TEST glusterfs --volfile-id=$V1 --volfile-server=$H0 --entry-timeout=0 $M1;
++
++#Disable ctime and create file, file doesn't contain "trusted.glusterfs.mdata" xattr
++TEST $CLI volume set $V1 ctime off
++TEST "mkdir $M1/DIR"
++TEST "echo hello_world > $M1/DIR/FILE"
++
++#Verify absence of xattr
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "" check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V1}0/DIR"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "" check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V1}0/DIR/FILE"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "" check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V1}1/DIR"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "" check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V1}1/DIR/FILE"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "" check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V1}2/DIR"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "" check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V1}2/DIR/FILE"
++
++#Enable ctime
++TEST $CLI volume set $V1 ctime on
++sleep 3
++TEST stat $M1/DIR/FILE
++
++#Verify presence "trusted.glusterfs.mdata" xattr on backend
++#The lookup above should have created xattr
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.glusterfs.mdata' check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V1}0/DIR"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.glusterfs.mdata' check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V1}0/DIR/FILE"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.glusterfs.mdata' check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V1}1/DIR"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.glusterfs.mdata' check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V1}1/DIR/FILE"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.glusterfs.mdata' check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V1}2/DIR"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.glusterfs.mdata' check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V1}2/DIR/FILE"
++
++cleanup;
++###############################################################################
+diff --git a/xlators/features/utime/src/utime-messages.h b/xlators/features/utime/src/utime-messages.h
+index bac18ab..bd40265 100644
+--- a/xlators/features/utime/src/utime-messages.h
++++ b/xlators/features/utime/src/utime-messages.h
+@@ -23,6 +23,7 @@
+  * glfs-message-id.h.
+  */
+ 
+-GLFS_MSGID(UTIME, UTIME_MSG_NO_MEMORY);
++GLFS_MSGID(UTIME, UTIME_MSG_NO_MEMORY, UTIME_MSG_SET_MDATA_FAILED,
++           UTIME_MSG_DICT_SET_FAILED);
+ 
+ #endif /* __UTIME_MESSAGES_H__ */
+diff --git a/xlators/features/utime/src/utime.c b/xlators/features/utime/src/utime.c
+index 877c751..2a986e7 100644
+--- a/xlators/features/utime/src/utime.c
++++ b/xlators/features/utime/src/utime.c
+@@ -9,8 +9,10 @@
+ */
+ 
+ #include "utime.h"
++#include "utime-helpers.h"
+ #include "utime-messages.h"
+ #include "utime-mem-types.h"
++#include <glusterfs/call-stub.h>
+ 
+ int32_t
+ gf_utime_invalidate(xlator_t *this, inode_t *inode)
+@@ -133,6 +135,124 @@ mem_acct_init(xlator_t *this)
+ }
+ 
+ int32_t
++gf_utime_set_mdata_setxattr_cbk(call_frame_t *frame, void *cookie,
++                                xlator_t *this, int op_ret, int op_errno,
++                                dict_t *xdata)
++{
++    /* Don't fail lookup if mdata setxattr fails */
++    if (op_ret) {
++        gf_msg(this->name, GF_LOG_ERROR, op_errno, UTIME_MSG_SET_MDATA_FAILED,
++               "dict set of key for set-ctime-mdata failed");
++    }
++    call_resume(frame->local);
++    return 0;
++}
++
++int32_t
++gf_utime_set_mdata_lookup_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
++                              int32_t op_ret, int32_t op_errno, inode_t *inode,
++                              struct iatt *stbuf, dict_t *xdata,
++                              struct iatt *postparent)
++{
++    dict_t *dict = NULL;
++    struct mdata_iatt *mdata = NULL;
++    int ret = 0;
++    loc_t loc = {
++        0,
++    };
++
++    if (!op_ret && dict_get(xdata, GF_XATTR_MDATA_KEY) == NULL) {
++        dict = dict_new();
++        if (!dict) {
++            op_errno = ENOMEM;
++            goto err;
++        }
++        mdata = GF_MALLOC(sizeof(struct mdata_iatt), gf_common_mt_char);
++        if (mdata == NULL) {
++            op_errno = ENOMEM;
++            goto err;
++        }
++        iatt_to_mdata(mdata, stbuf);
++        ret = dict_set_mdata(dict, CTIME_MDATA_XDATA_KEY, mdata, _gf_false);
++        if (ret < 0) {
++            gf_msg(this->name, GF_LOG_WARNING, ENOMEM, UTIME_MSG_NO_MEMORY,
++                   "dict set of key for set-ctime-mdata failed");
++            goto err;
++        }
++        frame->local = fop_lookup_cbk_stub(frame, default_lookup_cbk, op_ret,
++                                           op_errno, inode, stbuf, xdata,
++                                           postparent);
++        if (!frame->local) {
++            gf_msg(this->name, GF_LOG_WARNING, ENOMEM, UTIME_MSG_NO_MEMORY,
++                   "lookup_cbk stub allocation failed");
++            goto stub_err;
++        }
++
++        loc.inode = inode_ref(inode);
++        gf_uuid_copy(loc.gfid, stbuf->ia_gfid);
++        STACK_WIND(frame, gf_utime_set_mdata_setxattr_cbk, FIRST_CHILD(this),
++                   FIRST_CHILD(this)->fops->setxattr, &loc, dict, 0, NULL);
++
++        dict_unref(dict);
++        inode_unref(loc.inode);
++        return 0;
++    }
++
++    STACK_UNWIND_STRICT(lookup, frame, op_ret, op_errno, inode, stbuf, xdata,
++                        postparent);
++    return 0;
++
++err:
++    if (mdata) {
++        GF_FREE(mdata);
++    }
++stub_err:
++    if (dict) {
++        dict_unref(dict);
++    }
++    STACK_UNWIND_STRICT(lookup, frame, -1, op_errno, NULL, NULL, NULL, NULL);
++    return 0;
++}
++
++int
++gf_utime_lookup(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *xdata)
++{
++    int op_errno = -1;
++    int ret = -1;
++
++    VALIDATE_OR_GOTO(frame, err);
++    VALIDATE_OR_GOTO(this, err);
++    VALIDATE_OR_GOTO(loc, err);
++    VALIDATE_OR_GOTO(loc->inode, err);
++
++    xdata = xdata ? dict_ref(xdata) : dict_new();
++    if (!xdata) {
++        op_errno = ENOMEM;
++        goto err;
++    }
++
++    ret = dict_set_int8(xdata, GF_XATTR_MDATA_KEY, 1);
++    if (ret < 0) {
++        gf_msg(this->name, GF_LOG_WARNING, -ret, UTIME_MSG_DICT_SET_FAILED,
++               "%s: Unable to set dict value for %s", loc->path,
++               GF_XATTR_MDATA_KEY);
++        op_errno = -ret;
++        goto free_dict;
++    }
++
++    STACK_WIND(frame, gf_utime_set_mdata_lookup_cbk, FIRST_CHILD(this),
++               FIRST_CHILD(this)->fops->lookup, loc, xdata);
++    dict_unref(xdata);
++    return 0;
++
++free_dict:
++    dict_unref(xdata);
++err:
++    STACK_UNWIND_STRICT(lookup, frame, -1, op_errno, NULL, NULL, NULL, NULL);
++    return 0;
++}
++
++int32_t
+ init(xlator_t *this)
+ {
+     utime_priv_t *utime = NULL;
+@@ -182,19 +302,27 @@ notify(xlator_t *this, int event, void *data, ...)
+ }
+ 
+ struct xlator_fops fops = {
+-    /* TODO: Need to go through other fops and
+-     *       check if they modify time attributes
+-     */
+-    .rename = gf_utime_rename,       .mknod = gf_utime_mknod,
+-    .readv = gf_utime_readv,         .fremovexattr = gf_utime_fremovexattr,
+-    .open = gf_utime_open,           .create = gf_utime_create,
+-    .mkdir = gf_utime_mkdir,         .writev = gf_utime_writev,
+-    .rmdir = gf_utime_rmdir,         .fallocate = gf_utime_fallocate,
+-    .truncate = gf_utime_truncate,   .symlink = gf_utime_symlink,
+-    .zerofill = gf_utime_zerofill,   .link = gf_utime_link,
+-    .ftruncate = gf_utime_ftruncate, .unlink = gf_utime_unlink,
+-    .setattr = gf_utime_setattr,     .fsetattr = gf_utime_fsetattr,
+-    .opendir = gf_utime_opendir,     .removexattr = gf_utime_removexattr,
++    .rename = gf_utime_rename,
++    .mknod = gf_utime_mknod,
++    .readv = gf_utime_readv,
++    .fremovexattr = gf_utime_fremovexattr,
++    .open = gf_utime_open,
++    .create = gf_utime_create,
++    .mkdir = gf_utime_mkdir,
++    .writev = gf_utime_writev,
++    .rmdir = gf_utime_rmdir,
++    .fallocate = gf_utime_fallocate,
++    .truncate = gf_utime_truncate,
++    .symlink = gf_utime_symlink,
++    .zerofill = gf_utime_zerofill,
++    .link = gf_utime_link,
++    .ftruncate = gf_utime_ftruncate,
++    .unlink = gf_utime_unlink,
++    .setattr = gf_utime_setattr,
++    .fsetattr = gf_utime_fsetattr,
++    .opendir = gf_utime_opendir,
++    .removexattr = gf_utime_removexattr,
++    .lookup = gf_utime_lookup,
+ };
+ struct xlator_cbks cbks = {
+     .invalidate = gf_utime_invalidate,
+diff --git a/xlators/storage/posix/src/posix-inode-fd-ops.c b/xlators/storage/posix/src/posix-inode-fd-ops.c
+index ea3b69c..d22bbc2 100644
+--- a/xlators/storage/posix/src/posix-inode-fd-ops.c
++++ b/xlators/storage/posix/src/posix-inode-fd-ops.c
+@@ -2625,6 +2625,9 @@ posix_setxattr(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *dict,
+     gf_cs_obj_state state = -1;
+     int i = 0;
+     int len;
++    struct mdata_iatt mdata_iatt = {
++        0,
++    };
+ 
+     DECLARE_OLD_FS_ID_VAR;
+     SET_FS_ID(frame->root->uid, frame->root->gid);
+@@ -2638,6 +2641,20 @@ posix_setxattr(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *dict,
+     priv = this->private;
+     DISK_SPACE_CHECK_AND_GOTO(frame, priv, xdata, op_ret, op_errno, out);
+ 
++    ret = dict_get_mdata(dict, CTIME_MDATA_XDATA_KEY, &mdata_iatt);
++    if (ret == 0) {
++        /* This is initiated by lookup when ctime feature is enabled to create
++         * "trusted.glusterfs.mdata" xattr if not present. These are the files
++         * which were created when ctime feature is disabled.
++         */
++        ret = posix_set_mdata_xattr_legacy_files(this, loc->inode, &mdata_iatt,
++                                                 &op_errno);
++        if (ret != 0) {
++            op_ret = -1;
++        }
++        goto out;
++    }
++
+     MAKE_INODE_HANDLE(real_path, this, loc, NULL);
+     if (!real_path) {
+         op_ret = -1;
+diff --git a/xlators/storage/posix/src/posix-messages.h b/xlators/storage/posix/src/posix-messages.h
+index 3229275..15e23ff 100644
+--- a/xlators/storage/posix/src/posix-messages.h
++++ b/xlators/storage/posix/src/posix-messages.h
+@@ -68,6 +68,7 @@ GLFS_MSGID(POSIX, P_MSG_XATTR_FAILED, P_MSG_NULL_GFID, P_MSG_FCNTL_FAILED,
+            P_MSG_FALLOCATE_FAILED, P_MSG_STOREMDATA_FAILED,
+            P_MSG_FETCHMDATA_FAILED, P_MSG_GETMDATA_FAILED,
+            P_MSG_SETMDATA_FAILED, P_MSG_FRESHFILE, P_MSG_MUTEX_FAILED,
+-           P_MSG_COPY_FILE_RANGE_FAILED, P_MSG_TIMER_DELETE_FAILED);
++           P_MSG_COPY_FILE_RANGE_FAILED, P_MSG_TIMER_DELETE_FAILED,
++           P_MSG_NOMEM);
+ 
+ #endif /* !_GLUSTERD_MESSAGES_H_ */
+diff --git a/xlators/storage/posix/src/posix-metadata.c b/xlators/storage/posix/src/posix-metadata.c
+index 5a5e6cd..647c0bb 100644
+--- a/xlators/storage/posix/src/posix-metadata.c
++++ b/xlators/storage/posix/src/posix-metadata.c
+@@ -245,6 +245,10 @@ __posix_get_mdata_xattr(xlator_t *this, const char *real_path, int _fd,
+     if (ret == -1 || !mdata) {
+         mdata = GF_CALLOC(1, sizeof(posix_mdata_t), gf_posix_mt_mdata_attr);
+         if (!mdata) {
++            gf_msg(this->name, GF_LOG_ERROR, ENOMEM, P_MSG_NOMEM,
++                   "Could not allocate mdata. file: %s: gfid: %s",
++                   real_path ? real_path : "null",
++                   inode ? uuid_utoa(inode->gfid) : "null");
+             ret = -1;
+             goto out;
+         }
+@@ -262,18 +266,8 @@ __posix_get_mdata_xattr(xlator_t *this, const char *real_path, int _fd,
+             }
+         } else {
+             /* Failed to get mdata from disk, xattr missing.
+-             * This happens on two cases.
+-             * 1. File is created before ctime is enabled.
+-             * 2. On new file creation.
+-             *
+-             * Do nothing, just return success. It is as
+-             * good as ctime feature is not enabled for this
+-             * file. For files created before ctime is enabled,
+-             * time attributes gets updated into ctime structure
+-             * once the metadata modification fop happens and
+-             * time attributes become consistent eventually.
+-             * For new files, it would obviously get updated
+-             * before the fop completion.
++             * This happens when the file is created before
++             * ctime is enabled.
+              */
+             if (stbuf && op_errno != ENOENT) {
+                 ret = 0;
+@@ -345,6 +339,54 @@ posix_compare_timespec(struct timespec *first, struct timespec *second)
+         return first->tv_sec - second->tv_sec;
+ }
+ 
++int
++posix_set_mdata_xattr_legacy_files(xlator_t *this, inode_t *inode,
++                                   struct mdata_iatt *mdata_iatt, int *op_errno)
++{
++    posix_mdata_t *mdata = NULL;
++    int ret = 0;
++
++    GF_VALIDATE_OR_GOTO("posix", this, out);
++    GF_VALIDATE_OR_GOTO(this->name, inode, out);
++
++    LOCK(&inode->lock);
++    {
++        mdata = GF_CALLOC(1, sizeof(posix_mdata_t), gf_posix_mt_mdata_attr);
++        if (!mdata) {
++            gf_msg(this->name, GF_LOG_ERROR, ENOMEM, P_MSG_NOMEM,
++                   "Could not allocate mdata. gfid: %s",
++                   uuid_utoa(inode->gfid));
++            ret = -1;
++            *op_errno = ENOMEM;
++            goto unlock;
++        }
++
++        mdata->version = 1;
++        mdata->flags = 0;
++        mdata->ctime.tv_sec = mdata_iatt->ia_ctime;
++        mdata->ctime.tv_nsec = mdata_iatt->ia_ctime_nsec;
++        mdata->atime.tv_sec = mdata_iatt->ia_atime;
++        mdata->atime.tv_nsec = mdata_iatt->ia_atime_nsec;
++        mdata->mtime.tv_sec = mdata_iatt->ia_mtime;
++        mdata->mtime.tv_nsec = mdata_iatt->ia_mtime_nsec;
++
++        __inode_ctx_set1(inode, this, (uint64_t *)&mdata);
++
++        ret = posix_store_mdata_xattr(this, NULL, -1, inode, mdata);
++        if (ret) {
++            gf_msg(this->name, GF_LOG_ERROR, errno, P_MSG_STOREMDATA_FAILED,
++                   "gfid: %s key:%s ", uuid_utoa(inode->gfid),
++                   GF_XATTR_MDATA_KEY);
++            *op_errno = errno;
++            goto unlock;
++        }
++    }
++unlock:
++    UNLOCK(&inode->lock);
++out:
++    return ret;
++}
++
+ /* posix_set_mdata_xattr updates the posix_mdata_t based on the flag
+  * in inode context and stores it on disk
+  */
+@@ -372,6 +414,9 @@ posix_set_mdata_xattr(xlator_t *this, const char *real_path, int fd,
+              */
+             mdata = GF_CALLOC(1, sizeof(posix_mdata_t), gf_posix_mt_mdata_attr);
+             if (!mdata) {
++                gf_msg(this->name, GF_LOG_ERROR, ENOMEM, P_MSG_NOMEM,
++                       "Could not allocate mdata. file: %s: gfid: %s",
++                       real_path ? real_path : "null", uuid_utoa(inode->gfid));
+                 ret = -1;
+                 goto unlock;
+             }
+@@ -386,35 +431,11 @@ posix_set_mdata_xattr(xlator_t *this, const char *real_path, int fd,
+                 __inode_ctx_set1(inode, this, (uint64_t *)&mdata);
+             } else {
+                 /*
+-                 * This is the first time creating the time
+-                 * attr. This happens when you activate this
+-                 * feature, and the legacy file will not have
+-                 * any xattr set.
+-                 *
+-                 * New files will create extended attributes.
+-                 */
+-
+-                /*
+-                 * TODO: This is wrong approach, because before
+-                 * creating fresh xattr, we should consult
+-                 * to all replica and/or distribution set.
+-                 *
+-                 * We should contact the time management
+-                 * xlators, and ask them to create an xattr.
+-                 */
+-                /* We should not be relying on backend file's
+-                 * time attributes to load the initial ctime
+-                 * time attribute structure. This is incorrect
+-                 * as each replica set would have witnessed the
+-                 * file creation at different times.
+-                 *
+-                 * For new file creation, ctime, atime and mtime
+-                 * should be same, hence initiate the ctime
+-                 * structure with the time from the frame. But
+-                 * for the files which were created before ctime
+-                 * feature is enabled, this is not accurate but
+-                 * still fine as the times would get eventually
+-                 * accurate.
++                 * This is the first time creating the time attr. This happens
++                 * when you activate this feature. On this code path, only new
++                 * files will create mdata xattr. The legacy files (files
++                 * created before ctime enabled) will not have any xattr set.
++                 * The xattr on legacy file will be set via lookup.
+                  */
+ 
+                 /* Don't create xattr with utimes/utimensat, only update if
+diff --git a/xlators/storage/posix/src/posix-metadata.h b/xlators/storage/posix/src/posix-metadata.h
+index 3416148..dc25e59 100644
+--- a/xlators/storage/posix/src/posix-metadata.h
++++ b/xlators/storage/posix/src/posix-metadata.h
+@@ -53,5 +53,9 @@ posix_set_ctime_cfr(call_frame_t *frame, xlator_t *this,
+                     const char *real_path_in, int fd_in, inode_t *inode_in,
+                     struct iatt *stbuf_in, const char *read_path_put,
+                     int fd_out, inode_t *inode_out, struct iatt *stbuf_out);
++int
++posix_set_mdata_xattr_legacy_files(xlator_t *this, inode_t *inode,
++                                   struct mdata_iatt *mdata_iatt,
++                                   int *op_errno);
+ 
+ #endif /* _POSIX_METADATA_H */
+-- 
+1.8.3.1
+

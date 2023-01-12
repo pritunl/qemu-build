@@ -1,0 +1,76 @@
+From f410cd9f9b9455373a9612423558d8d0f83cd0fc Mon Sep 17 00:00:00 2001
+From: "Kaleb S. KEITHLEY" <kkeithle@redhat.com>
+Date: Wed, 12 Jul 2017 07:43:51 -0400
+Subject: [PATCH 070/124] packaging: glusterfs-ganesha update sometimes fails
+ semanage
+
+Depending on how dnf orders updates, the updated version of
+selinux-policy-targeted with ganesha_use_fusefs may not be updated
+before the glusterfs-ganesha update execute its %post scriptlet
+containing the `semanage ganesha_use_fusefs ...` command. In such
+situations the semanage command (silently) fails.
+
+Use a %trigger (and %triggerun) to run the scriptlet (again) after
+selinux-policy-targeted with ganesha_use_fusefs has been installed
+or updated.
+
+Note: the %triggerun is probably unnecessary, but it doesn't hurt.
+
+The release-3.10 branch is the "upstream master" for the glusterfs-
+ganesha subpackage.
+
+Note: to be merged after https://review.gluster.org/17806
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I1ad06d79fa1711e4abf038baf9f0a5b7bb665934
+Signed-off-by: Kaleb S. KEITHLEY <kkeithle@redhat.com>
+Reviewed-on: https://review.gluster.org/17756
+Smoke: Gluster Build System <jenkins@build.gluster.org>
+CentOS-regression: Gluster Build System <jenkins@build.gluster.org>
+Reviewed-by: Niels de Vos <ndevos@redhat.com>
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167155
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfs.spec.in | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index b01c94f..1d99a3d 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -1077,6 +1077,28 @@ exit 0
+ %endif
+ 
+ ##-----------------------------------------------------------------------------
++## All %%trigger should be placed here and keep them sorted
++##
++%if ( 0%{!?_without_server:1} )
++%if ( 0%{?fedora} && 0%{?fedora} > 25 )
++%trigger ganesha -- selinux-policy-targeted
++semanage boolean -m ganesha_use_fusefs --on
++exit 0
++%endif
++%endif
++
++##-----------------------------------------------------------------------------
++## All %%triggerun should be placed here and keep them sorted
++##
++%if ( 0%{!?_without_server:1} )
++%if ( 0%{?fedora} && 0%{?fedora} > 25 )
++%triggerun ganesha -- selinux-policy-targeted
++semanage boolean -m ganesha_use_fusefs --off
++exit 0
++%endif
++%endif
++
++##-----------------------------------------------------------------------------
+ ## All %%files should be placed here and keep them grouped
+ ##
+ %files
+-- 
+1.8.3.1
+

@@ -1,0 +1,109 @@
+From 5f304e003cc24ff7877ab51bdfded0dbf8ec581b Mon Sep 17 00:00:00 2001
+From: N Balachandran <nbalacha@redhat.com>
+Date: Fri, 21 Jun 2019 09:04:19 +0530
+Subject: [PATCH 222/255] cluster/dht:  Fixed a memleak in dht_rename_cbk
+
+Fixed a memleak in dht_rename_cbk when creating
+a linkto file.
+
+upstream: https://review.gluster.org/#/c/glusterfs/+/22912/
+
+>Change-Id: I705adef3cb79e33806520fc2b15558e90e2c211c
+>fixes: bz#1722698
+>Signed-off-by: N Balachandran <nbalacha@redhat.com>
+
+BUG:1722512
+Change-Id: I8450cac82a0e1611e698ffac476ea5516e614236
+Signed-off-by: N Balachandran <nbalacha@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/175181
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Susant Palai <spalai@redhat.com>
+---
+ xlators/cluster/dht/src/dht-rename.c | 44 +++++++++++++++++++++++++++---------
+ 1 file changed, 33 insertions(+), 11 deletions(-)
+
+diff --git a/xlators/cluster/dht/src/dht-rename.c b/xlators/cluster/dht/src/dht-rename.c
+index 893b451..5ba2373 100644
+--- a/xlators/cluster/dht/src/dht-rename.c
++++ b/xlators/cluster/dht/src/dht-rename.c
+@@ -1009,9 +1009,11 @@ dht_rename_links_create_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+ {
+     xlator_t *prev = NULL;
+     dht_local_t *local = NULL;
++    call_frame_t *main_frame = NULL;
+ 
+     prev = cookie;
+     local = frame->local;
++    main_frame = local->main_frame;
+ 
+     /* TODO: Handle this case in lookup-optimize */
+     if (op_ret == -1) {
+@@ -1024,7 +1026,8 @@ dht_rename_links_create_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+         dht_linkfile_attr_heal(frame, this);
+     }
+ 
+-    dht_rename_unlink(frame, this);
++    dht_rename_unlink(main_frame, this);
++    DHT_STACK_DESTROY(frame);
+     return 0;
+ }
+ 
+@@ -1040,7 +1043,8 @@ dht_rename_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+     xlator_t *src_cached = NULL;
+     xlator_t *dst_hashed = NULL;
+     xlator_t *dst_cached = NULL;
+-    loc_t link_loc = {0};
++    call_frame_t *link_frame = NULL;
++    dht_local_t *link_local = NULL;
+ 
+     local = frame->local;
+     prev = cookie;
+@@ -1110,18 +1114,36 @@ dht_rename_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+ 
+     /* Create the linkto file for the dst file */
+     if ((src_cached == dst_cached) && (dst_hashed != dst_cached)) {
+-        loc_copy(&link_loc, &local->loc2);
+-        if (link_loc.inode)
+-            inode_unref(link_loc.inode);
+-        link_loc.inode = inode_ref(local->loc.inode);
+-        gf_uuid_copy(local->gfid, local->loc.inode->gfid);
+-        gf_uuid_copy(link_loc.gfid, local->loc.inode->gfid);
+-
+-        dht_linkfile_create(frame, dht_rename_links_create_cbk, this,
+-                            src_cached, dst_hashed, &link_loc);
++        link_frame = copy_frame(frame);
++        if (!link_frame) {
++            goto unlink;
++        }
++
++        /* fop value sent as maxvalue because it is not used
++         * anywhere in this case */
++        link_local = dht_local_init(link_frame, &local->loc2, NULL,
++                                    GF_FOP_MAXVALUE);
++        if (!link_local) {
++            goto unlink;
++        }
++
++        if (link_local->loc.inode)
++            inode_unref(link_local->loc.inode);
++        link_local->loc.inode = inode_ref(local->loc.inode);
++        link_local->main_frame = frame;
++        link_local->stbuf = local->stbuf;
++        gf_uuid_copy(link_local->gfid, local->loc.inode->gfid);
++
++        dht_linkfile_create(link_frame, dht_rename_links_create_cbk, this,
++                            src_cached, dst_hashed, &link_local->loc);
+         return 0;
+     }
+ 
++unlink:
++
++    if (link_frame) {
++        DHT_STACK_DESTROY(link_frame);
++    }
+     dht_rename_unlink(frame, this);
+     return 0;
+ 
+-- 
+1.8.3.1
+

@@ -1,0 +1,72 @@
+From fe1d641e4666f9a20f656b1799cf6e7b75af1279 Mon Sep 17 00:00:00 2001
+From: karthik-us <ksubrahm@redhat.com>
+Date: Tue, 11 Jun 2019 11:31:02 +0530
+Subject: [PATCH 179/192] tests: Fix split-brain-favorite-child-policy.t
+ failure
+
+Backport of: https://review.gluster.org/#/c/glusterfs/+/22850/
+
+Problem:
+The test case is failing to heal the volume within $HEAL_TIMEOUT @195.
+This is happening because as part of split-brain resolution the file
+gets expunged from the sink and the new entry mark for that file will
+be done on the source bricks as part of impunging. Since the source
+bricks shd-threads failed to get the heal-domain lock, they will wait
+for the heal-timeout of 10 minutes, which is greater than $HEAL_TIMEOUT.
+
+Fix:
+Set the cluster.heal-timeout to 5 seconds to trigger the heal so that
+one of the source brick heals the file within the $HEAL_TIMEOUT.
+
+Change-Id: Iae5e819aa564ccde6639c51711f49d1152260c2d
+updates: bz#1704562
+Signed-off-by: karthik-us <ksubrahm@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172965
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/basic/afr/split-brain-favorite-child-policy.t | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/tests/basic/afr/split-brain-favorite-child-policy.t b/tests/basic/afr/split-brain-favorite-child-policy.t
+index 0e321c6..c268c12 100644
+--- a/tests/basic/afr/split-brain-favorite-child-policy.t
++++ b/tests/basic/afr/split-brain-favorite-child-policy.t
+@@ -16,6 +16,7 @@ TEST $CLI volume set $V0 cluster.self-heal-daemon off
+ TEST $CLI volume set $V0 cluster.entry-self-heal off
+ TEST $CLI volume set $V0 cluster.data-self-heal off
+ TEST $CLI volume set $V0 cluster.metadata-self-heal off
++TEST $CLI volume set $V0 cluster.heal-timeout 5
+ TEST $CLI volume start $V0
+ TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0
+ TEST touch $M0/file
+@@ -38,7 +39,7 @@ EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 0
+ EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 1
+ TEST $CLI volume heal $V0
+ 
+-#file fill in split-brain
++#file still in split-brain
+ cat $M0/file > /dev/null
+ EXPECT "1" echo $?
+ 
+@@ -124,7 +125,7 @@ EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 0
+ EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 1
+ TEST $CLI volume heal $V0
+ 
+-#file fill in split-brain
++#file still in split-brain
+ cat $M0/file > /dev/null
+ EXPECT "1" echo $?
+ 
+@@ -179,7 +180,7 @@ EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 1
+ EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 2
+ TEST $CLI volume heal $V0
+ 
+-#file fill in split-brain
++#file still in split-brain
+ cat $M0/file > /dev/null
+ EXPECT "1" echo $?
+ 
+-- 
+1.8.3.1
+

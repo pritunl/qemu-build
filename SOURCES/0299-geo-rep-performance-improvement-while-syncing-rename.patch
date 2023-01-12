@@ -1,0 +1,156 @@
+From f293f7ac2f75c58d81da1229b484eb530b7083b5 Mon Sep 17 00:00:00 2001
+From: Sunny Kumar <sunkumar@redhat.com>
+Date: Fri, 20 Sep 2019 09:39:12 +0530
+Subject: [PATCH 299/302] geo-rep: performance improvement while syncing
+ renames with existing gfid
+
+Problem:
+The bug[1] addresses issue of data inconsistency when handling RENAME with
+existing destination. This fix requires some performance tuning considering
+this issue occurs in heavy rename workload.
+
+Solution:
+If distribution count for master volume is one do not verify op's on
+master and go ahead with rename.
+
+The performance improvement with this patch can only be observed if
+master volume has distribution count one.
+
+[1]. https://bugzilla.redhat.com/show_bug.cgi?id=1694820
+Backport of:
+
+    >fixes: bz#1753857
+    >Change-Id: I8e9bcd575e7e35f40f9f78b7961c92dee642f47b
+    >Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+
+Upstream Patch:
+    https://review.gluster.org/#/c/glusterfs/+/23459/
+
+BUG: 1726000
+Change-Id: I8e9bcd575e7e35f40f9f78b7961c92dee642f47b
+Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/181893
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ geo-replication/gsyncd.conf.in           |  5 +++++
+ geo-replication/syncdaemon/gsyncd.py     |  2 ++
+ geo-replication/syncdaemon/monitor.py    |  2 ++
+ geo-replication/syncdaemon/resource.py   | 13 +++++++++++--
+ geo-replication/syncdaemon/syncdutils.py | 11 +++++++++++
+ 5 files changed, 31 insertions(+), 2 deletions(-)
+
+diff --git a/geo-replication/gsyncd.conf.in b/geo-replication/gsyncd.conf.in
+index 5ebd57a..9155cd8 100644
+--- a/geo-replication/gsyncd.conf.in
++++ b/geo-replication/gsyncd.conf.in
+@@ -23,6 +23,11 @@ configurable=false
+ type=int
+ value=1
+ 
++[master-distribution-count]
++configurable=false
++type=int
++value=1
++
+ [glusterd-workdir]
+ value = @GLUSTERD_WORKDIR@
+ 
+diff --git a/geo-replication/syncdaemon/gsyncd.py b/geo-replication/syncdaemon/gsyncd.py
+index a4c6f32..6ae5269 100644
+--- a/geo-replication/syncdaemon/gsyncd.py
++++ b/geo-replication/syncdaemon/gsyncd.py
+@@ -134,6 +134,8 @@ def main():
+                    help="Directory where Gluster binaries exist on slave")
+     p.add_argument("--slave-access-mount", action="store_true",
+                    help="Do not lazy umount the slave volume")
++    p.add_argument("--master-dist-count", type=int,
++                   help="Master Distribution count")
+ 
+     # Status
+     p = sp.add_parser("status")
+diff --git a/geo-replication/syncdaemon/monitor.py b/geo-replication/syncdaemon/monitor.py
+index 234f3f1..236afe7 100644
+--- a/geo-replication/syncdaemon/monitor.py
++++ b/geo-replication/syncdaemon/monitor.py
+@@ -37,6 +37,8 @@ def get_subvol_num(brick_idx, vol, hot):
+     tier = vol.is_tier()
+     disperse_count = vol.disperse_count(tier, hot)
+     replica_count = vol.replica_count(tier, hot)
++    distribute_count = vol.distribution_count(tier, hot)
++    gconf.setconfig("master-distribution-count", distribute_count)
+ 
+     if (tier and not hot):
+         brick_idx = brick_idx - vol.get_hot_bricks_count(tier)
+diff --git a/geo-replication/syncdaemon/resource.py b/geo-replication/syncdaemon/resource.py
+index b16db60..189d8a1 100644
+--- a/geo-replication/syncdaemon/resource.py
++++ b/geo-replication/syncdaemon/resource.py
+@@ -377,6 +377,7 @@ class Server(object):
+     def entry_ops(cls, entries):
+         pfx = gauxpfx()
+         logging.debug('entries: %s' % repr(entries))
++        dist_count = rconf.args.master_dist_count
+ 
+         def entry_purge(op, entry, gfid, e, uid, gid):
+             # This is an extremely racy code and needs to be fixed ASAP.
+@@ -686,9 +687,15 @@ class Server(object):
+                                             raise
+                                 else:
+                                     raise
+-                        elif not matching_disk_gfid(gfid, en):
++                        elif not matching_disk_gfid(gfid, en) and dist_count > 1:
+                             collect_failure(e, EEXIST, uid, gid, True)
+                         else:
++                            # We are here which means matching_disk_gfid for
++                            # both source and destination has returned false
++                            # and distribution count for master vol is greater
++                            # then one. Which basically says both the source and
++                            # destination exist and not hardlinks.
++                            # So we are safe to go ahead with rename here.
+                             rename_with_disk_gfid_confirmation(gfid, entry, en,
+                                                                uid, gid)
+             if blob:
+@@ -1409,7 +1416,9 @@ class SSH(object):
+                 '--slave-gluster-log-level',
+                 gconf.get("slave-gluster-log-level"),
+                 '--slave-gluster-command-dir',
+-                gconf.get("slave-gluster-command-dir")]
++                gconf.get("slave-gluster-command-dir"),
++                '--master-dist-count',
++                str(gconf.get("master-distribution-count"))]
+ 
+         if gconf.get("slave-access-mount"):
+             args_to_slave.append('--slave-access-mount')
+diff --git a/geo-replication/syncdaemon/syncdutils.py b/geo-replication/syncdaemon/syncdutils.py
+index 2ee10ac..aadaebd 100644
+--- a/geo-replication/syncdaemon/syncdutils.py
++++ b/geo-replication/syncdaemon/syncdutils.py
+@@ -926,6 +926,14 @@ class Volinfo(object):
+         else:
+             return int(self.get('disperseCount')[0].text)
+ 
++    def distribution_count(self, tier, hot):
++        if (tier and hot):
++            return int(self.get('hotBricks/hotdistCount')[0].text)
++        elif (tier and not hot):
++            return int(self.get('coldBricks/colddistCount')[0].text)
++        else:
++            return int(self.get('distCount')[0].text)
++
+     @property
+     @memoize
+     def hot_bricks(self):
+@@ -994,6 +1002,9 @@ class VolinfoFromGconf(object):
+     def disperse_count(self, tier, hot):
+         return gconf.get("master-disperse-count")
+ 
++    def distribution_count(self, tier, hot):
++        return gconf.get("master-distribution-count")
++
+     @property
+     @memoize
+     def hot_bricks(self):
+-- 
+1.8.3.1
+

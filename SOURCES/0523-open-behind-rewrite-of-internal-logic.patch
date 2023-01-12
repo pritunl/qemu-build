@@ -1,0 +1,2720 @@
+From b924c8ca8a133fc9413c8ed1407e63f1658c7e79 Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez <xhernandez@redhat.com>
+Date: Tue, 12 May 2020 23:54:54 +0200
+Subject: [PATCH 523/526] open-behind: rewrite of internal logic
+
+There was a critical flaw in the previous implementation of open-behind.
+
+When an open is done in the background, it's necessary to take a
+reference on the fd_t object because once we "fake" the open answer,
+the fd could be destroyed. However as long as there's a reference,
+the release function won't be called. So, if the application closes
+the file descriptor without having actually opened it, there will
+always remain at least 1 reference, causing a leak.
+
+To avoid this problem, the previous implementation didn't take a
+reference on the fd_t, so there were races where the fd could be
+destroyed while it was still in use.
+
+To fix this, I've implemented a new xlator cbk that gets called from
+fuse when the application closes a file descriptor.
+
+The whole logic of handling background opens have been simplified and
+it's more efficient now. Only if the fop needs to be delayed until an
+open completes, a stub is created. Otherwise no memory allocations are
+needed.
+
+Correctly handling the close request while the open is still pending
+has added a bit of complexity, but overall normal operation is simpler.
+
+Upstream patch:
+> Upstream-patch-link: https://review.gluster.org/#/c/glusterfs/+/24451
+> Change-Id: I6376a5491368e0e1c283cc452849032636261592
+> Fixes: #1225
+> Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+
+BUG: 1830713
+Change-Id: I6376a5491368e0e1c283cc452849032636261592
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/224487
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/fd.c                              |   26 +
+ libglusterfs/src/glusterfs/fd.h                    |    3 +
+ libglusterfs/src/glusterfs/xlator.h                |    4 +
+ libglusterfs/src/libglusterfs.sym                  |    1 +
+ tests/basic/open-behind/open-behind.t              |  183 +++
+ tests/basic/open-behind/tester-fd.c                |   99 ++
+ tests/basic/open-behind/tester.c                   |  444 +++++++
+ tests/basic/open-behind/tester.h                   |  145 +++
+ tests/bugs/glusterfs/bug-873962-spb.t              |    1 +
+ xlators/mount/fuse/src/fuse-bridge.c               |    2 +
+ .../open-behind/src/open-behind-messages.h         |    6 +-
+ xlators/performance/open-behind/src/open-behind.c  | 1302 ++++++++------------
+ 12 files changed, 1393 insertions(+), 823 deletions(-)
+ create mode 100644 tests/basic/open-behind/open-behind.t
+ create mode 100644 tests/basic/open-behind/tester-fd.c
+ create mode 100644 tests/basic/open-behind/tester.c
+ create mode 100644 tests/basic/open-behind/tester.h
+
+diff --git a/libglusterfs/src/fd.c b/libglusterfs/src/fd.c
+index 314546a..e4ec401 100644
+--- a/libglusterfs/src/fd.c
++++ b/libglusterfs/src/fd.c
+@@ -501,6 +501,32 @@ out:
+ }
+ 
+ void
++fd_close(fd_t *fd)
++{
++    xlator_t *xl, *old_THIS;
++
++    old_THIS = THIS;
++
++    for (xl = fd->inode->table->xl->graph->first; xl != NULL; xl = xl->next) {
++        if (!xl->call_cleanup) {
++            THIS = xl;
++
++            if (IA_ISDIR(fd->inode->ia_type)) {
++                if (xl->cbks->fdclosedir != NULL) {
++                    xl->cbks->fdclosedir(xl, fd);
++                }
++            } else {
++                if (xl->cbks->fdclose != NULL) {
++                    xl->cbks->fdclose(xl, fd);
++                }
++            }
++        }
++    }
++
++    THIS = old_THIS;
++}
++
++void
+ fd_unref(fd_t *fd)
+ {
+     int32_t refcount = 0;
+diff --git a/libglusterfs/src/glusterfs/fd.h b/libglusterfs/src/glusterfs/fd.h
+index cdbe289..4d157c4 100644
+--- a/libglusterfs/src/glusterfs/fd.h
++++ b/libglusterfs/src/glusterfs/fd.h
+@@ -107,6 +107,9 @@ fd_ref(fd_t *fd);
+ void
+ fd_unref(fd_t *fd);
+ 
++void
++fd_close(fd_t *fd);
++
+ fd_t *
+ fd_create(struct _inode *inode, pid_t pid);
+ 
+diff --git a/libglusterfs/src/glusterfs/xlator.h b/libglusterfs/src/glusterfs/xlator.h
+index 8650ccc..273039a 100644
+--- a/libglusterfs/src/glusterfs/xlator.h
++++ b/libglusterfs/src/glusterfs/xlator.h
+@@ -705,6 +705,8 @@ typedef size_t (*cbk_inodectx_size_t)(xlator_t *this, inode_t *inode);
+ 
+ typedef size_t (*cbk_fdctx_size_t)(xlator_t *this, fd_t *fd);
+ 
++typedef void (*cbk_fdclose_t)(xlator_t *this, fd_t *fd);
++
+ struct xlator_cbks {
+     cbk_forget_t forget;
+     cbk_release_t release;
+@@ -715,6 +717,8 @@ struct xlator_cbks {
+     cbk_ictxmerge_t ictxmerge;
+     cbk_inodectx_size_t ictxsize;
+     cbk_fdctx_size_t fdctxsize;
++    cbk_fdclose_t fdclose;
++    cbk_fdclose_t fdclosedir;
+ };
+ 
+ typedef int32_t (*dumpop_priv_t)(xlator_t *this);
+diff --git a/libglusterfs/src/libglusterfs.sym b/libglusterfs/src/libglusterfs.sym
+index bc770e2..0a0862e 100644
+--- a/libglusterfs/src/libglusterfs.sym
++++ b/libglusterfs/src/libglusterfs.sym
+@@ -456,6 +456,7 @@ event_unregister_close
+ fd_anonymous
+ fd_anonymous_with_flags
+ fd_bind
++fd_close
+ fd_create
+ fd_create_uint64
+ __fd_ctx_del
+diff --git a/tests/basic/open-behind/open-behind.t b/tests/basic/open-behind/open-behind.t
+new file mode 100644
+index 0000000..5e865d6
+--- /dev/null
++++ b/tests/basic/open-behind/open-behind.t
+@@ -0,0 +1,183 @@
++#!/bin/bash
++
++WD="$(dirname "${0}")"
++
++. ${WD}/../../include.rc
++. ${WD}/../../volume.rc
++
++function assign() {
++    local _assign_var="${1}"
++    local _assign_value="${2}"
++
++    printf -v "${_assign_var}" "%s" "${_assign_value}"
++}
++
++function pipe_create() {
++    local _pipe_create_var="${1}"
++    local _pipe_create_name
++    local _pipe_create_fd
++
++    _pipe_create_name="$(mktemp -u)"
++    mkfifo "${_pipe_create_name}"
++    exec {_pipe_create_fd}<>"${_pipe_create_name}"
++    rm "${_pipe_create_name}"
++
++    assign "${_pipe_create_var}" "${_pipe_create_fd}"
++}
++
++function pipe_close() {
++    local _pipe_close_fd="${!1}"
++
++    exec {_pipe_close_fd}>&-
++}
++
++function tester_start() {
++    declare -ag tester
++    local tester_in
++    local tester_out
++
++    pipe_create tester_in
++    pipe_create tester_out
++
++    ${WD}/tester <&${tester_in} >&${tester_out} &
++
++    tester=("$!" "${tester_in}" "${tester_out}")
++}
++
++function tester_send() {
++    declare -ag tester
++    local tester_res
++    local tester_extra
++
++    echo "${*}" >&${tester[1]}
++
++    read -t 3 -u ${tester[2]} tester_res tester_extra
++    echo "${tester_res} ${tester_extra}"
++    if [[ "${tester_res}" == "OK" ]]; then
++        return 0
++    fi
++
++    return 1
++}
++
++function tester_stop() {
++    declare -ag tester
++    local tester_res
++
++    tester_send "quit"
++
++    tester_res=0
++    if ! wait ${tester[0]}; then
++        tester_res=$?
++    fi
++
++    unset tester
++
++    return ${tester_res}
++}
++
++function count_open() {
++    local file="$(realpath "${B0}/${V0}/${1}")"
++    local count="0"
++    local inode
++    local ref
++
++    inode="$(stat -c %i "${file}")"
++
++    for fd in /proc/${BRICK_PID}/fd/*; do
++        ref="$(readlink "${fd}")"
++        if [[ "${ref}" == "${B0}/${V0}/"* ]]; then
++            if [[ "$(stat -c %i "${ref}")" == "${inode}" ]]; then
++                count="$((${count} + 1))"
++            fi
++        fi
++    done
++
++    echo "${count}"
++}
++
++cleanup
++
++TEST build_tester ${WD}/tester.c ${WD}/tester-fd.c
++
++TEST glusterd
++TEST pidof glusterd
++TEST ${CLI} volume create ${V0} ${H0}:${B0}/${V0}
++TEST ${CLI} volume set ${V0} flush-behind off
++TEST ${CLI} volume set ${V0} write-behind off
++TEST ${CLI} volume set ${V0} quick-read off
++TEST ${CLI} volume set ${V0} stat-prefetch on
++TEST ${CLI} volume set ${V0} io-cache off
++TEST ${CLI} volume set ${V0} open-behind on
++TEST ${CLI} volume set ${V0} lazy-open off
++TEST ${CLI} volume set ${V0} read-after-open off
++TEST ${CLI} volume start ${V0}
++
++TEST ${GFS} --volfile-id=/${V0} --volfile-server=${H0} ${M0};
++
++BRICK_PID="$(get_brick_pid ${V0} ${H0} ${B0}/${V0})"
++
++TEST touch "${M0}/test"
++
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
++TEST ${GFS} --volfile-id=/${V0} --volfile-server=${H0} ${M0};
++
++TEST tester_start
++
++TEST tester_send fd open 0 "${M0}/test"
++EXPECT_WITHIN 5 "1" count_open "/test"
++TEST tester_send fd close 0
++EXPECT_WITHIN 5 "0" count_open "/test"
++
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
++TEST ${CLI} volume set ${V0} lazy-open on
++TEST ${GFS} --volfile-id=/${V0} --volfile-server=${H0} ${M0};
++
++TEST tester_send fd open 0 "${M0}/test"
++sleep 2
++EXPECT "0" count_open "/test"
++TEST tester_send fd write 0 "test"
++EXPECT "1" count_open "/test"
++TEST tester_send fd close 0
++EXPECT_WITHIN 5 "0" count_open "/test"
++
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
++TEST ${GFS} --volfile-id=/${V0} --volfile-server=${H0} ${M0};
++
++TEST tester_send fd open 0 "${M0}/test"
++EXPECT "0" count_open "/test"
++EXPECT "test" tester_send fd read 0 64
++# Even though read-after-open is disabled, use-anonymous-fd is also disabled,
++# so reads need to open the file first.
++EXPECT "1" count_open "/test"
++TEST tester_send fd close 0
++EXPECT "0" count_open "/test"
++
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
++TEST ${GFS} --volfile-id=/${V0} --volfile-server=${H0} ${M0};
++
++TEST tester_send fd open 0 "${M0}/test"
++EXPECT "0" count_open "/test"
++TEST tester_send fd open 1 "${M0}/test"
++EXPECT "2" count_open "/test"
++TEST tester_send fd close 0
++EXPECT_WITHIN 5 "1" count_open "/test"
++TEST tester_send fd close 1
++EXPECT_WITHIN 5 "0" count_open "/test"
++
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
++TEST ${CLI} volume set ${V0} read-after-open on
++TEST ${GFS} --volfile-id=/${V0} --volfile-server=${H0} ${M0};
++
++TEST tester_send fd open 0 "${M0}/test"
++EXPECT "0" count_open "/test"
++EXPECT "test" tester_send fd read 0 64
++EXPECT "1" count_open "/test"
++TEST tester_send fd close 0
++EXPECT_WITHIN 5 "0" count_open "/test"
++
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
++
++TEST tester_stop
++
++cleanup
+diff --git a/tests/basic/open-behind/tester-fd.c b/tests/basic/open-behind/tester-fd.c
+new file mode 100644
+index 0000000..00f02bc
+--- /dev/null
++++ b/tests/basic/open-behind/tester-fd.c
+@@ -0,0 +1,99 @@
++/*
++  Copyright (c) 2020 Red Hat, Inc. <http://www.redhat.com>
++  This file is part of GlusterFS.
++
++  This file is licensed to you under your choice of the GNU Lesser
++  General Public License, version 3 or any later version (LGPLv3 or
++  later), or the GNU General Public License, version 2 (GPLv2), in all
++  cases as published by the Free Software Foundation.
++*/
++
++#include "tester.h"
++
++#include <stdlib.h>
++#include <unistd.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <string.h>
++#include <ctype.h>
++#include <errno.h>
++
++static int32_t
++fd_open(context_t *ctx, command_t *cmd)
++{
++    obj_t *obj;
++    int32_t fd;
++
++    obj = cmd->args[0].obj.ref;
++
++    fd = open(cmd->args[1].str.data, O_RDWR);
++    if (fd < 0) {
++        return error(errno, "open() failed");
++    }
++
++    obj->type = OBJ_TYPE_FD;
++    obj->fd = fd;
++
++    out_ok("%d", fd);
++
++    return 0;
++}
++
++static int32_t
++fd_close(context_t *ctx, command_t *cmd)
++{
++    obj_t *obj;
++
++    obj = cmd->args[0].obj.ref;
++    obj->type = OBJ_TYPE_NONE;
++
++    if (close(obj->fd) != 0) {
++        return error(errno, "close() failed");
++    }
++
++    out_ok();
++
++    return 0;
++}
++
++static int32_t
++fd_write(context_t *ctx, command_t *cmd)
++{
++    ssize_t len, ret;
++
++    len = strlen(cmd->args[1].str.data);
++    ret = write(cmd->args[0].obj.ref->fd, cmd->args[1].str.data, len);
++    if (ret < 0) {
++        return error(errno, "write() failed");
++    }
++
++    out_ok("%zd", ret);
++
++    return 0;
++}
++
++static int32_t
++fd_read(context_t *ctx, command_t *cmd)
++{
++    char data[cmd->args[1].num.value + 1];
++    ssize_t ret;
++
++    ret = read(cmd->args[0].obj.ref->fd, data, cmd->args[1].num.value);
++    if (ret < 0) {
++        return error(errno, "read() failed");
++    }
++
++    data[ret] = 0;
++
++    out_ok("%zd %s", ret, data);
++
++    return 0;
++}
++
++command_t fd_commands[] = {
++    {"open", fd_open, CMD_ARGS(ARG_VAL(OBJ_TYPE_NONE), ARG_STR(1024))},
++    {"close", fd_close, CMD_ARGS(ARG_VAL(OBJ_TYPE_FD))},
++    {"write", fd_write, CMD_ARGS(ARG_VAL(OBJ_TYPE_FD), ARG_STR(1024))},
++    {"read", fd_read, CMD_ARGS(ARG_VAL(OBJ_TYPE_FD), ARG_NUM(0, 1024))},
++    CMD_END};
+diff --git a/tests/basic/open-behind/tester.c b/tests/basic/open-behind/tester.c
+new file mode 100644
+index 0000000..b2da71c
+--- /dev/null
++++ b/tests/basic/open-behind/tester.c
+@@ -0,0 +1,444 @@
++/*
++  Copyright (c) 2020 Red Hat, Inc. <http://www.redhat.com>
++  This file is part of GlusterFS.
++
++  This file is licensed to you under your choice of the GNU Lesser
++  General Public License, version 3 or any later version (LGPLv3 or
++  later), or the GNU General Public License, version 2 (GPLv2), in all
++  cases as published by the Free Software Foundation.
++*/
++
++#include "tester.h"
++
++#include <stdlib.h>
++#include <unistd.h>
++#include <string.h>
++#include <ctype.h>
++#include <errno.h>
++
++static void *
++mem_alloc(size_t size)
++{
++    void *ptr;
++
++    ptr = malloc(size);
++    if (ptr == NULL) {
++        error(ENOMEM, "Failed to allocate memory (%zu bytes)", size);
++    }
++
++    return ptr;
++}
++
++static void
++mem_free(void *ptr)
++{
++    free(ptr);
++}
++
++static bool
++buffer_create(context_t *ctx, size_t size)
++{
++    ctx->buffer.base = mem_alloc(size);
++    if (ctx->buffer.base == NULL) {
++        return false;
++    }
++
++    ctx->buffer.size = size;
++    ctx->buffer.len = 0;
++    ctx->buffer.pos = 0;
++
++    return true;
++}
++
++static void
++buffer_destroy(context_t *ctx)
++{
++    mem_free(ctx->buffer.base);
++    ctx->buffer.size = 0;
++    ctx->buffer.len = 0;
++}
++
++static int32_t
++buffer_get(context_t *ctx)
++{
++    ssize_t len;
++
++    if (ctx->buffer.pos >= ctx->buffer.len) {
++        len = read(0, ctx->buffer.base, ctx->buffer.size);
++        if (len < 0) {
++            return error(errno, "read() failed");
++        }
++        if (len == 0) {
++            return 0;
++        }
++
++        ctx->buffer.len = len;
++        ctx->buffer.pos = 0;
++    }
++
++    return ctx->buffer.base[ctx->buffer.pos++];
++}
++
++static int32_t
++str_skip_spaces(context_t *ctx, int32_t current)
++{
++    while ((current > 0) && (current != '\n') && isspace(current)) {
++        current = buffer_get(ctx);
++    }
++
++    return current;
++}
++
++static int32_t
++str_token(context_t *ctx, char *buffer, uint32_t size, int32_t current)
++{
++    uint32_t len;
++
++    current = str_skip_spaces(ctx, current);
++
++    len = 0;
++    while ((size > 0) && (current > 0) && (current != '\n') &&
++           !isspace(current)) {
++        len++;
++        *buffer++ = current;
++        size--;
++        current = buffer_get(ctx);
++    }
++
++    if (len == 0) {
++        return error(ENODATA, "Expecting a token");
++    }
++
++    if (size == 0) {
++        return error(ENOBUFS, "Token too long");
++    }
++
++    *buffer = 0;
++
++    return current;
++}
++
++static int32_t
++str_number(context_t *ctx, uint64_t min, uint64_t max, uint64_t *value,
++           int32_t current)
++{
++    char text[32], *ptr;
++    uint64_t num;
++
++    current = str_token(ctx, text, sizeof(text), current);
++    if (current > 0) {
++        num = strtoul(text, &ptr, 0);
++        if ((*ptr != 0) || (num < min) || (num > max)) {
++            return error(ERANGE, "Invalid number");
++        }
++        *value = num;
++    }
++
++    return current;
++}
++
++static int32_t
++str_eol(context_t *ctx, int32_t current)
++{
++    current = str_skip_spaces(ctx, current);
++    if (current != '\n') {
++        return error(EINVAL, "Expecting end of command");
++    }
++
++    return current;
++}
++
++static void
++str_skip(context_t *ctx, int32_t current)
++{
++    while ((current > 0) && (current != '\n')) {
++        current = buffer_get(ctx);
++    }
++}
++
++static int32_t
++cmd_parse_obj(context_t *ctx, arg_t *arg, int32_t current)
++{
++    obj_t *obj;
++    uint64_t id;
++
++    current = str_number(ctx, 0, ctx->obj_count, &id, current);
++    if (current <= 0) {
++        return current;
++    }
++
++    obj = &ctx->objs[id];
++    if (obj->type != arg->obj.type) {
++        if (obj->type != OBJ_TYPE_NONE) {
++            return error(EBUSY, "Object is in use");
++        }
++        return error(ENOENT, "Object is not defined");
++    }
++
++    arg->obj.ref = obj;
++
++    return current;
++}
++
++static int32_t
++cmd_parse_num(context_t *ctx, arg_t *arg, int32_t current)
++{
++    return str_number(ctx, arg->num.min, arg->num.max, &arg->num.value,
++                      current);
++}
++
++static int32_t
++cmd_parse_str(context_t *ctx, arg_t *arg, int32_t current)
++{
++    return str_token(ctx, arg->str.data, arg->str.size, current);
++}
++
++static int32_t
++cmd_parse_args(context_t *ctx, command_t *cmd, int32_t current)
++{
++    arg_t *arg;
++
++    for (arg = cmd->args; arg->type != ARG_TYPE_NONE; arg++) {
++        switch (arg->type) {
++            case ARG_TYPE_OBJ:
++                current = cmd_parse_obj(ctx, arg, current);
++                break;
++            case ARG_TYPE_NUM:
++                current = cmd_parse_num(ctx, arg, current);
++                break;
++            case ARG_TYPE_STR:
++                current = cmd_parse_str(ctx, arg, current);
++                break;
++            default:
++                return error(EINVAL, "Unknown argument type");
++        }
++    }
++
++    if (current < 0) {
++        return current;
++    }
++
++    current = str_eol(ctx, current);
++    if (current <= 0) {
++        return error(EINVAL, "Syntax error");
++    }
++
++    return cmd->handler(ctx, cmd);
++}
++
++static int32_t
++cmd_parse(context_t *ctx, command_t *cmds)
++{
++    char text[32];
++    command_t *cmd;
++    int32_t current;
++
++    cmd = cmds;
++    do {
++        current = str_token(ctx, text, sizeof(text), buffer_get(ctx));
++        if (current <= 0) {
++            return current;
++        }
++
++        while (cmd->name != NULL) {
++            if (strcmp(cmd->name, text) == 0) {
++                if (cmd->handler != NULL) {
++                    return cmd_parse_args(ctx, cmd, current);
++                }
++                cmd = cmd->cmds;
++                break;
++            }
++            cmd++;
++        }
++    } while (cmd->name != NULL);
++
++    str_skip(ctx, current);
++
++    return error(ENOTSUP, "Unknown command");
++}
++
++static void
++cmd_fini(context_t *ctx, command_t *cmds)
++{
++    command_t *cmd;
++    arg_t *arg;
++
++    for (cmd = cmds; cmd->name != NULL; cmd++) {
++        if (cmd->handler == NULL) {
++            cmd_fini(ctx, cmd->cmds);
++        } else {
++            for (arg = cmd->args; arg->type != ARG_TYPE_NONE; arg++) {
++                switch (arg->type) {
++                    case ARG_TYPE_STR:
++                        mem_free(arg->str.data);
++                        arg->str.data = NULL;
++                        break;
++                    default:
++                        break;
++                }
++            }
++        }
++    }
++}
++
++static bool
++cmd_init(context_t *ctx, command_t *cmds)
++{
++    command_t *cmd;
++    arg_t *arg;
++
++    for (cmd = cmds; cmd->name != NULL; cmd++) {
++        if (cmd->handler == NULL) {
++            if (!cmd_init(ctx, cmd->cmds)) {
++                return false;
++            }
++        } else {
++            for (arg = cmd->args; arg->type != ARG_TYPE_NONE; arg++) {
++                switch (arg->type) {
++                    case ARG_TYPE_STR:
++                        arg->str.data = mem_alloc(arg->str.size);
++                        if (arg->str.data == NULL) {
++                            return false;
++                        }
++                        break;
++                    default:
++                        break;
++                }
++            }
++        }
++    }
++
++    return true;
++}
++
++static bool
++objs_create(context_t *ctx, uint32_t count)
++{
++    uint32_t i;
++
++    ctx->objs = mem_alloc(sizeof(obj_t) * count);
++    if (ctx->objs == NULL) {
++        return false;
++    }
++    ctx->obj_count = count;
++
++    for (i = 0; i < count; i++) {
++        ctx->objs[i].type = OBJ_TYPE_NONE;
++    }
++
++    return true;
++}
++
++static int32_t
++objs_destroy(context_t *ctx)
++{
++    uint32_t i;
++    int32_t err;
++
++    err = 0;
++    for (i = 0; i < ctx->obj_count; i++) {
++        if (ctx->objs[i].type != OBJ_TYPE_NONE) {
++            err = error(ENOTEMPTY, "Objects not destroyed");
++            break;
++        }
++    }
++
++    mem_free(ctx->objs);
++    ctx->objs = NULL;
++    ctx->obj_count = 0;
++
++    return err;
++}
++
++static context_t *
++init(size_t size, uint32_t objs, command_t *cmds)
++{
++    context_t *ctx;
++
++    ctx = mem_alloc(sizeof(context_t));
++    if (ctx == NULL) {
++        goto failed;
++    }
++
++    if (!buffer_create(ctx, size)) {
++        goto failed_ctx;
++    }
++
++    if (!objs_create(ctx, objs)) {
++        goto failed_buffer;
++    }
++
++    if (!cmd_init(ctx, cmds)) {
++        goto failed_objs;
++    }
++
++    ctx->active = true;
++
++    return ctx;
++
++failed_objs:
++    cmd_fini(ctx, cmds);
++    objs_destroy(ctx);
++failed_buffer:
++    buffer_destroy(ctx);
++failed_ctx:
++    mem_free(ctx);
++failed:
++    return NULL;
++}
++
++static int32_t
++fini(context_t *ctx, command_t *cmds)
++{
++    int32_t ret;
++
++    cmd_fini(ctx, cmds);
++    buffer_destroy(ctx);
++
++    ret = objs_destroy(ctx);
++
++    ctx->active = false;
++
++    return ret;
++}
++
++static int32_t
++exec_quit(context_t *ctx, command_t *cmd)
++{
++    ctx->active = false;
++
++    return 0;
++}
++
++static command_t commands[] = {{"fd", NULL, CMD_SUB(fd_commands)},
++                               {"quit", exec_quit, CMD_ARGS()},
++                               CMD_END};
++
++int32_t
++main(int32_t argc, char *argv[])
++{
++    context_t *ctx;
++    int32_t res;
++
++    ctx = init(1024, 16, commands);
++    if (ctx == NULL) {
++        return 1;
++    }
++
++    do {
++        res = cmd_parse(ctx, commands);
++        if (res < 0) {
++            out_err(-res);
++        }
++    } while (ctx->active);
++
++    res = fini(ctx, commands);
++    if (res >= 0) {
++        out_ok();
++        return 0;
++    }
++
++    out_err(-res);
++
++    return 1;
++}
+diff --git a/tests/basic/open-behind/tester.h b/tests/basic/open-behind/tester.h
+new file mode 100644
+index 0000000..64e940c
+--- /dev/null
++++ b/tests/basic/open-behind/tester.h
+@@ -0,0 +1,145 @@
++/*
++  Copyright (c) 2020 Red Hat, Inc. <http://www.redhat.com>
++  This file is part of GlusterFS.
++
++  This file is licensed to you under your choice of the GNU Lesser
++  General Public License, version 3 or any later version (LGPLv3 or
++  later), or the GNU General Public License, version 2 (GPLv2), in all
++  cases as published by the Free Software Foundation.
++*/
++
++#ifndef __TESTER_H__
++#define __TESTER_H__
++
++#include <stdio.h>
++#include <inttypes.h>
++#include <stdbool.h>
++
++enum _obj_type;
++typedef enum _obj_type obj_type_t;
++
++enum _arg_type;
++typedef enum _arg_type arg_type_t;
++
++struct _buffer;
++typedef struct _buffer buffer_t;
++
++struct _obj;
++typedef struct _obj obj_t;
++
++struct _context;
++typedef struct _context context_t;
++
++struct _arg;
++typedef struct _arg arg_t;
++
++struct _command;
++typedef struct _command command_t;
++
++enum _obj_type { OBJ_TYPE_NONE, OBJ_TYPE_FD };
++
++enum _arg_type { ARG_TYPE_NONE, ARG_TYPE_OBJ, ARG_TYPE_NUM, ARG_TYPE_STR };
++
++struct _buffer {
++    char *base;
++    uint32_t size;
++    uint32_t len;
++    uint32_t pos;
++};
++
++struct _obj {
++    obj_type_t type;
++    union {
++        int32_t fd;
++    };
++};
++
++struct _context {
++    obj_t *objs;
++    buffer_t buffer;
++    uint32_t obj_count;
++    bool active;
++};
++
++struct _arg {
++    arg_type_t type;
++    union {
++        struct {
++            obj_type_t type;
++            obj_t *ref;
++        } obj;
++        struct {
++            uint64_t value;
++            uint64_t min;
++            uint64_t max;
++        } num;
++        struct {
++            uint32_t size;
++            char *data;
++        } str;
++    };
++};
++
++struct _command {
++    const char *name;
++    int32_t (*handler)(context_t *ctx, command_t *cmd);
++    union {
++        arg_t *args;
++        command_t *cmds;
++    };
++};
++
++#define msg(_stream, _fmt, _args...)                                           \
++    do {                                                                       \
++        fprintf(_stream, _fmt "\n", ##_args);                                  \
++        fflush(_stream);                                                       \
++    } while (0)
++
++#define msg_out(_fmt, _args...) msg(stdout, _fmt, ##_args)
++#define msg_err(_err, _fmt, _args...)                                          \
++    ({                                                                         \
++        int32_t __msg_err = (_err);                                            \
++        msg(stderr, "[%4u:%-15s] " _fmt, __LINE__, __FUNCTION__, __msg_err,    \
++            ##_args);                                                          \
++        -__msg_err;                                                            \
++    })
++
++#define error(_err, _fmt, _args...) msg_err(_err, "E(%4d) " _fmt, ##_args)
++#define warn(_err, _fmt, _args...) msg_err(_err, "W(%4d) " _fmt, ##_args)
++#define info(_err, _fmt, _args...) msg_err(_err, "I(%4d) " _fmt, ##_args)
++
++#define out_ok(_args...) msg_out("OK " _args)
++#define out_err(_err) msg_out("ERR %d", _err)
++
++#define ARG_END                                                                \
++    {                                                                          \
++        ARG_TYPE_NONE                                                          \
++    }
++
++#define CMD_ARGS1(_x, _args...)                                                \
++    .args = (arg_t[]) { _args }
++#define CMD_ARGS(_args...) CMD_ARGS1(, ##_args, ARG_END)
++
++#define CMD_SUB(_cmds) .cmds = _cmds
++
++#define CMD_END                                                                \
++    {                                                                          \
++        NULL, NULL, CMD_SUB(NULL)                                              \
++    }
++
++#define ARG_VAL(_type)                                                         \
++    {                                                                          \
++        ARG_TYPE_OBJ, .obj = {.type = _type }                                  \
++    }
++#define ARG_NUM(_min, _max)                                                    \
++    {                                                                          \
++        ARG_TYPE_NUM, .num = {.min = _min, .max = _max }                       \
++    }
++#define ARG_STR(_size)                                                         \
++    {                                                                          \
++        ARG_TYPE_STR, .str = {.size = _size }                                  \
++    }
++
++extern command_t fd_commands[];
++
++#endif /* __TESTER_H__ */
+\ No newline at end of file
+diff --git a/tests/bugs/glusterfs/bug-873962-spb.t b/tests/bugs/glusterfs/bug-873962-spb.t
+index db84a22..db71cc0 100644
+--- a/tests/bugs/glusterfs/bug-873962-spb.t
++++ b/tests/bugs/glusterfs/bug-873962-spb.t
+@@ -14,6 +14,7 @@ TEST $CLI volume set $V0 performance.io-cache off
+ TEST $CLI volume set $V0 performance.write-behind off
+ TEST $CLI volume set $V0 performance.stat-prefetch off
+ TEST $CLI volume set $V0 performance.read-ahead off
++TEST $CLI volume set $V0 performance.open-behind off
+ TEST $CLI volume set $V0 cluster.background-self-heal-count 0
+ TEST $CLI volume start $V0
+ TEST glusterfs --entry-timeout=0 --attribute-timeout=0 -s $H0 --volfile-id=$V0 $M0 --direct-io-mode=enable
+diff --git a/xlators/mount/fuse/src/fuse-bridge.c b/xlators/mount/fuse/src/fuse-bridge.c
+index 919eea3..76b5809 100644
+--- a/xlators/mount/fuse/src/fuse-bridge.c
++++ b/xlators/mount/fuse/src/fuse-bridge.c
+@@ -3398,6 +3398,8 @@ fuse_release(xlator_t *this, fuse_in_header_t *finh, void *msg,
+     gf_log("glusterfs-fuse", GF_LOG_TRACE,
+            "finh->unique: %" PRIu64 ": RELEASE %p", finh->unique, state->fd);
+ 
++    fd_close(state->fd);
++
+     fuse_fd_ctx_destroy(this, state->fd);
+     fd_unref(fd);
+ 
+diff --git a/xlators/performance/open-behind/src/open-behind-messages.h b/xlators/performance/open-behind/src/open-behind-messages.h
+index f250824..0e78917 100644
+--- a/xlators/performance/open-behind/src/open-behind-messages.h
++++ b/xlators/performance/open-behind/src/open-behind-messages.h
+@@ -23,6 +23,10 @@
+  */
+ 
+ GLFS_MSGID(OPEN_BEHIND, OPEN_BEHIND_MSG_XLATOR_CHILD_MISCONFIGURED,
+-           OPEN_BEHIND_MSG_VOL_MISCONFIGURED, OPEN_BEHIND_MSG_NO_MEMORY);
++           OPEN_BEHIND_MSG_VOL_MISCONFIGURED, OPEN_BEHIND_MSG_NO_MEMORY,
++           OPEN_BEHIND_MSG_FAILED, OPEN_BEHIND_MSG_BAD_STATE);
++
++#define OPEN_BEHIND_MSG_FAILED_STR "Failed to submit fop"
++#define OPEN_BEHIND_MSG_BAD_STATE_STR "Unexpected state"
+ 
+ #endif /* _OPEN_BEHIND_MESSAGES_H_ */
+diff --git a/xlators/performance/open-behind/src/open-behind.c b/xlators/performance/open-behind/src/open-behind.c
+index cbe89ec..e43fe73 100644
+--- a/xlators/performance/open-behind/src/open-behind.c
++++ b/xlators/performance/open-behind/src/open-behind.c
+@@ -16,6 +16,18 @@
+ #include "open-behind-messages.h"
+ #include <glusterfs/glusterfs-acl.h>
+ 
++/* Note: The initial design of open-behind was made to cover the simple case
++ *       of open, read, close for small files. This pattern combined with
++ *       quick-read can do the whole operation without a single request to the
++ *       bricks (except the initial lookup).
++ *
++ *       The way to do this has been improved, but the logic remains the same.
++ *       Basically, this means that any operation sent to the fd or the inode
++ *       that it's not a read, causes the open request to be sent to the
++ *       bricks, and all future operations will be executed synchronously,
++ *       including opens (it's reset once all fd's are closed).
++ */
++
+ typedef struct ob_conf {
+     gf_boolean_t use_anonymous_fd; /* use anonymous FDs wherever safe
+                                       e.g - fstat() readv()
+@@ -32,1096 +44,754 @@ typedef struct ob_conf {
+                                         */
+ } ob_conf_t;
+ 
+-typedef struct ob_inode {
+-    inode_t *inode;
+-    struct list_head resume_fops;
+-    struct list_head ob_fds;
+-    int count;
+-    int op_ret;
+-    int op_errno;
+-    gf_boolean_t open_in_progress;
+-    int unlinked;
+-} ob_inode_t;
++/* A negative state represents an errno value negated. In this case the
++ * current operation cannot be processed. */
++typedef enum _ob_state {
++    /* There are no opens on the inode or the first open is already
++     * completed. The current operation can be sent directly. */
++    OB_STATE_READY = 0,
+ 
+-typedef struct ob_fd {
+-    call_frame_t *open_frame;
+-    loc_t loc;
+-    dict_t *xdata;
+-    int flags;
+-    int op_errno;
+-    ob_inode_t *ob_inode;
+-    fd_t *fd;
+-    gf_boolean_t opened;
+-    gf_boolean_t ob_inode_fops_waiting;
+-    struct list_head list;
+-    struct list_head ob_fds_on_inode;
+-} ob_fd_t;
++    /* There's an open pending and it has been triggered. The current
++     * operation should be "stubbified" and processed with
++     * ob_stub_dispatch(). */
++    OB_STATE_OPEN_TRIGGERED,
+ 
+-ob_inode_t *
+-ob_inode_alloc(inode_t *inode)
+-{
+-    ob_inode_t *ob_inode = NULL;
++    /* There's an open pending but it has not been triggered. The current
++     * operation can be processed directly but using an anonymous fd. */
++    OB_STATE_OPEN_PENDING,
+ 
+-    ob_inode = GF_CALLOC(1, sizeof(*ob_inode), gf_ob_mt_inode_t);
+-    if (ob_inode == NULL)
+-        goto out;
++    /* The current operation is the first open on the inode. */
++    OB_STATE_FIRST_OPEN
++} ob_state_t;
+ 
+-    ob_inode->inode = inode;
+-    INIT_LIST_HEAD(&ob_inode->resume_fops);
+-    INIT_LIST_HEAD(&ob_inode->ob_fds);
+-out:
+-    return ob_inode;
+-}
+-
+-void
+-ob_inode_free(ob_inode_t *ob_inode)
+-{
+-    if (ob_inode == NULL)
+-        goto out;
++typedef struct ob_inode {
++    /* List of stubs pending on the first open. Once the first open is
++     * complete, all these stubs will be resubmitted, and dependencies
++     * will be checked again. */
++    struct list_head resume_fops;
+ 
+-    list_del_init(&ob_inode->resume_fops);
+-    list_del_init(&ob_inode->ob_fds);
++    /* The inode this object references. */
++    inode_t *inode;
+ 
+-    GF_FREE(ob_inode);
+-out:
+-    return;
+-}
++    /* The fd from the first open sent to this inode. It will be set
++     * from the moment the open is processed until the open if fully
++     * executed or closed before actually opened. It's NULL in all
++     * other cases. */
++    fd_t *first_fd;
++
++    /* The stub from the first open operation. When open fop starts
++     * being processed, it's assigned the OB_OPEN_PREPARING value
++     * until the actual stub is created. This is necessary to avoid
++     * creating the stub inside a locked region. Once the stub is
++     * successfully created, it's assigned here. This value is set
++     * to NULL once the stub is resumed. */
++    call_stub_t *first_open;
++
++    /* The total number of currently open fd's on this inode. */
++    int32_t open_count;
++
++    /* This flag is set as soon as we know that the open will be
++     * sent to the bricks, even before the stub is ready. */
++    bool triggered;
++} ob_inode_t;
+ 
+-ob_inode_t *
+-ob_inode_get(xlator_t *this, inode_t *inode)
++/* Dummy pointer used temporarily while the actual open stub is being created */
++#define OB_OPEN_PREPARING ((call_stub_t *)-1)
++
++#define OB_POST_COMMON(_fop, _xl, _frame, _fd, _args...)                       \
++    case OB_STATE_FIRST_OPEN:                                                  \
++        gf_smsg((_xl)->name, GF_LOG_ERROR, EINVAL, OPEN_BEHIND_MSG_BAD_STATE,  \
++                "fop=%s", #_fop, "state=%d", __ob_state, NULL);                \
++        default_##_fop##_failure_cbk(_frame, EINVAL);                          \
++        break;                                                                 \
++    case OB_STATE_READY:                                                       \
++        default_##_fop(_frame, _xl, ##_args);                                  \
++        break;                                                                 \
++    case OB_STATE_OPEN_TRIGGERED: {                                            \
++        call_stub_t *__ob_stub = fop_##_fop##_stub(_frame, ob_##_fop,          \
++                                                   ##_args);                   \
++        if (__ob_stub != NULL) {                                               \
++            ob_stub_dispatch(_xl, __ob_inode, _fd, __ob_stub);                 \
++            break;                                                             \
++        }                                                                      \
++        __ob_state = -ENOMEM;                                                  \
++    }                                                                          \
++    default:                                                                   \
++        gf_smsg((_xl)->name, GF_LOG_ERROR, -__ob_state,                        \
++                OPEN_BEHIND_MSG_FAILED, "fop=%s", #_fop, NULL);                \
++        default_##_fop##_failure_cbk(_frame, -__ob_state)
++
++#define OB_POST_FD(_fop, _xl, _frame, _fd, _trigger, _args...)                 \
++    do {                                                                       \
++        ob_inode_t *__ob_inode;                                                \
++        fd_t *__first_fd;                                                      \
++        ob_state_t __ob_state = ob_open_and_resume_fd(                         \
++            _xl, _fd, 0, true, _trigger, &__ob_inode, &__first_fd);            \
++        switch (__ob_state) {                                                  \
++            case OB_STATE_OPEN_PENDING:                                        \
++                if (!(_trigger)) {                                             \
++                    fd_t *__ob_fd = fd_anonymous_with_flags((_fd)->inode,      \
++                                                            (_fd)->flags);     \
++                    if (__ob_fd != NULL) {                                     \
++                        default_##_fop(_frame, _xl, ##_args);                  \
++                        fd_unref(__ob_fd);                                     \
++                        break;                                                 \
++                    }                                                          \
++                    __ob_state = -ENOMEM;                                      \
++                }                                                              \
++                OB_POST_COMMON(_fop, _xl, _frame, __first_fd, ##_args);        \
++        }                                                                      \
++    } while (0)
++
++#define OB_POST_FLUSH(_xl, _frame, _fd, _args...)                              \
++    do {                                                                       \
++        ob_inode_t *__ob_inode;                                                \
++        fd_t *__first_fd;                                                      \
++        ob_state_t __ob_state = ob_open_and_resume_fd(                         \
++            _xl, _fd, 0, true, false, &__ob_inode, &__first_fd);               \
++        switch (__ob_state) {                                                  \
++            case OB_STATE_OPEN_PENDING:                                        \
++                default_flush_cbk(_frame, NULL, _xl, 0, 0, NULL);              \
++                break;                                                         \
++                OB_POST_COMMON(flush, _xl, _frame, __first_fd, ##_args);       \
++        }                                                                      \
++    } while (0)
++
++#define OB_POST_INODE(_fop, _xl, _frame, _inode, _trigger, _args...)           \
++    do {                                                                       \
++        ob_inode_t *__ob_inode;                                                \
++        fd_t *__first_fd;                                                      \
++        ob_state_t __ob_state = ob_open_and_resume_inode(                      \
++            _xl, _inode, NULL, 0, true, _trigger, &__ob_inode, &__first_fd);   \
++        switch (__ob_state) {                                                  \
++            case OB_STATE_OPEN_PENDING:                                        \
++                OB_POST_COMMON(_fop, _xl, _frame, __first_fd, ##_args);        \
++        }                                                                      \
++    } while (0)
++
++static ob_inode_t *
++ob_inode_get_locked(xlator_t *this, inode_t *inode)
+ {
+     ob_inode_t *ob_inode = NULL;
+     uint64_t value = 0;
+-    int ret = 0;
+ 
+-    if (!inode)
+-        goto out;
++    if ((__inode_ctx_get(inode, this, &value) == 0) && (value != 0)) {
++        return (ob_inode_t *)(uintptr_t)value;
++    }
+ 
+-    LOCK(&inode->lock);
+-    {
+-        __inode_ctx_get(inode, this, &value);
+-        if (value == 0) {
+-            ob_inode = ob_inode_alloc(inode);
+-            if (ob_inode == NULL)
+-                goto unlock;
+-
+-            value = (uint64_t)(uintptr_t)ob_inode;
+-            ret = __inode_ctx_set(inode, this, &value);
+-            if (ret < 0) {
+-                ob_inode_free(ob_inode);
+-                ob_inode = NULL;
+-            }
+-        } else {
+-            ob_inode = (ob_inode_t *)(uintptr_t)value;
++    ob_inode = GF_CALLOC(1, sizeof(*ob_inode), gf_ob_mt_inode_t);
++    if (ob_inode != NULL) {
++        ob_inode->inode = inode;
++        INIT_LIST_HEAD(&ob_inode->resume_fops);
++
++        value = (uint64_t)(uintptr_t)ob_inode;
++        if (__inode_ctx_set(inode, this, &value) < 0) {
++            GF_FREE(ob_inode);
++            ob_inode = NULL;
+         }
+     }
+-unlock:
+-    UNLOCK(&inode->lock);
+ 
+-out:
+     return ob_inode;
+ }
+ 
+-ob_fd_t *
+-__ob_fd_ctx_get(xlator_t *this, fd_t *fd)
++static ob_state_t
++ob_open_and_resume_inode(xlator_t *xl, inode_t *inode, fd_t *fd,
++                         int32_t open_count, bool synchronous, bool trigger,
++                         ob_inode_t **pob_inode, fd_t **pfd)
+ {
+-    uint64_t value = 0;
+-    int ret = -1;
+-    ob_fd_t *ob_fd = NULL;
++    ob_conf_t *conf;
++    ob_inode_t *ob_inode;
++    call_stub_t *open_stub;
+ 
+-    ret = __fd_ctx_get(fd, this, &value);
+-    if (ret)
+-        return NULL;
++    if (inode == NULL) {
++        return OB_STATE_READY;
++    }
+ 
+-    ob_fd = (void *)((long)value);
++    conf = xl->private;
+ 
+-    return ob_fd;
+-}
++    *pfd = NULL;
+ 
+-ob_fd_t *
+-ob_fd_ctx_get(xlator_t *this, fd_t *fd)
+-{
+-    ob_fd_t *ob_fd = NULL;
+-
+-    LOCK(&fd->lock);
++    LOCK(&inode->lock);
+     {
+-        ob_fd = __ob_fd_ctx_get(this, fd);
+-    }
+-    UNLOCK(&fd->lock);
+-
+-    return ob_fd;
+-}
++        ob_inode = ob_inode_get_locked(xl, inode);
++        if (ob_inode == NULL) {
++            UNLOCK(&inode->lock);
+ 
+-int
+-__ob_fd_ctx_set(xlator_t *this, fd_t *fd, ob_fd_t *ob_fd)
+-{
+-    uint64_t value = 0;
+-    int ret = -1;
++            return -ENOMEM;
++        }
++        *pob_inode = ob_inode;
++
++        ob_inode->open_count += open_count;
++
++        /* If first_fd is not NULL, it means that there's a previous open not
++         * yet completed. */
++        if (ob_inode->first_fd != NULL) {
++            *pfd = ob_inode->first_fd;
++            /* If the current request doesn't trigger the open and it hasn't
++             * been triggered yet, we can continue without issuing the open
++             * only if the current request belongs to the same fd as the
++             * first one. */
++            if (!trigger && !ob_inode->triggered &&
++                (ob_inode->first_fd == fd)) {
++                UNLOCK(&inode->lock);
++
++                return OB_STATE_OPEN_PENDING;
++            }
+ 
+-    value = (long)((void *)ob_fd);
++            /* We need to issue the open. It could have already been triggered
++             * before. In this case open_stub will be NULL. Or the initial open
++             * may not be completely ready yet. In this case open_stub will be
++             * OB_OPEN_PREPARING. */
++            open_stub = ob_inode->first_open;
++            ob_inode->first_open = NULL;
++            ob_inode->triggered = true;
+ 
+-    ret = __fd_ctx_set(fd, this, value);
++            UNLOCK(&inode->lock);
+ 
+-    return ret;
+-}
++            if ((open_stub != NULL) && (open_stub != OB_OPEN_PREPARING)) {
++                call_resume(open_stub);
++            }
+ 
+-int
+-ob_fd_ctx_set(xlator_t *this, fd_t *fd, ob_fd_t *ob_fd)
+-{
+-    int ret = -1;
++            return OB_STATE_OPEN_TRIGGERED;
++        }
+ 
+-    LOCK(&fd->lock);
+-    {
+-        ret = __ob_fd_ctx_set(this, fd, ob_fd);
+-    }
+-    UNLOCK(&fd->lock);
++        /* There's no pending open. Only opens can be non synchronous, so all
++         * regular fops will be processed directly. For non synchronous opens,
++         * we'll still process them normally (i.e. synchornous) if there are
++         * more file descriptors open. */
++        if (synchronous || (ob_inode->open_count > open_count)) {
++            UNLOCK(&inode->lock);
+ 
+-    return ret;
+-}
++            return OB_STATE_READY;
++        }
+ 
+-ob_fd_t *
+-ob_fd_new(void)
+-{
+-    ob_fd_t *ob_fd = NULL;
++        *pfd = fd;
+ 
+-    ob_fd = GF_CALLOC(1, sizeof(*ob_fd), gf_ob_mt_fd_t);
++        /* This is the first open. We keep a reference on the fd and set
++         * first_open stub to OB_OPEN_PREPARING until the actual stub can
++         * be assigned (we don't create the stub here to avoid doing memory
++         * allocations inside the mutex). */
++        ob_inode->first_fd = __fd_ref(fd);
++        ob_inode->first_open = OB_OPEN_PREPARING;
+ 
+-    INIT_LIST_HEAD(&ob_fd->list);
+-    INIT_LIST_HEAD(&ob_fd->ob_fds_on_inode);
++        /* If lazy_open is not set, we'll need to immediately send the open,
++         * so we set triggered right now. */
++        ob_inode->triggered = !conf->lazy_open;
++    }
++    UNLOCK(&inode->lock);
+ 
+-    return ob_fd;
++    return OB_STATE_FIRST_OPEN;
+ }
+ 
+-void
+-ob_fd_free(ob_fd_t *ob_fd)
++static ob_state_t
++ob_open_and_resume_fd(xlator_t *xl, fd_t *fd, int32_t open_count,
++                      bool synchronous, bool trigger, ob_inode_t **pob_inode,
++                      fd_t **pfd)
+ {
+-    LOCK(&ob_fd->fd->inode->lock);
+-    {
+-        list_del_init(&ob_fd->ob_fds_on_inode);
+-    }
+-    UNLOCK(&ob_fd->fd->inode->lock);
+-
+-    loc_wipe(&ob_fd->loc);
+-
+-    if (ob_fd->xdata)
+-        dict_unref(ob_fd->xdata);
++    uint64_t err;
+ 
+-    if (ob_fd->open_frame) {
+-        /* If we sill have a frame it means that background open has never
+-         * been triggered. We need to release the pending reference. */
+-        fd_unref(ob_fd->fd);
+-
+-        STACK_DESTROY(ob_fd->open_frame->root);
++    if ((fd_ctx_get(fd, xl, &err) == 0) && (err != 0)) {
++        return (ob_state_t)-err;
+     }
+ 
+-    GF_FREE(ob_fd);
++    return ob_open_and_resume_inode(xl, fd->inode, fd, open_count, synchronous,
++                                    trigger, pob_inode, pfd);
+ }
+ 
+-int
+-ob_wake_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int op_ret,
+-            int op_errno, fd_t *fd_ret, dict_t *xdata)
++static ob_state_t
++ob_open_behind(xlator_t *xl, fd_t *fd, int32_t flags, ob_inode_t **pob_inode,
++               fd_t **pfd)
+ {
+-    fd_t *fd = NULL;
+-    int count = 0;
+-    int ob_inode_op_ret = 0;
+-    int ob_inode_op_errno = 0;
+-    ob_fd_t *ob_fd = NULL;
+-    call_stub_t *stub = NULL, *tmp = NULL;
+-    ob_inode_t *ob_inode = NULL;
+-    gf_boolean_t ob_inode_fops_waiting = _gf_false;
+-    struct list_head fops_waiting_on_fd, fops_waiting_on_inode;
++    bool synchronous;
+ 
+-    fd = frame->local;
+-    frame->local = NULL;
+-
+-    INIT_LIST_HEAD(&fops_waiting_on_fd);
+-    INIT_LIST_HEAD(&fops_waiting_on_inode);
++    /* TODO: If O_CREAT, O_APPEND, O_WRONLY or O_DIRECT are specified, shouldn't
++     *       we also execute this open synchronously ? */
++    synchronous = (flags & O_TRUNC) != 0;
+ 
+-    ob_inode = ob_inode_get(this, fd->inode);
++    return ob_open_and_resume_fd(xl, fd, 1, synchronous, true, pob_inode, pfd);
++}
+ 
+-    LOCK(&fd->lock);
++static int32_t
++ob_stub_dispatch(xlator_t *xl, ob_inode_t *ob_inode, fd_t *fd,
++                 call_stub_t *stub)
++{
++    LOCK(&ob_inode->inode->lock);
+     {
+-        ob_fd = __ob_fd_ctx_get(this, fd);
+-        ob_fd->opened = _gf_true;
+-
+-        ob_inode_fops_waiting = ob_fd->ob_inode_fops_waiting;
+-
+-        list_splice_init(&ob_fd->list, &fops_waiting_on_fd);
+-
+-        if (op_ret < 0) {
+-            /* mark fd BAD for ever */
+-            ob_fd->op_errno = op_errno;
+-            ob_fd = NULL; /*shouldn't be freed*/
+-        } else {
+-            __fd_ctx_del(fd, this, NULL);
+-        }
+-    }
+-    UNLOCK(&fd->lock);
+-
+-    if (ob_inode_fops_waiting) {
+-        LOCK(&fd->inode->lock);
+-        {
+-            count = --ob_inode->count;
+-            if (op_ret < 0) {
+-                /* TODO: when to reset the error? */
+-                ob_inode->op_ret = -1;
+-                ob_inode->op_errno = op_errno;
+-            }
+-
+-            if (count == 0) {
+-                ob_inode->open_in_progress = _gf_false;
+-                ob_inode_op_ret = ob_inode->op_ret;
+-                ob_inode_op_errno = ob_inode->op_errno;
+-                list_splice_init(&ob_inode->resume_fops,
+-                                 &fops_waiting_on_inode);
+-            }
++        /* We only queue a stub if the open has not been completed or
++         * cancelled. */
++        if (ob_inode->first_fd == fd) {
++            list_add_tail(&stub->list, &ob_inode->resume_fops);
++            stub = NULL;
+         }
+-        UNLOCK(&fd->inode->lock);
+-    }
+-
+-    if (ob_fd)
+-        ob_fd_free(ob_fd);
+-
+-    list_for_each_entry_safe(stub, tmp, &fops_waiting_on_fd, list)
+-    {
+-        list_del_init(&stub->list);
+-
+-        if (op_ret < 0)
+-            call_unwind_error(stub, -1, op_errno);
+-        else
+-            call_resume(stub);
+     }
++    UNLOCK(&ob_inode->inode->lock);
+ 
+-    list_for_each_entry_safe(stub, tmp, &fops_waiting_on_inode, list)
+-    {
+-        list_del_init(&stub->list);
+-
+-        if (ob_inode_op_ret < 0)
+-            call_unwind_error(stub, -1, ob_inode_op_errno);
+-        else
+-            call_resume(stub);
++    if (stub != NULL) {
++        call_resume(stub);
+     }
+ 
+-    /* The background open is completed. We can release the 'fd' reference. */
+-    fd_unref(fd);
+-
+-    STACK_DESTROY(frame->root);
+-
+     return 0;
+ }
+ 
+-int
+-ob_fd_wake(xlator_t *this, fd_t *fd, ob_fd_t *ob_fd)
++static int32_t
++ob_open_dispatch(xlator_t *xl, ob_inode_t *ob_inode, fd_t *fd,
++                 call_stub_t *stub)
+ {
+-    call_frame_t *frame = NULL;
+-
+-    if (ob_fd == NULL) {
+-        LOCK(&fd->lock);
+-        {
+-            ob_fd = __ob_fd_ctx_get(this, fd);
+-            if (!ob_fd)
+-                goto unlock;
++    bool closed;
+ 
+-            frame = ob_fd->open_frame;
+-            ob_fd->open_frame = NULL;
+-        }
+-    unlock:
+-        UNLOCK(&fd->lock);
+-    } else {
+-        LOCK(&fd->lock);
+-        {
+-            frame = ob_fd->open_frame;
+-            ob_fd->open_frame = NULL;
++    LOCK(&ob_inode->inode->lock);
++    {
++        closed = ob_inode->first_fd != fd;
++        if (!closed) {
++            if (ob_inode->triggered) {
++                ob_inode->first_open = NULL;
++            } else {
++                ob_inode->first_open = stub;
++                stub = NULL;
++            }
+         }
+-        UNLOCK(&fd->lock);
+     }
++    UNLOCK(&ob_inode->inode->lock);
+ 
+-    if (frame) {
+-        /* We don't need to take a reference here. We already have a reference
+-         * while the open is pending. */
+-        frame->local = fd;
+-
+-        STACK_WIND(frame, ob_wake_cbk, FIRST_CHILD(this),
+-                   FIRST_CHILD(this)->fops->open, &ob_fd->loc, ob_fd->flags, fd,
+-                   ob_fd->xdata);
++    if (stub != NULL) {
++        if (closed) {
++            call_stub_destroy(stub);
++            fd_unref(fd);
++        } else {
++            call_resume(stub);
++        }
+     }
+ 
+     return 0;
+ }
+ 
+-void
+-ob_inode_wake(xlator_t *this, struct list_head *ob_fds)
++static void
++ob_resume_pending(struct list_head *list)
+ {
+-    ob_fd_t *ob_fd = NULL, *tmp = NULL;
++    call_stub_t *stub;
+ 
+-    if (!list_empty(ob_fds)) {
+-        list_for_each_entry_safe(ob_fd, tmp, ob_fds, ob_fds_on_inode)
+-        {
+-            ob_fd_wake(this, ob_fd->fd, ob_fd);
+-            ob_fd_free(ob_fd);
+-        }
+-    }
+-}
++    while (!list_empty(list)) {
++        stub = list_first_entry(list, call_stub_t, list);
++        list_del_init(&stub->list);
+ 
+-/* called holding inode->lock and fd->lock */
+-void
+-ob_fd_copy(ob_fd_t *src, ob_fd_t *dst)
+-{
+-    if (!src || !dst)
+-        goto out;
+-
+-    dst->fd = src->fd;
+-    dst->loc.inode = inode_ref(src->loc.inode);
+-    gf_uuid_copy(dst->loc.gfid, src->loc.gfid);
+-    dst->flags = src->flags;
+-    dst->xdata = dict_ref(src->xdata);
+-    dst->ob_inode = src->ob_inode;
+-out:
+-    return;
++        call_resume(stub);
++    }
+ }
+ 
+-int
+-open_all_pending_fds_and_resume(xlator_t *this, inode_t *inode,
+-                                call_stub_t *stub)
++static void
++ob_open_completed(xlator_t *xl, ob_inode_t *ob_inode, fd_t *fd, int32_t op_ret,
++                  int32_t op_errno)
+ {
+-    ob_inode_t *ob_inode = NULL;
+-    ob_fd_t *ob_fd = NULL, *tmp = NULL;
+-    gf_boolean_t was_open_in_progress = _gf_false;
+-    gf_boolean_t wait_for_open = _gf_false;
+-    struct list_head ob_fds;
++    struct list_head list;
+ 
+-    ob_inode = ob_inode_get(this, inode);
+-    if (ob_inode == NULL)
+-        goto out;
++    INIT_LIST_HEAD(&list);
+ 
+-    INIT_LIST_HEAD(&ob_fds);
++    if (op_ret < 0) {
++        fd_ctx_set(fd, xl, op_errno <= 0 ? EIO : op_errno);
++    }
+ 
+-    LOCK(&inode->lock);
++    LOCK(&ob_inode->inode->lock);
+     {
+-        was_open_in_progress = ob_inode->open_in_progress;
+-        ob_inode->unlinked = 1;
+-
+-        if (was_open_in_progress) {
+-            list_add_tail(&stub->list, &ob_inode->resume_fops);
+-            goto inode_unlock;
+-        }
+-
+-        list_for_each_entry(ob_fd, &ob_inode->ob_fds, ob_fds_on_inode)
+-        {
+-            LOCK(&ob_fd->fd->lock);
+-            {
+-                if (ob_fd->opened)
+-                    goto fd_unlock;
+-
+-                ob_inode->count++;
+-                ob_fd->ob_inode_fops_waiting = _gf_true;
+-
+-                if (ob_fd->open_frame == NULL) {
+-                    /* open in progress no need of wake */
+-                } else {
+-                    tmp = ob_fd_new();
+-                    tmp->open_frame = ob_fd->open_frame;
+-                    ob_fd->open_frame = NULL;
+-
+-                    ob_fd_copy(ob_fd, tmp);
+-                    list_add_tail(&tmp->ob_fds_on_inode, &ob_fds);
+-                }
+-            }
+-        fd_unlock:
+-            UNLOCK(&ob_fd->fd->lock);
+-        }
+-
+-        if (ob_inode->count) {
+-            wait_for_open = ob_inode->open_in_progress = _gf_true;
+-            list_add_tail(&stub->list, &ob_inode->resume_fops);
++        /* Only update the fields if the file has not been closed before
++         * getting here. */
++        if (ob_inode->first_fd == fd) {
++            list_splice_init(&ob_inode->resume_fops, &list);
++            ob_inode->first_fd = NULL;
++            ob_inode->first_open = NULL;
++            ob_inode->triggered = false;
+         }
+     }
+-inode_unlock:
+-    UNLOCK(&inode->lock);
++    UNLOCK(&ob_inode->inode->lock);
+ 
+-out:
+-    if (!was_open_in_progress) {
+-        if (!wait_for_open) {
+-            call_resume(stub);
+-        } else {
+-            ob_inode_wake(this, &ob_fds);
+-        }
+-    }
++    ob_resume_pending(&list);
+ 
+-    return 0;
++    fd_unref(fd);
+ }
+ 
+-int
+-open_and_resume(xlator_t *this, fd_t *fd, call_stub_t *stub)
++static int32_t
++ob_open_cbk(call_frame_t *frame, void *cookie, xlator_t *xl, int32_t op_ret,
++            int32_t op_errno, fd_t *fd, dict_t *xdata)
+ {
+-    ob_fd_t *ob_fd = NULL;
+-    int op_errno = 0;
+-
+-    if (!fd)
+-        goto nofd;
+-
+-    LOCK(&fd->lock);
+-    {
+-        ob_fd = __ob_fd_ctx_get(this, fd);
+-        if (!ob_fd)
+-            goto unlock;
++    ob_inode_t *ob_inode;
+ 
+-        if (ob_fd->op_errno) {
+-            op_errno = ob_fd->op_errno;
+-            goto unlock;
+-        }
++    ob_inode = frame->local;
++    frame->local = NULL;
+ 
+-        list_add_tail(&stub->list, &ob_fd->list);
+-    }
+-unlock:
+-    UNLOCK(&fd->lock);
++    ob_open_completed(xl, ob_inode, cookie, op_ret, op_errno);
+ 
+-nofd:
+-    if (op_errno)
+-        call_unwind_error(stub, -1, op_errno);
+-    else if (ob_fd)
+-        ob_fd_wake(this, fd, NULL);
+-    else
+-        call_resume(stub);
++    STACK_DESTROY(frame->root);
+ 
+     return 0;
+ }
+ 
+-int
+-ob_open_behind(call_frame_t *frame, xlator_t *this, loc_t *loc, int flags,
++static int32_t
++ob_open_resume(call_frame_t *frame, xlator_t *this, loc_t *loc, int flags,
+                fd_t *fd, dict_t *xdata)
+ {
+-    ob_fd_t *ob_fd = NULL;
+-    int ret = -1;
+-    ob_conf_t *conf = NULL;
+-    ob_inode_t *ob_inode = NULL;
+-    gf_boolean_t open_in_progress = _gf_false;
+-    int unlinked = 0;
+-
+-    conf = this->private;
+-
+-    if (flags & O_TRUNC) {
+-        STACK_WIND(frame, default_open_cbk, FIRST_CHILD(this),
+-                   FIRST_CHILD(this)->fops->open, loc, flags, fd, xdata);
+-        return 0;
+-    }
+-
+-    ob_inode = ob_inode_get(this, fd->inode);
+-
+-    ob_fd = ob_fd_new();
+-    if (!ob_fd)
+-        goto enomem;
+-
+-    ob_fd->ob_inode = ob_inode;
+-
+-    ob_fd->fd = fd;
+-
+-    ob_fd->open_frame = copy_frame(frame);
+-    if (!ob_fd->open_frame)
+-        goto enomem;
+-    ret = loc_copy(&ob_fd->loc, loc);
+-    if (ret)
+-        goto enomem;
+-
+-    ob_fd->flags = flags;
+-    if (xdata)
+-        ob_fd->xdata = dict_ref(xdata);
+-
+-    LOCK(&fd->inode->lock);
+-    {
+-        open_in_progress = ob_inode->open_in_progress;
+-        unlinked = ob_inode->unlinked;
+-        if (!open_in_progress && !unlinked) {
+-            ret = ob_fd_ctx_set(this, fd, ob_fd);
+-            if (ret) {
+-                UNLOCK(&fd->inode->lock);
+-                goto enomem;
+-            }
+-
+-            list_add(&ob_fd->ob_fds_on_inode, &ob_inode->ob_fds);
+-        }
+-    }
+-    UNLOCK(&fd->inode->lock);
+-
+-    /* We take a reference while the background open is pending or being
+-     * processed. If we finally wind the request in the foreground, then
+-     * ob_fd_free() will take care of this additional reference. */
+-    fd_ref(fd);
+-
+-    if (!open_in_progress && !unlinked) {
+-        STACK_UNWIND_STRICT(open, frame, 0, 0, fd, xdata);
+-
+-        if (!conf->lazy_open)
+-            ob_fd_wake(this, fd, NULL);
+-    } else {
+-        ob_fd_free(ob_fd);
+-        STACK_WIND(frame, default_open_cbk, FIRST_CHILD(this),
+-                   FIRST_CHILD(this)->fops->open, loc, flags, fd, xdata);
+-    }
++    STACK_WIND_COOKIE(frame, ob_open_cbk, fd, FIRST_CHILD(this),
++                      FIRST_CHILD(this)->fops->open, loc, flags, fd, xdata);
+ 
+     return 0;
+-enomem:
+-    if (ob_fd) {
+-        if (ob_fd->open_frame)
+-            STACK_DESTROY(ob_fd->open_frame->root);
+-
+-        loc_wipe(&ob_fd->loc);
+-        if (ob_fd->xdata)
+-            dict_unref(ob_fd->xdata);
+-
+-        GF_FREE(ob_fd);
+-    }
+-
+-    return -1;
+ }
+ 
+-int
++static int32_t
+ ob_open(call_frame_t *frame, xlator_t *this, loc_t *loc, int flags, fd_t *fd,
+         dict_t *xdata)
+ {
+-    fd_t *old_fd = NULL;
+-    int ret = -1;
+-    int op_errno = ENOMEM;
+-    call_stub_t *stub = NULL;
+-
+-    old_fd = fd_lookup(fd->inode, 0);
+-    if (old_fd) {
+-        /* open-behind only when this is the first FD */
+-        stub = fop_open_stub(frame, default_open_resume, loc, flags, fd, xdata);
+-        if (!stub) {
+-            fd_unref(old_fd);
+-            goto err;
+-        }
+-
+-        open_and_resume(this, old_fd, stub);
++    ob_inode_t *ob_inode;
++    call_frame_t *open_frame;
++    call_stub_t *stub;
++    fd_t *first_fd;
++    ob_state_t state;
++
++    state = ob_open_behind(this, fd, flags, &ob_inode, &first_fd);
++    if (state == OB_STATE_READY) {
++        /* There's no pending open, but there are other file descriptors opened
++         * or the current flags require a synchronous open. */
++        return default_open(frame, this, loc, flags, fd, xdata);
++    }
+ 
+-        fd_unref(old_fd);
++    if (state == OB_STATE_OPEN_TRIGGERED) {
++        /* The first open is in progress (either because it was already issued
++         * or because this request triggered it). We try to create a new stub
++         * to retry the operation once the initial open completes. */
++        stub = fop_open_stub(frame, ob_open, loc, flags, fd, xdata);
++        if (stub != NULL) {
++            return ob_stub_dispatch(this, ob_inode, first_fd, stub);
++        }
+ 
+-        return 0;
++        state = -ENOMEM;
+     }
+ 
+-    ret = ob_open_behind(frame, this, loc, flags, fd, xdata);
+-    if (ret) {
+-        goto err;
+-    }
++    if (state == OB_STATE_FIRST_OPEN) {
++        /* We try to create a stub for the new open. A new frame needs to be
++         * used because the current one may be destroyed soon after sending
++         * the open's reply. */
++        open_frame = copy_frame(frame);
++        if (open_frame != NULL) {
++            stub = fop_open_stub(open_frame, ob_open_resume, loc, flags, fd,
++                                 xdata);
++            if (stub != NULL) {
++                open_frame->local = ob_inode;
+ 
+-    return 0;
+-err:
+-    gf_msg(this->name, GF_LOG_ERROR, op_errno, OPEN_BEHIND_MSG_NO_MEMORY, "%s",
+-           loc->path);
++                /* TODO: Previous version passed xdata back to the caller, but
++                 *       probably this doesn't make sense since it won't contain
++                 *       any requested data. I think it would be better to pass
++                 *       NULL for xdata. */
++                default_open_cbk(frame, NULL, this, 0, 0, fd, xdata);
+ 
+-    STACK_UNWIND_STRICT(open, frame, -1, op_errno, 0, 0);
++                return ob_open_dispatch(this, ob_inode, first_fd, stub);
++            }
+ 
+-    return 0;
+-}
++            STACK_DESTROY(open_frame->root);
++        }
+ 
+-fd_t *
+-ob_get_wind_fd(xlator_t *this, fd_t *fd, uint32_t *flag)
+-{
+-    fd_t *wind_fd = NULL;
+-    ob_fd_t *ob_fd = NULL;
+-    ob_conf_t *conf = NULL;
++        /* In case of error, simulate a regular completion but with an error
++         * code. */
++        ob_open_completed(this, ob_inode, first_fd, -1, ENOMEM);
+ 
+-    conf = this->private;
++        state = -ENOMEM;
++    }
+ 
+-    ob_fd = ob_fd_ctx_get(this, fd);
++    /* In case of failure we need to decrement the number of open files because
++     * ob_fdclose() won't be called. */
+ 
+-    if (ob_fd && ob_fd->open_frame && conf->use_anonymous_fd) {
+-        wind_fd = fd_anonymous(fd->inode);
+-        if ((ob_fd->flags & O_DIRECT) && (flag))
+-            *flag = *flag | O_DIRECT;
+-    } else {
+-        wind_fd = fd_ref(fd);
++    LOCK(&fd->inode->lock);
++    {
++        ob_inode->open_count--;
+     }
++    UNLOCK(&fd->inode->lock);
+ 
+-    return wind_fd;
++    gf_smsg(this->name, GF_LOG_ERROR, -state, OPEN_BEHIND_MSG_FAILED, "fop=%s",
++            "open", "path=%s", loc->path, NULL);
++
++    return default_open_failure_cbk(frame, -state);
+ }
+ 
+-int
++static int32_t
+ ob_readv(call_frame_t *frame, xlator_t *this, fd_t *fd, size_t size,
+          off_t offset, uint32_t flags, dict_t *xdata)
+ {
+-    call_stub_t *stub = NULL;
+-    fd_t *wind_fd = NULL;
+-    ob_conf_t *conf = NULL;
++    ob_conf_t *conf = this->private;
++    bool trigger = conf->read_after_open || !conf->use_anonymous_fd;
+ 
+-    conf = this->private;
+-
+-    if (!conf->read_after_open)
+-        wind_fd = ob_get_wind_fd(this, fd, &flags);
+-    else
+-        wind_fd = fd_ref(fd);
+-
+-    stub = fop_readv_stub(frame, default_readv_resume, wind_fd, size, offset,
+-                          flags, xdata);
+-    fd_unref(wind_fd);
+-
+-    if (!stub)
+-        goto err;
+-
+-    open_and_resume(this, wind_fd, stub);
+-
+-    return 0;
+-err:
+-    STACK_UNWIND_STRICT(readv, frame, -1, ENOMEM, 0, 0, 0, 0, 0);
++    OB_POST_FD(readv, this, frame, fd, trigger, fd, size, offset, flags, xdata);
+ 
+     return 0;
+ }
+ 
+-int
++static int32_t
+ ob_writev(call_frame_t *frame, xlator_t *this, fd_t *fd, struct iovec *iov,
+           int count, off_t offset, uint32_t flags, struct iobref *iobref,
+           dict_t *xdata)
+ {
+-    call_stub_t *stub = NULL;
+-
+-    stub = fop_writev_stub(frame, default_writev_resume, fd, iov, count, offset,
+-                           flags, iobref, xdata);
+-    if (!stub)
+-        goto err;
+-
+-    open_and_resume(this, fd, stub);
+-
+-    return 0;
+-err:
+-    STACK_UNWIND_STRICT(writev, frame, -1, ENOMEM, 0, 0, 0);
++    OB_POST_FD(writev, this, frame, fd, true, fd, iov, count, offset, flags,
++               iobref, xdata);
+ 
+     return 0;
+ }
+ 
+-int
++static int32_t
+ ob_fstat(call_frame_t *frame, xlator_t *this, fd_t *fd, dict_t *xdata)
+ {
+-    call_stub_t *stub = NULL;
+-    fd_t *wind_fd = NULL;
+-
+-    wind_fd = ob_get_wind_fd(this, fd, NULL);
+-
+-    stub = fop_fstat_stub(frame, default_fstat_resume, wind_fd, xdata);
++    ob_conf_t *conf = this->private;
++    bool trigger = !conf->use_anonymous_fd;
+ 
+-    fd_unref(wind_fd);
+-
+-    if (!stub)
+-        goto err;
+-
+-    open_and_resume(this, wind_fd, stub);
+-
+-    return 0;
+-err:
+-    STACK_UNWIND_STRICT(fstat, frame, -1, ENOMEM, 0, 0);
++    OB_POST_FD(fstat, this, frame, fd, trigger, fd, xdata);
+ 
+     return 0;
+ }
+ 
+-int
++static int32_t
+ ob_seek(call_frame_t *frame, xlator_t *this, fd_t *fd, off_t offset,
+         gf_seek_what_t what, dict_t *xdata)
+ {
+-    call_stub_t *stub = NULL;
+-    fd_t *wind_fd = NULL;
+-
+-    wind_fd = ob_get_wind_fd(this, fd, NULL);
++    ob_conf_t *conf = this->private;
++    bool trigger = !conf->use_anonymous_fd;
+ 
+-    stub = fop_seek_stub(frame, default_seek_resume, wind_fd, offset, what,
+-                         xdata);
+-
+-    fd_unref(wind_fd);
+-
+-    if (!stub)
+-        goto err;
+-
+-    open_and_resume(this, wind_fd, stub);
+-
+-    return 0;
+-err:
+-    STACK_UNWIND_STRICT(fstat, frame, -1, ENOMEM, 0, 0);
++    OB_POST_FD(seek, this, frame, fd, trigger, fd, offset, what, xdata);
+ 
+     return 0;
+ }
+ 
+-int
++static int32_t
+ ob_flush(call_frame_t *frame, xlator_t *this, fd_t *fd, dict_t *xdata)
+ {
+-    call_stub_t *stub = NULL;
+-    ob_fd_t *ob_fd = NULL;
+-    gf_boolean_t unwind = _gf_false;
+-
+-    LOCK(&fd->lock);
+-    {
+-        ob_fd = __ob_fd_ctx_get(this, fd);
+-        if (ob_fd && ob_fd->open_frame)
+-            /* if open() was never wound to backend,
+-               no need to wind flush() either.
+-            */
+-            unwind = _gf_true;
+-    }
+-    UNLOCK(&fd->lock);
+-
+-    if (unwind)
+-        goto unwind;
+-
+-    stub = fop_flush_stub(frame, default_flush_resume, fd, xdata);
+-    if (!stub)
+-        goto err;
+-
+-    open_and_resume(this, fd, stub);
+-
+-    return 0;
+-err:
+-    STACK_UNWIND_STRICT(flush, frame, -1, ENOMEM, 0);
+-
+-    return 0;
+-
+-unwind:
+-    STACK_UNWIND_STRICT(flush, frame, 0, 0, 0);
++    OB_POST_FLUSH(this, frame, fd, fd, xdata);
+ 
+     return 0;
+ }
+ 
+-int
++static int32_t
+ ob_fsync(call_frame_t *frame, xlator_t *this, fd_t *fd, int flag, dict_t *xdata)
+ {
+-    call_stub_t *stub = NULL;
+-
+-    stub = fop_fsync_stub(frame, default_fsync_resume, fd, flag, xdata);
+-    if (!stub)
+-        goto err;
+-
+-    open_and_resume(this, fd, stub);
+-
+-    return 0;
+-err:
+-    STACK_UNWIND_STRICT(fsync, frame, -1, ENOMEM, 0, 0, 0);
++    OB_POST_FD(fsync, this, frame, fd, true, fd, flag, xdata);
+ 
+     return 0;
+ }
+ 
+-int
++static int32_t
+ ob_lk(call_frame_t *frame, xlator_t *this, fd_t *fd, int cmd,
+       struct gf_flock *flock, dict_t *xdata)
+ {
+-    call_stub_t *stub = NULL;
+-
+-    stub = fop_lk_stub(frame, default_lk_resume, fd, cmd, flock, xdata);
+-    if (!stub)
+-        goto err;
+-
+-    open_and_resume(this, fd, stub);
+-
+-    return 0;
+-err:
+-    STACK_UNWIND_STRICT(lk, frame, -1, ENOMEM, 0, 0);
++    OB_POST_FD(lk, this, frame, fd, true, fd, cmd, flock, xdata);
+ 
+     return 0;
+ }
+ 
+-int
++static int32_t
+ ob_ftruncate(call_frame_t *frame, xlator_t *this, fd_t *fd, off_t offset,
+              dict_t *xdata)
+ {
+-    call_stub_t *stub = NULL;
+-
+-    stub = fop_ftruncate_stub(frame, default_ftruncate_resume, fd, offset,
+-                              xdata);
+-    if (!stub)
+-        goto err;
+-
+-    open_and_resume(this, fd, stub);
+-
+-    return 0;
+-err:
+-    STACK_UNWIND_STRICT(ftruncate, frame, -1, ENOMEM, 0, 0, 0);
++    OB_POST_FD(ftruncate, this, frame, fd, true, fd, offset, xdata);
+ 
+     return 0;
+ }
+ 
+-int
++static int32_t
+ ob_fsetxattr(call_frame_t *frame, xlator_t *this, fd_t *fd, dict_t *xattr,
+              int flags, dict_t *xdata)
+ {
+-    call_stub_t *stub = NULL;
+-
+-    stub = fop_fsetxattr_stub(frame, default_fsetxattr_resume, fd, xattr, flags,
+-                              xdata);
+-    if (!stub)
+-        goto err;
+-
+-    open_and_resume(this, fd, stub);
+-
+-    return 0;
+-err:
+-    STACK_UNWIND_STRICT(fsetxattr, frame, -1, ENOMEM, 0);
++    OB_POST_FD(fsetxattr, this, frame, fd, true, fd, xattr, flags, xdata);
+ 
+     return 0;
+ }
+ 
+-int
++static int32_t
+ ob_fgetxattr(call_frame_t *frame, xlator_t *this, fd_t *fd, const char *name,
+              dict_t *xdata)
+ {
+-    call_stub_t *stub = NULL;
+-
+-    stub = fop_fgetxattr_stub(frame, default_fgetxattr_resume, fd, name, xdata);
+-    if (!stub)
+-        goto err;
+-
+-    open_and_resume(this, fd, stub);
+-
+-    return 0;
+-err:
+-    STACK_UNWIND_STRICT(fgetxattr, frame, -1, ENOMEM, 0, 0);
++    OB_POST_FD(fgetxattr, this, frame, fd, true, fd, name, xdata);
+ 
+     return 0;
+ }
+ 
+-int
++static int32_t
+ ob_fremovexattr(call_frame_t *frame, xlator_t *this, fd_t *fd, const char *name,
+                 dict_t *xdata)
+ {
+-    call_stub_t *stub = NULL;
+-
+-    stub = fop_fremovexattr_stub(frame, default_fremovexattr_resume, fd, name,
+-                                 xdata);
+-    if (!stub)
+-        goto err;
+-
+-    open_and_resume(this, fd, stub);
+-
+-    return 0;
+-err:
+-    STACK_UNWIND_STRICT(fremovexattr, frame, -1, ENOMEM, 0);
++    OB_POST_FD(fremovexattr, this, frame, fd, true, fd, name, xdata);
+ 
+     return 0;
+ }
+ 
+-int
++static int32_t
+ ob_finodelk(call_frame_t *frame, xlator_t *this, const char *volume, fd_t *fd,
+             int cmd, struct gf_flock *flock, dict_t *xdata)
+ {
+-    call_stub_t *stub = fop_finodelk_stub(frame, default_finodelk_resume,
+-                                          volume, fd, cmd, flock, xdata);
+-    if (stub)
+-        open_and_resume(this, fd, stub);
+-    else
+-        STACK_UNWIND_STRICT(finodelk, frame, -1, ENOMEM, 0);
++    OB_POST_FD(finodelk, this, frame, fd, true, volume, fd, cmd, flock, xdata);
+ 
+     return 0;
+ }
+ 
+-int
++static int32_t
+ ob_fentrylk(call_frame_t *frame, xlator_t *this, const char *volume, fd_t *fd,
+             const char *basename, entrylk_cmd cmd, entrylk_type type,
+             dict_t *xdata)
+ {
+-    call_stub_t *stub = fop_fentrylk_stub(
+-        frame, default_fentrylk_resume, volume, fd, basename, cmd, type, xdata);
+-    if (stub)
+-        open_and_resume(this, fd, stub);
+-    else
+-        STACK_UNWIND_STRICT(fentrylk, frame, -1, ENOMEM, 0);
++    OB_POST_FD(fentrylk, this, frame, fd, true, volume, fd, basename, cmd, type,
++               xdata);
+ 
+     return 0;
+ }
+ 
+-int
++static int32_t
+ ob_fxattrop(call_frame_t *frame, xlator_t *this, fd_t *fd,
+             gf_xattrop_flags_t optype, dict_t *xattr, dict_t *xdata)
+ {
+-    call_stub_t *stub = fop_fxattrop_stub(frame, default_fxattrop_resume, fd,
+-                                          optype, xattr, xdata);
+-    if (stub)
+-        open_and_resume(this, fd, stub);
+-    else
+-        STACK_UNWIND_STRICT(fxattrop, frame, -1, ENOMEM, 0, 0);
++    OB_POST_FD(fxattrop, this, frame, fd, true, fd, optype, xattr, xdata);
+ 
+     return 0;
+ }
+ 
+-int
++static int32_t
+ ob_fsetattr(call_frame_t *frame, xlator_t *this, fd_t *fd, struct iatt *iatt,
+             int valid, dict_t *xdata)
+ {
+-    call_stub_t *stub = NULL;
+-
+-    stub = fop_fsetattr_stub(frame, default_fsetattr_resume, fd, iatt, valid,
+-                             xdata);
+-    if (!stub)
+-        goto err;
+-
+-    open_and_resume(this, fd, stub);
+-
+-    return 0;
+-err:
+-    STACK_UNWIND_STRICT(fsetattr, frame, -1, ENOMEM, 0, 0, 0);
++    OB_POST_FD(fsetattr, this, frame, fd, true, fd, iatt, valid, xdata);
+ 
+     return 0;
+ }
+ 
+-int
++static int32_t
+ ob_fallocate(call_frame_t *frame, xlator_t *this, fd_t *fd, int32_t mode,
+              off_t offset, size_t len, dict_t *xdata)
+ {
+-    call_stub_t *stub;
+-
+-    stub = fop_fallocate_stub(frame, default_fallocate_resume, fd, mode, offset,
+-                              len, xdata);
+-    if (!stub)
+-        goto err;
+-
+-    open_and_resume(this, fd, stub);
++    OB_POST_FD(fallocate, this, frame, fd, true, fd, mode, offset, len, xdata);
+ 
+     return 0;
+-err:
+-    STACK_UNWIND_STRICT(fallocate, frame, -1, ENOMEM, NULL, NULL, NULL);
+-    return 0;
+ }
+ 
+-int
++static int32_t
+ ob_discard(call_frame_t *frame, xlator_t *this, fd_t *fd, off_t offset,
+            size_t len, dict_t *xdata)
+ {
+-    call_stub_t *stub;
+-
+-    stub = fop_discard_stub(frame, default_discard_resume, fd, offset, len,
+-                            xdata);
+-    if (!stub)
+-        goto err;
+-
+-    open_and_resume(this, fd, stub);
++    OB_POST_FD(discard, this, frame, fd, true, fd, offset, len, xdata);
+ 
+     return 0;
+-err:
+-    STACK_UNWIND_STRICT(discard, frame, -1, ENOMEM, NULL, NULL, NULL);
+-    return 0;
+ }
+ 
+-int
++static int32_t
+ ob_zerofill(call_frame_t *frame, xlator_t *this, fd_t *fd, off_t offset,
+             off_t len, dict_t *xdata)
+ {
+-    call_stub_t *stub;
+-
+-    stub = fop_zerofill_stub(frame, default_zerofill_resume, fd, offset, len,
+-                             xdata);
+-    if (!stub)
+-        goto err;
++    OB_POST_FD(zerofill, this, frame, fd, true, fd, offset, len, xdata);
+ 
+-    open_and_resume(this, fd, stub);
+-
+-    return 0;
+-err:
+-    STACK_UNWIND_STRICT(zerofill, frame, -1, ENOMEM, NULL, NULL, NULL);
+     return 0;
+ }
+ 
+-int
++static int32_t
+ ob_unlink(call_frame_t *frame, xlator_t *this, loc_t *loc, int xflags,
+           dict_t *xdata)
+ {
+-    call_stub_t *stub = NULL;
+-
+-    stub = fop_unlink_stub(frame, default_unlink_resume, loc, xflags, xdata);
+-    if (!stub)
+-        goto err;
+-
+-    open_all_pending_fds_and_resume(this, loc->inode, stub);
+-
+-    return 0;
+-err:
+-    STACK_UNWIND_STRICT(unlink, frame, -1, ENOMEM, 0, 0, 0);
++    OB_POST_INODE(unlink, this, frame, loc->inode, true, loc, xflags, xdata);
+ 
+     return 0;
+ }
+ 
+-int
++static int32_t
+ ob_rename(call_frame_t *frame, xlator_t *this, loc_t *src, loc_t *dst,
+           dict_t *xdata)
+ {
+-    call_stub_t *stub = NULL;
+-
+-    stub = fop_rename_stub(frame, default_rename_resume, src, dst, xdata);
+-    if (!stub)
+-        goto err;
+-
+-    open_all_pending_fds_and_resume(this, dst->inode, stub);
+-
+-    return 0;
+-err:
+-    STACK_UNWIND_STRICT(rename, frame, -1, ENOMEM, 0, 0, 0, 0, 0, 0);
++    OB_POST_INODE(rename, this, frame, dst->inode, true, src, dst, xdata);
+ 
+     return 0;
+ }
+ 
+-int32_t
++static int32_t
+ ob_setattr(call_frame_t *frame, xlator_t *this, loc_t *loc, struct iatt *stbuf,
+            int32_t valid, dict_t *xdata)
+ {
+-    call_stub_t *stub = NULL;
+-
+-    stub = fop_setattr_stub(frame, default_setattr_resume, loc, stbuf, valid,
+-                            xdata);
+-    if (!stub)
+-        goto err;
++    OB_POST_INODE(setattr, this, frame, loc->inode, true, loc, stbuf, valid,
++                  xdata);
+ 
+-    open_all_pending_fds_and_resume(this, loc->inode, stub);
+-
+-    return 0;
+-err:
+-    STACK_UNWIND_STRICT(setattr, frame, -1, ENOMEM, NULL, NULL, NULL);
+     return 0;
+ }
+ 
+-int32_t
++static int32_t
+ ob_setxattr(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *dict,
+             int32_t flags, dict_t *xdata)
+ {
+-    call_stub_t *stub = NULL;
+-    gf_boolean_t access_xattr = _gf_false;
+-
+     if (dict_get(dict, POSIX_ACL_DEFAULT_XATTR) ||
+         dict_get(dict, POSIX_ACL_ACCESS_XATTR) ||
+-        dict_get(dict, GF_SELINUX_XATTR_KEY))
+-        access_xattr = _gf_true;
+-
+-    if (!access_xattr)
++        dict_get(dict, GF_SELINUX_XATTR_KEY)) {
+         return default_setxattr(frame, this, loc, dict, flags, xdata);
++    }
+ 
+-    stub = fop_setxattr_stub(frame, default_setxattr_resume, loc, dict, flags,
+-                             xdata);
+-    if (!stub)
+-        goto err;
+-
+-    open_all_pending_fds_and_resume(this, loc->inode, stub);
++    OB_POST_INODE(setxattr, this, frame, loc->inode, true, loc, dict, flags,
++                  xdata);
+ 
+     return 0;
+-err:
+-    STACK_UNWIND_STRICT(setxattr, frame, -1, ENOMEM, NULL);
+-    return 0;
+ }
+ 
+-int
+-ob_release(xlator_t *this, fd_t *fd)
++static void
++ob_fdclose(xlator_t *this, fd_t *fd)
+ {
+-    ob_fd_t *ob_fd = NULL;
++    struct list_head list;
++    ob_inode_t *ob_inode;
++    call_stub_t *stub;
++
++    INIT_LIST_HEAD(&list);
++    stub = NULL;
+ 
+-    ob_fd = ob_fd_ctx_get(this, fd);
++    LOCK(&fd->inode->lock);
++    {
++        ob_inode = ob_inode_get_locked(this, fd->inode);
++        if (ob_inode != NULL) {
++            ob_inode->open_count--;
++
++            /* If this fd is the same as ob_inode->first_fd, it means that
++             * the initial open has not fully completed. We'll try to cancel
++             * it. */
++            if (ob_inode->first_fd == fd) {
++                if (ob_inode->first_open == OB_OPEN_PREPARING) {
++                    /* In this case ob_open_dispatch() has not been called yet.
++                     * We clear first_fd and first_open to allow that function
++                     * to know that the open is not really needed. This also
++                     * allows other requests to work as expected if they
++                     * arrive before the dispatch function is called. If there
++                     * are pending fops, we can directly process them here.
++                     * (note that there shouldn't be any fd related fops, but
++                     * if there are, it's fine if they fail). */
++                    ob_inode->first_fd = NULL;
++                    ob_inode->first_open = NULL;
++                    ob_inode->triggered = false;
++                    list_splice_init(&ob_inode->resume_fops, &list);
++                } else if (!ob_inode->triggered) {
++                    /* If the open has already been dispatched, we can only
++                     * cancel it if it has not been triggered. Otherwise we
++                     * simply wait until it completes. While it's not triggered,
++                     * first_open must be a valid stub and there can't be any
++                     * pending fops. */
++                    GF_ASSERT((ob_inode->first_open != NULL) &&
++                              list_empty(&ob_inode->resume_fops));
++
++                    ob_inode->first_fd = NULL;
++                    stub = ob_inode->first_open;
++                    ob_inode->first_open = NULL;
++                }
++            }
++        }
++    }
++    UNLOCK(&fd->inode->lock);
+ 
+-    ob_fd_free(ob_fd);
++    if (stub != NULL) {
++        call_stub_destroy(stub);
++        fd_unref(fd);
++    }
+ 
+-    return 0;
++    ob_resume_pending(&list);
+ }
+ 
+ int
+ ob_forget(xlator_t *this, inode_t *inode)
+ {
+-    ob_inode_t *ob_inode = NULL;
++    ob_inode_t *ob_inode;
+     uint64_t value = 0;
+ 
+-    inode_ctx_del(inode, this, &value);
+-
+-    if (value) {
++    if ((inode_ctx_del(inode, this, &value) == 0) && (value != 0)) {
+         ob_inode = (ob_inode_t *)(uintptr_t)value;
+-        ob_inode_free(ob_inode);
++        GF_FREE(ob_inode);
+     }
+ 
+     return 0;
+@@ -1153,20 +823,18 @@ ob_priv_dump(xlator_t *this)
+ int
+ ob_fdctx_dump(xlator_t *this, fd_t *fd)
+ {
+-    ob_fd_t *ob_fd = NULL;
+     char key_prefix[GF_DUMP_MAX_BUF_LEN] = {
+         0,
+     };
+-    int ret = 0;
++    uint64_t value = 0;
++    int ret = 0, error = 0;
+ 
+     ret = TRY_LOCK(&fd->lock);
+     if (ret)
+         return 0;
+ 
+-    ob_fd = __ob_fd_ctx_get(this, fd);
+-    if (!ob_fd) {
+-        UNLOCK(&fd->lock);
+-        return 0;
++    if ((__fd_ctx_get(fd, this, &value) == 0) && (value != 0)) {
++        error = (int32_t)value;
+     }
+ 
+     gf_proc_dump_build_key(key_prefix, "xlator.performance.open-behind",
+@@ -1175,17 +843,7 @@ ob_fdctx_dump(xlator_t *this, fd_t *fd)
+ 
+     gf_proc_dump_write("fd", "%p", fd);
+ 
+-    gf_proc_dump_write("open_frame", "%p", ob_fd->open_frame);
+-
+-    if (ob_fd->open_frame)
+-        gf_proc_dump_write("open_frame.root.unique", "%" PRIu64,
+-                           ob_fd->open_frame->root->unique);
+-
+-    gf_proc_dump_write("loc.path", "%s", ob_fd->loc.path);
+-
+-    gf_proc_dump_write("loc.ino", "%s", uuid_utoa(ob_fd->loc.gfid));
+-
+-    gf_proc_dump_write("flags", "%d", ob_fd->flags);
++    gf_proc_dump_write("error", "%d", error);
+ 
+     UNLOCK(&fd->lock);
+ 
+@@ -1307,7 +965,7 @@ struct xlator_fops fops = {
+ };
+ 
+ struct xlator_cbks cbks = {
+-    .release = ob_release,
++    .fdclose = ob_fdclose,
+     .forget = ob_forget,
+ };
+ 
+-- 
+1.8.3.1
+

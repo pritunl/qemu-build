@@ -1,0 +1,48 @@
+From 659bd2a0fde9ba0cb8fc3905bcdb63d91e3dfa9d Mon Sep 17 00:00:00 2001
+From: Raghavendra Bhat <raghavendra@redhat.com>
+Date: Tue, 2 Jul 2019 16:50:23 -0400
+Subject: [PATCH 319/335] features/snapview-server: obtain the list of
+ snapshots inside the lock
+
+The current list of snapshots from priv->dirents is obtained outside
+the lock.
+
+Upstream patch:
+> Change-Id: I8876ec0a38308da5db058397382fbc82cc7ac177
+> Fixes: bz#1726783
+> Signed-off-by: Raghavendra Bhat <raghavendra@redhat.com>
+> patch: https://review.gluster.org/#/c/glusterfs/+/22990/
+
+BUG: 1731513
+Change-Id: I8876ec0a38308da5db058397382fbc82cc7ac177
+Signed-off-by: Raghavendra Bhat <raghavendra@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/185838
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/features/snapview-server/src/snapview-server-mgmt.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/features/snapview-server/src/snapview-server-mgmt.c b/xlators/features/snapview-server/src/snapview-server-mgmt.c
+index bc415ef..3d64383 100644
+--- a/xlators/features/snapview-server/src/snapview-server-mgmt.c
++++ b/xlators/features/snapview-server/src/snapview-server-mgmt.c
+@@ -256,7 +256,6 @@ mgmt_get_snapinfo_cbk(struct rpc_req *req, struct iovec *iov, int count,
+     this = frame->this;
+     ctx = frame->this->ctx;
+     priv = this->private;
+-    old_dirents = priv->dirents;
+ 
+     if (!ctx) {
+         errno = EINVAL;
+@@ -388,6 +387,7 @@ mgmt_get_snapinfo_cbk(struct rpc_req *req, struct iovec *iov, int count,
+     LOCK(&priv->snaplist_lock);
+     {
+         oldcount = priv->num_snaps;
++        old_dirents = priv->dirents;
+         for (i = 0; i < priv->num_snaps; i++) {
+             for (j = 0; j < snapcount; j++) {
+                 if ((!strcmp(old_dirents[i].name, dirents[j].name)) &&
+-- 
+1.8.3.1
+

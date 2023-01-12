@@ -1,0 +1,93 @@
+From 8267e5e97327633bf21fd02df8d52e3a97f0f9ea Mon Sep 17 00:00:00 2001
+From: Ashish Pandey <aspandey@redhat.com>
+Date: Wed, 4 Dec 2019 17:06:18 +0530
+Subject: [PATCH 421/449] Improve logging in EC, client and lock translator
+
+BUG: 1787294
+> Upstream patch: https://review.gluster.org/#/c/glusterfs/+/23814/
+> Change-Id: I98af8672a25ff9fd9dba91a2e1384719f9155255
+> Fixes: bz#1779760
+
+Change-Id: I5cb04993f12d6248f2349a0c5a9e2c0ceecaf528
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202533
+Tested-by: Ashish Pandey <aspandey@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/ec/src/ec-combine.c  |  5 +++--
+ xlators/cluster/ec/src/ec-common.c   |  2 +-
+ xlators/features/locks/src/inodelk.c | 12 ++++++++----
+ 3 files changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/xlators/cluster/ec/src/ec-combine.c b/xlators/cluster/ec/src/ec-combine.c
+index c5af2ab..99e5534 100644
+--- a/xlators/cluster/ec/src/ec-combine.c
++++ b/xlators/cluster/ec/src/ec-combine.c
+@@ -179,13 +179,14 @@ ec_iatt_combine(ec_fop_data_t *fop, struct iatt *dst, struct iatt *src,
+                    "links: %u-%u, uid: %u-%u, gid: %u-%u, "
+                    "rdev: %" PRIu64 "-%" PRIu64 ", size: %" PRIu64 "-%" PRIu64
+                    ", "
+-                   "mode: %o-%o)",
++                   "mode: %o-%o), %s",
+                    dst[i].ia_ino, src[i].ia_ino, dst[i].ia_nlink,
+                    src[i].ia_nlink, dst[i].ia_uid, src[i].ia_uid, dst[i].ia_gid,
+                    src[i].ia_gid, dst[i].ia_rdev, src[i].ia_rdev,
+                    dst[i].ia_size, src[i].ia_size,
+                    st_mode_from_ia(dst[i].ia_prot, dst[i].ia_type),
+-                   st_mode_from_ia(src[i].ia_prot, dst[i].ia_type));
++                   st_mode_from_ia(src[i].ia_prot, dst[i].ia_type),
++                   ec_msg_str(fop));
+ 
+             return 0;
+         }
+diff --git a/xlators/cluster/ec/src/ec-common.c b/xlators/cluster/ec/src/ec-common.c
+index 5cae37b..e580bfb 100644
+--- a/xlators/cluster/ec/src/ec-common.c
++++ b/xlators/cluster/ec/src/ec-common.c
+@@ -2240,7 +2240,7 @@ ec_unlocked(call_frame_t *frame, void *cookie, xlator_t *this, int32_t op_ret,
+ 
+     if (op_ret < 0) {
+         gf_msg(this->name, GF_LOG_WARNING, op_errno, EC_MSG_UNLOCK_FAILED,
+-               "entry/inode unlocking failed (%s)", ec_fop_name(link->fop->id));
++               "entry/inode unlocking failed :(%s)", ec_msg_str(link->fop));
+     } else {
+         ec_trace("UNLOCKED", link->fop, "lock=%p", link->lock);
+     }
+diff --git a/xlators/features/locks/src/inodelk.c b/xlators/features/locks/src/inodelk.c
+index df00ede..a9c42f1 100644
+--- a/xlators/features/locks/src/inodelk.c
++++ b/xlators/features/locks/src/inodelk.c
+@@ -502,22 +502,26 @@ static pl_inode_lock_t *
+ __inode_unlock_lock(xlator_t *this, pl_inode_lock_t *lock, pl_dom_list_t *dom)
+ {
+     pl_inode_lock_t *conf = NULL;
++    inode_t *inode = NULL;
++
++    inode = lock->pl_inode->inode;
+ 
+     conf = find_matching_inodelk(lock, dom);
+     if (!conf) {
+         gf_log(this->name, GF_LOG_ERROR,
+                " Matching lock not found for unlock %llu-%llu, by %s "
+-               "on %p",
++               "on %p for gfid:%s",
+                (unsigned long long)lock->fl_start,
+                (unsigned long long)lock->fl_end, lkowner_utoa(&lock->owner),
+-               lock->client);
++               lock->client, inode ? uuid_utoa(inode->gfid) : "UNKNOWN");
+         goto out;
+     }
+     __delete_inode_lock(conf);
+     gf_log(this->name, GF_LOG_DEBUG,
+-           " Matching lock found for unlock %llu-%llu, by %s on %p",
++           " Matching lock found for unlock %llu-%llu, by %s on %p for gfid:%s",
+            (unsigned long long)lock->fl_start, (unsigned long long)lock->fl_end,
+-           lkowner_utoa(&lock->owner), lock->client);
++           lkowner_utoa(&lock->owner), lock->client,
++           inode ? uuid_utoa(inode->gfid) : "UNKNOWN");
+ 
+ out:
+     return conf;
+-- 
+1.8.3.1
+

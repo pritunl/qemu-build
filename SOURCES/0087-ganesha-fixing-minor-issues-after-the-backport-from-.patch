@@ -1,0 +1,89 @@
+From 144f2eb56d1bbecc9c455065755f41ec81974e3e Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Sun, 7 Apr 2019 21:54:07 +0530
+Subject: [PATCH 087/124] ganesha : fixing minor issues after the backport from
+ 3.4
+
+label : DOWNSTREAM ONLY
+
+Change-Id: Ib0f6d8728d2e33da63ed4baab0bb981a0b06a8e0
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167168
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Kaleb Keithley <kkeithle@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfs.spec.in                            | 20 +++++++++++++++++---
+ xlators/mgmt/glusterd/src/glusterd-ganesha.c |  2 +-
+ 2 files changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index e0607ba..f6b823d 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -883,6 +883,15 @@ sed -i 's|option working-directory /etc/glusterd|option working-directory %{_sha
+ install -D -p -m 0644 extras/glusterfs-logrotate \
+     %{buildroot}%{_sysconfdir}/logrotate.d/glusterfs
+ 
++# ganesha ghosts
++%if ( 0%{!?_without_server:1} )
++mkdir -p %{buildroot}%{_sysconfdir}/ganesha
++touch %{buildroot}%{_sysconfdir}/ganesha/ganesha-ha.conf
++mkdir -p %{buildroot}%{_localstatedir}/run/gluster/shared_storage/nfs-ganesha/
++touch %{buildroot}%{_localstatedir}/run/gluster/shared_storage/nfs-ganesha/ganesha.conf
++touch %{buildroot}%{_localstatedir}/run/gluster/shared_storage/nfs-ganesha/ganesha-ha.conf
++%endif
++
+ %if ( 0%{!?_without_georeplication:1} )
+ mkdir -p %{buildroot}%{_sharedstatedir}/glusterd/geo-replication
+ touch %{buildroot}%{_sharedstatedir}/glusterd/geo-replication/gsyncd_template.conf
+@@ -1197,7 +1206,7 @@ exit 0
+ 
+ %if ( 0%{?_without_server:1} )
+ #exclude ganesha related files
+-%exclude %{_sysconfdir}/ganesha/*
++%exclude %{_sysconfdir}/ganesha/ganesha-ha.conf.sample
+ %exclude %{_libexecdir}/ganesha/*
+ %exclude %{_prefix}/lib/ocf/resource.d/heartbeat/*
+ %endif
+@@ -1376,9 +1385,15 @@ exit 0
+ 
+ %if ( 0%{!?_without_server:1} )
+ %files ganesha
+-%{_sysconfdir}/ganesha/*
++%dir %{_libexecdir}/ganesha
++%{_sysconfdir}/ganesha/ganesha-ha.conf.sample
+ %{_libexecdir}/ganesha/*
+ %{_prefix}/lib/ocf/resource.d/heartbeat/*
++%{_sharedstatedir}/glusterd/hooks/1/start/post/S31ganesha-start.sh
++%ghost      %attr(0644,-,-) %config(noreplace) %{_sysconfdir}/ganesha/ganesha-ha.conf
++%ghost %dir %attr(0755,-,-) %{_localstatedir}/run/gluster/shared_storage/nfs-ganesha
++%ghost      %attr(0644,-,-) %config(noreplace) %{_localstatedir}/run/gluster/shared_storage/nfs-ganesha/ganesha.conf
++%ghost      %attr(0644,-,-) %config(noreplace) %{_localstatedir}/run/gluster/shared_storage/nfs-ganesha/ganesha-ha.conf
+ %endif
+ 
+ %if ( 0%{!?_without_ocf:1} )
+@@ -1508,7 +1523,6 @@ exit 0
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/start/post
+             %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/start/post/S29CTDBsetup.sh
+             %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/start/post/S30samba-start.sh
+-            %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/start/post/S31ganesha-start.sh
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/start/pre
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/stop
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/stop/post
+diff --git a/xlators/mgmt/glusterd/src/glusterd-ganesha.c b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+index d882105..0a16925 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-ganesha.c
++++ b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+@@ -278,7 +278,7 @@ glusterd_op_stage_set_ganesha(dict_t *dict, char **op_errstr)
+         goto out;
+     }
+ 
+-    if (strcmp(value, "enable")) {
++    if (strcmp(value, "enable") == 0) {
+         ret = start_ganesha(op_errstr);
+         if (ret) {
+             gf_msg(THIS->name, GF_LOG_ERROR, 0, GD_MSG_NFS_GNS_START_FAIL,
+-- 
+1.8.3.1
+

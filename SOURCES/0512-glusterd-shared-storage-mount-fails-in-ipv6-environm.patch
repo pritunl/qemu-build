@@ -1,0 +1,105 @@
+From c963653a89c3f6466af9a3e8f19246a7907f7f8c Mon Sep 17 00:00:00 2001
+From: nik-redhat <nladha@redhat.com>
+Date: Thu, 30 Jul 2020 13:04:52 +0530
+Subject: [PATCH 512/517] glusterd: shared storage mount fails in ipv6
+ environment
+
+Issue:
+In case of ipv6 environment, the mounting of glusterd_shared_storage
+volume fails as it doesn't recognises the ipv6 enviornment.
+
+Fix:
+In case of ipv6 environment, the address-family is passed
+to the hooks script on creating shared-storage, then depending
+upon the address-family --xlator-option=transport.address-family=inet6
+option is added to the mount command, and the mounting succeeds.
+
+>Fixes: #1406
+>
+>Change-Id: Ib1888c34d85e6c01618b0ba214cbe1f57576908d
+>Signed-off-by: nik-redhat <nladha@redhat.com>
+
+Upstream patch: https://review.gluster.org/c/glusterfs/+/24797
+BUG: 1856574
+
+Change-Id: Ib1888c34d85e6c01618b0ba214cbe1f57576908d
+Signed-off-by: nik-redhat <nladha@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/221844
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Srijan Sivakumar <ssivakum@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ .../set/post/S32gluster_enable_shared_storage.sh      | 11 +++++++++--
+ xlators/mgmt/glusterd/src/glusterd-hooks.c            | 19 +++++++++++++++++++
+ 2 files changed, 28 insertions(+), 2 deletions(-)
+
+diff --git a/extras/hook-scripts/set/post/S32gluster_enable_shared_storage.sh b/extras/hook-scripts/set/post/S32gluster_enable_shared_storage.sh
+index 3bae37c..9597503 100755
+--- a/extras/hook-scripts/set/post/S32gluster_enable_shared_storage.sh
++++ b/extras/hook-scripts/set/post/S32gluster_enable_shared_storage.sh
+@@ -104,8 +104,15 @@ function check_volume_status()
+     echo $status
+ }
+ 
+-mount_cmd="mount -t glusterfs $local_node_hostname:/gluster_shared_storage \
+-           /run/gluster/shared_storage"
++key=`echo $5 | cut -d '=' -f 1`
++val=`echo $5 | cut -d '=' -f 2`
++if [ "$key" == "transport.address-family" ]; then
++    mount_cmd="mount -t glusterfs -o xlator-option=transport.address-family=inet6 \
++               $local_node_hostname:/gluster_shared_storage /var/run/gluster/shared_storage"
++else
++    mount_cmd="mount -t glusterfs $local_node_hostname:/gluster_shared_storage \
++           /var/run/gluster/shared_storage"
++fi
+ 
+ if [ "$option" == "enable" ]; then
+     retry=0;
+diff --git a/xlators/mgmt/glusterd/src/glusterd-hooks.c b/xlators/mgmt/glusterd/src/glusterd-hooks.c
+index 216cdf7..4f0d775 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-hooks.c
++++ b/xlators/mgmt/glusterd/src/glusterd-hooks.c
+@@ -200,11 +200,16 @@ glusterd_hooks_set_volume_args(dict_t *dict, runner_t *runner)
+     int i = 0;
+     int count = 0;
+     int ret = -1;
++    int flag = 0;
+     char query[1024] = {
+         0,
+     };
+     char *key = NULL;
+     char *value = NULL;
++    char *inet_family = NULL;
++    xlator_t *this = NULL;
++    this = THIS;
++    GF_ASSERT(this);
+ 
+     ret = dict_get_int32(dict, "count", &count);
+     if (ret)
+@@ -228,9 +233,23 @@ glusterd_hooks_set_volume_args(dict_t *dict, runner_t *runner)
+             continue;
+ 
+         runner_argprintf(runner, "%s=%s", key, value);
++        if ((strncmp(key, "cluster.enable-shared-storage",
++                     SLEN("cluster.enable-shared-storage")) == 0 ||
++             strncmp(key, "enable-shared-storage",
++                     SLEN("enable-shared-storage")) == 0) &&
++            strncmp(value, "enable", SLEN("enable")) == 0)
++            flag = 1;
+     }
+ 
+     glusterd_hooks_add_custom_args(dict, runner);
++    if (flag == 1) {
++        ret = dict_get_str_sizen(this->options, "transport.address-family",
++                                 &inet_family);
++        if (!ret) {
++            runner_argprintf(runner, "transport.address-family=%s",
++                             inet_family);
++        }
++    }
+ 
+     ret = 0;
+ out:
+-- 
+1.8.3.1
+

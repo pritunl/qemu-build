@@ -1,0 +1,89 @@
+From 37555b6c83d3a979033111a754ee1728dab254f5 Mon Sep 17 00:00:00 2001
+From: Hari Gowtham <hgowtham@redhat.com>
+Date: Wed, 18 Sep 2019 17:38:52 +0530
+Subject: [PATCH 297/297] rpmbuild: fixing the build errors with 2a905a8ae
+
+Label: DOWNSTREAM ONLY
+
+Have added a Makefile inside extras/quota to remove the
+No rule to make target error for quota/log_accounting.sh
+
+Change-Id: Ia3f6b3fa21a0de7eb3bdb31b3d205139df412aca
+fixes: bz#1719171
+Signed-off-by: Hari Gowtham <hgowtham@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/181326
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Aravinda Vishwanathapura Krishna Murthy <avishwan@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ configure.ac             | 1 +
+ extras/Makefile.am       | 6 +-----
+ extras/quota/Makefile.am | 8 ++++++++
+ 3 files changed, 10 insertions(+), 5 deletions(-)
+ create mode 100644 extras/quota/Makefile.am
+
+diff --git a/configure.ac b/configure.ac
+index f597b86..327733e 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -232,6 +232,7 @@ AC_CONFIG_FILES([Makefile
+                 extras/hook-scripts/reset/pre/Makefile
+                 extras/python/Makefile
+                 extras/snap_scheduler/Makefile
++                extras/quota/Makefile
+                 events/Makefile
+                 events/src/Makefile
+                 events/src/eventsapiconf.py
+diff --git a/extras/Makefile.am b/extras/Makefile.am
+index 8cbfda1..31ccdf5 100644
+--- a/extras/Makefile.am
++++ b/extras/Makefile.am
+@@ -12,7 +12,7 @@ EditorMode_DATA = glusterfs-mode.el glusterfs.vim
+ 
+ SUBDIRS = init.d systemd benchmarking hook-scripts $(OCF_SUBDIR) LinuxRPM \
+           $(GEOREP_EXTRAS_SUBDIR) snap_scheduler firewalld cliutils python \
+-		  ganesha
++		  ganesha quota
+ 
+ confdir = $(sysconfdir)/glusterfs
+ if WITH_SERVER
+@@ -30,14 +30,11 @@ endif
+ 
+ scriptsdir = $(datadir)/glusterfs/scripts
+ scripts_SCRIPTS = thin-arbiter/setup-thin-arbiter.sh
+-scripts_SCRIPTS += quota/log_accounting.sh
+ scripts_SCRIPTS += collect-system-stats.sh
+ scripts_SCRIPTS += identify-hangs.sh
+ if WITH_SERVER
+ scripts_SCRIPTS += post-upgrade-script-for-quota.sh \
+ 	pre-upgrade-script-for-quota.sh stop-all-gluster-processes.sh
+-scripts_SCRIPTS += quota/quota_fsck.py
+-scripts_SCRIPTS += quota/xattr_analysis.py
+ if USE_SYSTEMD
+ scripts_SCRIPTS += control-cpu-load.sh
+ scripts_SCRIPTS += control-mem.sh
+@@ -56,7 +53,6 @@ EXTRA_DIST = glusterfs-logrotate gluster-rsyslog-7.2.conf gluster-rsyslog-5.8.co
+ 	stop-all-gluster-processes.sh clang-checker.sh mount-shared-storage.sh \
+ 	control-cpu-load.sh control-mem.sh group-distributed-virt \
+ 	thin-arbiter/thin-arbiter.vol thin-arbiter/setup-thin-arbiter.sh \
+-	quota/xattr_analysis.py quota/quota_fsck.py quota/log_accounting.sh \
+ 	collect-system-stats.sh identify-hangs.sh
+ 
+ if WITH_SERVER
+diff --git a/extras/quota/Makefile.am b/extras/quota/Makefile.am
+new file mode 100644
+index 0000000..cdb6be1
+--- /dev/null
++++ b/extras/quota/Makefile.am
+@@ -0,0 +1,8 @@
++scriptsdir = $(datadir)/glusterfs/scripts
++scripts_SCRIPTS =  log_accounting.sh
++
++if WITH_SERVER
++scripts_SCRIPTS += xattr_analysis.py quota_fsck.py
++endif
++
++EXTRA_DIST = log_accounting.sh xattr_analysis.py quota_fsck.py
+-- 
+1.8.3.1
+

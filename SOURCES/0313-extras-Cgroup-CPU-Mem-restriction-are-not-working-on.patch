@@ -1,0 +1,60 @@
+From 23091d24d34102c7938ae2890930b73c89c5a8e7 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Tue, 22 Oct 2019 18:52:25 +0530
+Subject: [PATCH 313/313] extras: Cgroup(CPU/Mem) restriction are not working
+ on gluster process
+
+Problem: After Configure the Cgroup(CPU/MEM) limit to a gluster processes
+         resource(CPU/MEM) limits are not applicable to the gluster
+         processes.Cgroup limits are not applicable because all threads are
+         not moved into a newly created cgroup to apply restriction.
+
+Solution: To move a gluster thread to newly created cgroup change the
+          condition in script
+
+> Change-Id: I8ad81c69200e4ec43a74f6052481551cf835354c
+> Fixes: bz#1764208
+> (Cherry pick from commit 38de02012948013a88597545cf49380ce97f6fa7)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/23599/)
+> Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+
+Change-Id: I8ad81c69200e4ec43a74f6052481551cf835354c
+BUG: 1764202
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/183730
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/control-cpu-load.sh | 2 +-
+ extras/control-mem.sh      | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/extras/control-cpu-load.sh b/extras/control-cpu-load.sh
+index b739c82..52dcf62 100755
+--- a/extras/control-cpu-load.sh
++++ b/extras/control-cpu-load.sh
+@@ -104,7 +104,7 @@ echo "Setting $quota_value to cpu.cfs_quota_us for gluster_cgroup."
+ echo ${quota_value} > ${LOC}/${cgroup_name}/cpu.cfs_quota_us
+ 
+ if ps -T -p ${daemon_pid} | grep gluster > /dev/null; then
+-  for thid in `ps -T -p ${daemon_pid} | grep gluster | awk -F " " '{print $2}'`;
++  for thid in `ps -T -p ${daemon_pid} | grep -v SPID | awk -F " " '{print $2}'`;
+     do
+       echo ${thid} > ${LOC}/${cgroup_name}/tasks ;
+     done
+diff --git a/extras/control-mem.sh b/extras/control-mem.sh
+index 38aa2a0..91b36f8 100755
+--- a/extras/control-mem.sh
++++ b/extras/control-mem.sh
+@@ -116,7 +116,7 @@ else
+ fi
+ 
+ if ps -T -p ${daemon_pid} | grep gluster > /dev/null; then
+-  for thid in `ps -T -p ${daemon_pid} | grep gluster | awk -F " " '{print $2}'`;
++  for thid in `ps -T -p ${daemon_pid} | grep -v SPID | awk -F " " '{print $2}'`;
+     do
+       echo ${thid} > ${LOC}/${cgroup_name}/tasks ;
+     done
+-- 
+1.8.3.1
+

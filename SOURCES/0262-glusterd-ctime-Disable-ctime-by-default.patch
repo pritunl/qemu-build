@@ -1,0 +1,78 @@
+From c44c9f2003b703d64a2a06c53f5a2b85e9dc7a11 Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Wed, 31 Jul 2019 09:23:42 -0400
+Subject: [PATCH 262/262] glusterd/ctime: Disable ctime by default
+
+The ctime feature, in combination with gfid2path
+causes peformance dip on rename workloads. Hence
+disabling the feature by default.
+
+Change-Id: I280527eea4dc19bba39fb6a5e74760823a056dc9
+Label : DOWNSTREAM ONLY
+BUG: 1713890
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/177421
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-by: Amar Tumballi Suryanarayan <amarts@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-volgen.c     | 10 +++++++---
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c |  2 +-
+ xlators/storage/posix/src/posix-common.c        |  2 +-
+ 3 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volgen.c b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+index 5e0214e..539e8a5 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volgen.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+@@ -4382,14 +4382,18 @@ client_graph_builder(volgen_graph_t *graph, glusterd_volinfo_t *volinfo,
+             goto out;
+         }
+     }
+-    /* a. ret will be -1 if features.ctime is not set in the volinfo->dict which
+-     * means ctime should be loaded into the graph.
++    /* a. ret will be 0 (returned default) if features.ctime is not set
++     * in the volinfo->dict which means ctime should not be loaded into
++     * the graph. It is disabled by default.
+      * b. ret will be 1 if features.ctime is explicitly turned on through
+      * volume set and in that case ctime should be loaded into the graph.
+      * c. ret will be 0 if features.ctime is explicitly turned off and in that
+      * case ctime shouldn't be loaded into the graph.
+      */
+-    ret = dict_get_str_boolean(set_dict, "features.ctime", -1);
++    ret = dict_get_str_boolean(set_dict, "features.ctime", 0);
++    if (ret == -1)
++        goto out;
++
+     if (conf->op_version >= GD_OP_VERSION_5_0 && ret) {
+         xl = volgen_graph_add(graph, "features/utime", volname);
+         if (!xl) {
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index 7a83124..8ce338e 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -3680,7 +3680,7 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+     {.key = "features.ctime",
+      .voltype = "features/utime",
+      .validate_fn = validate_boolean,
+-     .value = "on",
++     .value = "off",
+      .option = "!utime",
+      .op_version = GD_OP_VERSION_4_1_0,
+      .description = "enable/disable utime translator on the volume.",
+diff --git a/xlators/storage/posix/src/posix-common.c b/xlators/storage/posix/src/posix-common.c
+index bfe2cb0..d738692 100644
+--- a/xlators/storage/posix/src/posix-common.c
++++ b/xlators/storage/posix/src/posix-common.c
+@@ -1374,7 +1374,7 @@ struct volume_options posix_options[] = {
+                     "SHA256 checksum. MD5 otherwise."},
+     {.key = {"ctime"},
+      .type = GF_OPTION_TYPE_BOOL,
+-     .default_value = "on",
++     .default_value = "off",
+      .flags = OPT_FLAG_SETTABLE | OPT_FLAG_DOC,
+      .op_version = {GD_OP_VERSION_4_1_0},
+      .tags = {"ctime"},
+-- 
+1.8.3.1
+

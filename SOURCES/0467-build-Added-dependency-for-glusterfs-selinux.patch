@@ -1,0 +1,38 @@
+From 9176ee8f10c3c33f31d00261995ed27e8680934a Mon Sep 17 00:00:00 2001
+From: Rinku Kothiya <rkothiya@redhat.com>
+Date: Thu, 3 Sep 2020 11:46:38 +0000
+Subject: [PATCH 467/467] build: Added dependency for glusterfs-selinux
+
+> Fixes: #1442
+> Upstream-patch: https://review.gluster.org/#/c/glusterfs/+/24876/
+> Change-Id: I7d79bceff329db4d525bc8a77ba7ffe41bf53c97
+> Signed-off-by: Rinku Kothiya <rkothiya@redhat.com>
+
+BUG: 1460657
+
+Change-Id: I7d79bceff329db4d525bc8a77ba7ffe41bf53c97
+Signed-off-by: Rinku Kothiya <rkothiya@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/210637
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfs.spec.in | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 9def416..ed6bdf3 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -650,6 +650,9 @@ Summary:          Clustered file-system server
+ Requires:         %{name}%{?_isa} = %{version}-%{release}
+ Requires:         %{name}-cli%{?_isa} = %{version}-%{release}
+ Requires:         %{name}-libs%{?_isa} = %{version}-%{release}
++%if ( 0%{?fedora} && 0%{?fedora} >= 30  || ( 0%{?rhel} && 0%{?rhel} >= 8 ) )
++Requires:         glusterfs-selinux >= 0.1.0-2
++%endif
+ # some daemons (like quota) use a fuse-mount, glusterfsd is part of -fuse
+ Requires:         %{name}-fuse%{?_isa} = %{version}-%{release}
+ # self-heal daemon, rebalance, nfs-server etc. are actually clients
+-- 
+1.8.3.1
+

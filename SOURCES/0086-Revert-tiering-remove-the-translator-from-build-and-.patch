@@ -1,0 +1,3194 @@
+From 06adac5dbac7b2067232270cbee12931400f7824 Mon Sep 17 00:00:00 2001
+From: Hari Gowtham <hgowtham@redhat.com>
+Date: Sat, 6 Apr 2019 17:00:47 +0530
+Subject: [PATCH 086/124] Revert "tiering: remove the translator from build and
+ glusterd"
+
+This reverts commit 55a6ba56bea9ec0d3316c005300c514ea3ab0e54.
+Add the test files and glusterd related changes.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Ib704b7142a82cb1e94538a48af916730992a5701
+Signed-off-by: Hari Gowtham <hgowtham@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/166246
+Reviewed-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-by: Nithya Balachandran <nbalacha@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ MAINTAINERS                                        |  18 +
+ tests/basic/afr/granular-esh/cli.t                 |  30 +-
+ ...1214222-directories_missing_after_attach_tier.t |  61 ++
+ ...60185-donot-allow-detach-commit-unnecessarily.t |  47 ++
+ tests/basic/tier/ctr-rename-overwrite.t            |  50 ++
+ tests/basic/tier/file_lock.c                       |  72 ++
+ tests/basic/tier/file_with_spaces.t                |  71 ++
+ tests/basic/tier/fops-during-migration-pause.t     |  89 +++
+ tests/basic/tier/fops-during-migration.t           | 105 +++
+ tests/basic/tier/frequency-counters.t              |  82 +++
+ tests/basic/tier/legacy-many.t                     |  92 +++
+ tests/basic/tier/locked_file_migration.t           |  80 +++
+ tests/basic/tier/new-tier-cmds.t                   | 129 ++++
+ tests/basic/tier/readdir-during-migration.t        |  65 ++
+ tests/basic/tier/record-metadata-heat.t            | 106 +++
+ tests/basic/tier/tier-heald.t                      |  98 +++
+ tests/basic/tier/tier-snapshot.t                   |  47 ++
+ tests/basic/tier/tier.t                            | 219 +++++++
+ tests/basic/tier/tier_lookup_heal.t                |  69 ++
+ tests/basic/tier/tierd_check.t                     | 128 ++++
+ tests/basic/tier/unlink-during-migration.t         |  92 +++
+ ...03028-Rebalance-glusterd-rpc-connection-issue.t |  78 +++
+ tests/bugs/quota/bug-1288474.t                     |  51 ++
+ .../bug-1290965-detect-bitrotten-objects.t         |  53 ++
+ .../tier/bug-1205545-CTR-and-trash-integration.t   |  72 ++
+ tests/bugs/tier/bug-1279376-rename-demoted-file.t  |  93 +++
+ xlators/mgmt/glusterd/src/glusterd-volgen.c        |  75 +++
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c    | 723 +++++++++++++++++++++
+ 28 files changed, 2894 insertions(+), 1 deletion(-)
+ create mode 100755 tests/basic/tier/bug-1214222-directories_missing_after_attach_tier.t
+ create mode 100644 tests/basic/tier/bug-1260185-donot-allow-detach-commit-unnecessarily.t
+ create mode 100755 tests/basic/tier/ctr-rename-overwrite.t
+ create mode 100644 tests/basic/tier/file_lock.c
+ create mode 100755 tests/basic/tier/file_with_spaces.t
+ create mode 100755 tests/basic/tier/fops-during-migration-pause.t
+ create mode 100755 tests/basic/tier/fops-during-migration.t
+ create mode 100644 tests/basic/tier/frequency-counters.t
+ create mode 100644 tests/basic/tier/legacy-many.t
+ create mode 100755 tests/basic/tier/locked_file_migration.t
+ create mode 100644 tests/basic/tier/new-tier-cmds.t
+ create mode 100644 tests/basic/tier/readdir-during-migration.t
+ create mode 100755 tests/basic/tier/record-metadata-heat.t
+ create mode 100644 tests/basic/tier/tier-heald.t
+ create mode 100644 tests/basic/tier/tier-snapshot.t
+ create mode 100755 tests/basic/tier/tier.t
+ create mode 100755 tests/basic/tier/tier_lookup_heal.t
+ create mode 100644 tests/basic/tier/tierd_check.t
+ create mode 100755 tests/basic/tier/unlink-during-migration.t
+ create mode 100644 tests/bugs/glusterd/bug-1303028-Rebalance-glusterd-rpc-connection-issue.t
+ create mode 100755 tests/bugs/quota/bug-1288474.t
+ create mode 100644 tests/bugs/replicate/bug-1290965-detect-bitrotten-objects.t
+ create mode 100644 tests/bugs/tier/bug-1205545-CTR-and-trash-integration.t
+ create mode 100755 tests/bugs/tier/bug-1279376-rename-demoted-file.t
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index b1fc0ee..1f4c93a 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -103,6 +103,12 @@ P: Kotresh HR <khiremat@redhat.com>
+ S: Maintained
+ F: xlators/features/changelog/
+ 
++Changetimerecorder
++M: Shyamsundar Ranganathan <srangana@redhat.com>
++P: Hari Gowtham <hgowtham@redhat.com>
++S: Maintained
++F: xlators/features/changetimerecorder/
++
+ Decompounder
+ M: Krutika Dhananjay <kdhananj@redhat.com>
+ P: Pranith Karampuri <pkarampu@redhat.com>
+@@ -248,6 +254,12 @@ P: Xavier Hernandez  <xhernandez@redhat.com>
+ S: Maintained
+ F: xlators/features/shard/
+ 
++Tiering
++M: Shyamsundar Ranganathan <srangana@redhat.com>
++P: Hari Gowtham <hgowtham@redhat.com>
++S: Maintained
++F: xlators/cluster/dht/src/tier.c
++
+ Trash
+ M: Anoop C S <anoopcs@redhat.com>
+ M: Jiffin Tony Thottan <jthottan@redhat.com>
+@@ -327,6 +339,12 @@ P: Soumya Koduri <skoduri@redhat.com>
+ S: Maintained
+ F: api/
+ 
++libgfdb
++M: Shyamsundar Ranganathan <srangana@redhat.com>
++P: Hari Gowtham <hgowtham@redhat.com>
++S: Maintained
++F: libglusterfs/src/gfdb/
++
+ libglusterfs
+ M: Amar Tumballi <amarts@redhat.com>
+ M: Jeff Darcy <jeff@pl.atyp.us>
+diff --git a/tests/basic/afr/granular-esh/cli.t b/tests/basic/afr/granular-esh/cli.t
+index 10b6c63..995d93e 100644
+--- a/tests/basic/afr/granular-esh/cli.t
++++ b/tests/basic/afr/granular-esh/cli.t
+@@ -11,7 +11,7 @@ TESTS_EXPECTED_IN_LOOP=4
+ TEST glusterd
+ TEST pidof glusterd
+ 
+-TEST   $CLI volume create $V0 replica 3 $H0:$B0/${V0}{0,1,2}
++TEST   $CLI volume create $V0 replica 2 $H0:$B0/${V0}{0,1}
+ # Test that enabling the option should work on a newly created volume
+ TEST   $CLI volume set $V0 cluster.granular-entry-heal on
+ TEST   $CLI volume set $V0 cluster.granular-entry-heal off
+@@ -25,6 +25,34 @@ TEST $CLI volume start $V1
+ TEST ! $CLI volume heal $V1 granular-entry-heal enable
+ TEST ! $CLI volume heal $V1 granular-entry-heal disable
+ 
++#######################
++###### TIER TEST ######
++#######################
++# Execute the same command on a disperse + replicate tiered volume and make
++# sure the option is set on the replicate leg of the volume
++TEST $CLI volume tier $V1 attach replica 2 $H0:$B0/${V1}{3,4}
++TEST $CLI volume heal $V1 granular-entry-heal enable
++EXPECT "enable" volume_get_field $V1 cluster.granular-entry-heal
++TEST $CLI volume heal $V1 granular-entry-heal disable
++EXPECT "disable" volume_get_field $V1 cluster.granular-entry-heal
++
++# Kill a disperse brick and make heal be pending on the volume.
++TEST kill_brick $V1 $H0 $B0/${V1}0
++
++# Now make sure that one offline brick in disperse does not affect enabling the
++# option on the volume.
++TEST $CLI volume heal $V1 granular-entry-heal enable
++EXPECT "enable" volume_get_field $V1 cluster.granular-entry-heal
++TEST $CLI volume heal $V1 granular-entry-heal disable
++EXPECT "disable" volume_get_field $V1 cluster.granular-entry-heal
++
++# Now kill a replicate brick.
++TEST kill_brick $V1 $H0 $B0/${V1}3
++# Now make sure that one offline brick in replicate causes the command to be
++# failed.
++TEST ! $CLI volume heal $V1 granular-entry-heal enable
++EXPECT "disable" volume_get_field $V1 cluster.granular-entry-heal
++
+ ######################
+ ### REPLICATE TEST ###
+ ######################
+diff --git a/tests/basic/tier/bug-1214222-directories_missing_after_attach_tier.t b/tests/basic/tier/bug-1214222-directories_missing_after_attach_tier.t
+new file mode 100755
+index 0000000..f9166d7
+--- /dev/null
++++ b/tests/basic/tier/bug-1214222-directories_missing_after_attach_tier.t
+@@ -0,0 +1,61 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../tier.rc
++
++LAST_BRICK=3
++CACHE_BRICK_FIRST=4
++CACHE_BRICK_LAST=5
++DEMOTE_TIMEOUT=12
++PROMOTE_TIMEOUT=5
++
++
++LAST_BRICK=1
++CACHE_BRICK=2
++DEMOTE_TIMEOUT=12
++PROMOTE_TIMEOUT=5
++MIGRATION_TIMEOUT=10
++cleanup
++
++
++TEST glusterd
++
++TEST $CLI volume create $V0 replica 2 $H0:$B0/${V0}{0..$LAST_BRICK}
++TEST $CLI volume start $V0
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0;
++
++# Basic operations.
++cd $M0
++TEST stat .
++TEST mkdir d1
++TEST [ -d d1 ]
++TEST touch file1
++TEST [ -e file1 ]
++
++TEST $CLI volume tier $V0 attach replica 2 $H0:$B0/${V0}$CACHE_BRICK_FIRST $H0:$B0/${V0}$CACHE_BRICK_LAST
++TEST $CLI volume set $V0 features.ctr-enabled on
++
++#check whether the directory's and files are present on mount or not.
++TEST [ -d d1 ]
++TEST [ -e file1 ]
++
++cd
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0;
++
++tier_status ()
++{
++	$CLI volume tier $V0 detach status | grep progress | wc -l
++}
++
++TEST $CLI volume tier $V0 detach start
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "0" tier_status
++TEST $CLI volume tier $V0 detach commit
++
++EXPECT "0" confirm_tier_removed ${V0}${CACHE_BRICK_FIRST}
++
++EXPECT_WITHIN $REBALANCE_TIMEOUT "0" confirm_vol_stopped $V0
++
++cleanup;
++
++#G_TESTDEF_TEST_STATUS_NETBSD7=BAD_TEST,BUG=000000
+diff --git a/tests/basic/tier/bug-1260185-donot-allow-detach-commit-unnecessarily.t b/tests/basic/tier/bug-1260185-donot-allow-detach-commit-unnecessarily.t
+new file mode 100644
+index 0000000..6efbe32
+--- /dev/null
++++ b/tests/basic/tier/bug-1260185-donot-allow-detach-commit-unnecessarily.t
+@@ -0,0 +1,47 @@
++#!/bin/bash
++
++## Test case for BZ: 1260185
++## Do not allow detach-tier commit without "force" option or without
++## user have not started "detach-tier start" operation
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../cluster.rc
++. $(dirname $0)/../../tier.rc
++
++cleanup;
++
++## Start glusterd
++TEST glusterd;
++TEST pidof glusterd;
++
++## Lets create and start the volume
++TEST $CLI volume create $V0 $H0:$B0/${V0}{1..2}
++TEST $CLI volume start $V0
++
++## Perform attach-tier operation on volume $V0
++TEST $CLI volume tier $V0 attach $H0:$B0/${V0}{3..4}
++
++## detach-tier commit operation without force option on volume $V0
++## should not succeed
++TEST ! $CLI --mode=script volume tier $V0 detach commit
++
++## detach-tier commit operation with force option on volume $V0
++## should succeed
++TEST  $CLI volume tier $V0 detach force
++
++sleep 3
++
++## Again performing attach-tier operation on volume $V0
++TEST $CLI volume tier $V0 attach $H0:$B0/${V0}{5..6}
++
++## Do detach-tier start on volume $V0
++TEST $CLI volume tier $V0 detach start
++
++## Now detach-tier commit on volume $V0 should succeed.
++## wait for the detach to complete
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" tier_detach_commit_for_single_node
++
++cleanup;
++
++#G_TESTDEF_TEST_STATUS_NETBSD7=KNOWN_ISSUE,BUG=1517961
+diff --git a/tests/basic/tier/ctr-rename-overwrite.t b/tests/basic/tier/ctr-rename-overwrite.t
+new file mode 100755
+index 0000000..73ee758
+--- /dev/null
++++ b/tests/basic/tier/ctr-rename-overwrite.t
+@@ -0,0 +1,50 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../tier.rc
++
++LAST_BRICK=1
++CACHE_BRICK_FIRST=4
++CACHE_BRICK_LAST=5
++
++DEMOTE_FREQ=5
++PROMOTE_FREQ=5
++
++cleanup
++
++# Start glusterd
++TEST glusterd
++TEST pidof glusterd
++
++# Set-up tier cluster
++TEST $CLI volume create $V0 replica 2 $H0:$B0/${V0}{0..$LAST_BRICK}
++TEST $CLI volume start $V0
++TEST $CLI volume tier $V0 attach replica 2 $H0:$B0/${V0}$CACHE_BRICK_FIRST $H0:$B0/${V0}$CACHE_BRICK_LAST
++
++TEST $CLI volume set $V0 cluster.tier-demote-frequency $DEMOTE_FREQ
++TEST $CLI volume set $V0 cluster.tier-promote-frequency $PROMOTE_FREQ
++
++# Start and mount the volume after enabling CTR
++TEST $CLI volume set $V0 features.ctr-enabled on
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0;
++
++# create two files
++echo "hello world" > $M0/file1
++echo "hello world" > $M0/file2
++
++# db in hot brick shows 4 record. 2 for file1 and 2 for file2
++ENTRY_COUNT=$(echo "select * from gf_file_tb; select * from gf_flink_tb;" | \
++        sqlite3 $B0/${V0}5/.glusterfs/${V0}5.db | wc -l )
++TEST [ $ENTRY_COUNT -eq 4 ]
++
++#overwrite file2 with file1
++mv -f $M0/file1 $M0/file2
++
++# Now the db in hot tier should have only 2 records for file1.
++ENTRY_COUNT=$(echo "select * from gf_file_tb; select * from gf_flink_tb;" | \
++        sqlite3 $B0/${V0}5/.glusterfs/${V0}5.db | wc -l )
++TEST [ $ENTRY_COUNT -eq 2 ]
++
++cleanup
++#G_TESTDEF_TEST_STATUS_NETBSD7=KNOWN_ISSUE,BUG=000000
+diff --git a/tests/basic/tier/file_lock.c b/tests/basic/tier/file_lock.c
+new file mode 100644
+index 0000000..20fdbc0
+--- /dev/null
++++ b/tests/basic/tier/file_lock.c
+@@ -0,0 +1,72 @@
++#include <stdio.h>
++#include <stdlib.h>
++#include <unistd.h>
++#include <fcntl.h>
++
++void
++usage(void)
++{
++    printf("Usage: testlock <filepath> [R|W]\n");
++    return;
++}
++
++int
++main(int argc, char *argv[])
++{
++    char *file_path = NULL;
++    int fd = -1;
++    struct flock lock = {0};
++    int ret = -1;
++    int c = 0;
++
++    if (argc != 3) {
++        usage();
++        exit(1);
++    }
++
++    file_path = argv[1];
++    fd = open(file_path, O_RDWR);
++
++    if (-1 == fd) {
++        printf("Failed to open file %s. %m\n", file_path);
++        exit(1);
++    }
++
++    /* TODO: Check for invalid input*/
++
++    if (!strcmp(argv[2], "W")) {
++        lock.l_type = F_WRLCK;
++        printf("Taking write lock\n");
++
++    } else {
++        lock.l_type = F_RDLCK;
++        printf("Taking read lock\n");
++    }
++
++    lock.l_whence = SEEK_SET;
++    lock.l_start = 0;
++    lock.l_len = 0;
++    lock.l_pid = getpid();
++
++    printf("Acquiring lock on %s\n", file_path);
++    ret = fcntl(fd, F_SETLK, &lock);
++    if (ret) {
++        printf("Failed to acquire lock on %s (%m)\n", file_path);
++        close(fd);
++        exit(1);
++    }
++
++    sleep(10);
++
++    /*Unlock*/
++
++    printf("Releasing lock on %s\n", file_path);
++    lock.l_type = F_UNLCK;
++    ret = fcntl(fd, F_SETLK, &lock);
++    if (ret) {
++        printf("Failed to release lock on %s (%m)\n", file_path);
++    }
++
++    close(fd);
++    return ret;
++}
+diff --git a/tests/basic/tier/file_with_spaces.t b/tests/basic/tier/file_with_spaces.t
+new file mode 100755
+index 0000000..919b900
+--- /dev/null
++++ b/tests/basic/tier/file_with_spaces.t
+@@ -0,0 +1,71 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../tier.rc
++
++NUM_BRICKS=3
++DEMOTE_FREQ=5
++DEMOTE_TIMEOUT=10
++PROMOTE_FREQ=5
++
++FILE_SPACE="Testing filenames with spaces.log"
++
++
++# Creates a tiered volume with pure distribute hot and cold tiers
++# Both hot and cold tiers will have an equal number of bricks.
++
++function create_dist_tier_vol () {
++        mkdir $B0/cold
++        mkdir $B0/hot
++        TEST $CLI volume create $V0 $H0:$B0/cold/${V0}{0..$1}
++        TEST $CLI volume set $V0 performance.quick-read off
++        TEST $CLI volume set $V0 performance.io-cache off
++        TEST $CLI volume set $V0 features.ctr-enabled on
++        TEST $CLI volume start $V0
++        TEST $CLI volume tier $V0 attach $H0:$B0/hot/${V0}{0..$1}
++        TEST $CLI volume set $V0 cluster.tier-demote-frequency $DEMOTE_FREQ
++        TEST $CLI volume set $V0 cluster.tier-promote-frequency $PROMOTE_FREQ
++        TEST $CLI volume set $V0 cluster.read-freq-threshold 0
++        TEST $CLI volume set $V0 cluster.write-freq-threshold 0
++        TEST $CLI volume set $V0 cluster.tier-mode test
++}
++
++
++cleanup;
++
++#Basic checks
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume info
++
++
++#Create and start a tiered volume
++create_dist_tier_vol $NUM_BRICKS
++
++# Mount FUSE
++TEST glusterfs -s $H0 --volfile-id $V0 $M0
++
++
++# The file will be created on the hot tier
++
++touch "$M0/$FILE_SPACE"
++
++# Get the path of the file on the hot tier
++HPATH=`find $B0/hot/ -name  "$FILE_SPACE"`
++echo "File path on hot tier: "$HPATH
++
++EXPECT "yes" exists_and_regular_file $HPATH
++
++# Wait for the tier process to demote the file
++sleep $DEMOTE_TIMEOUT
++
++# Get the path of the file on the cold tier
++CPATH=`find $B0/cold/ -name  "$FILE_SPACE"`
++echo "File path on cold tier: "$CPATH
++
++EXPECT "yes" exists_and_regular_file $CPATH
++
++cleanup;
++
++#G_TESTDEF_TEST_STATUS_NETBSD7=KNOWN_ISSUE,BUG=000000
+diff --git a/tests/basic/tier/fops-during-migration-pause.t b/tests/basic/tier/fops-during-migration-pause.t
+new file mode 100755
+index 0000000..46fc6e4
+--- /dev/null
++++ b/tests/basic/tier/fops-during-migration-pause.t
+@@ -0,0 +1,89 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../tier.rc
++
++NUM_BRICKS=3
++DEMOTE_FREQ=10
++PROMOTE_FREQ=10
++
++TEST_STR="Testing write and truncate fops on tier migration"
++
++function is_sticky_set () {
++        echo $1
++        if [ -k $1 ];
++        then
++                echo "yes"
++        else
++                echo "no"
++        fi
++}
++
++
++# Creates a tiered volume with pure distribute hot and cold tiers
++# Both hot and cold tiers will have an equal number of bricks.
++
++function create_dist_tier_vol () {
++        mkdir $B0/cold
++        mkdir $B0/hot
++        TEST $CLI volume create $V0 $H0:$B0/cold/${V0}{0..$1}
++        TEST $CLI volume set $V0 performance.quick-read off
++        TEST $CLI volume set $V0 performance.io-cache off
++        TEST $CLI volume set $V0 features.ctr-enabled on
++        TEST $CLI volume start $V0
++        TEST $CLI volume tier $V0 attach $H0:$B0/hot/${V0}{0..$1}
++        TEST $CLI volume set $V0 cluster.tier-demote-frequency $DEMOTE_FREQ
++        TEST $CLI volume set $V0 cluster.tier-promote-frequency $PROMOTE_FREQ
++        TEST $CLI volume set $V0 cluster.read-freq-threshold 0
++        TEST $CLI volume set $V0 cluster.write-freq-threshold 0
++        TEST $CLI volume set $V0 cluster.tier-mode test
++}
++
++
++cleanup;
++
++#Basic checks
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume info
++
++
++#Create and start a tiered volume
++create_dist_tier_vol $NUM_BRICKS
++
++# Mount FUSE
++TEST glusterfs -s $H0 --volfile-id $V0 $M0
++
++TEST mkdir $M0/dir1
++
++# Create a large file (800MB), so that rebalance takes time
++# The file will be created on the hot tier
++sleep_until_mid_cycle $DEMOTE_FREQ
++dd if=/dev/zero of=$M0/dir1/FILE1 bs=256k count=5120
++
++# Get the path of the file on the hot tier
++HPATH=`find $B0/hot/ -name  FILE1`
++echo "File path on hot tier: "$HPATH
++
++
++# Wait for the tier process to demote the file
++EXPECT_WITHIN $REBALANCE_TIMEOUT "yes" is_sticky_set $HPATH
++
++TEST $CLI volume set $V0 cluster.tier-pause on
++
++# Wait for the tier process to finish migrating the file
++EXPECT_WITHIN $REBALANCE_TIMEOUT "no" is_sticky_set $HPATH
++
++# Get the path of the file on the cold tier
++CPATH=`find $B0/cold/ -name  FILE1`
++
++# make sure destination is empty
++TEST ! test -s $CPATH
++
++# make sure source exists and not empty
++TEST test -s $HPATH
++
++cleanup;
++
++#G_TESTDEF_TEST_STATUS_NETBSD7=KNOWN_ISSUE,BUG=000000
+diff --git a/tests/basic/tier/fops-during-migration.t b/tests/basic/tier/fops-during-migration.t
+new file mode 100755
+index 0000000..458c01e
+--- /dev/null
++++ b/tests/basic/tier/fops-during-migration.t
+@@ -0,0 +1,105 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../tier.rc
++
++
++NUM_BRICKS=3
++DEMOTE_FREQ=5
++PROMOTE_FREQ=5
++
++TEST_STR="Testing write and truncate fops on tier migration"
++
++
++# Creates a tiered volume with pure distribute hot and cold tiers
++# Both hot and cold tiers will have an equal number of bricks.
++
++function create_dist_tier_vol () {
++        mkdir $B0/cold
++        mkdir $B0/hot
++        TEST $CLI volume create $V0 $H0:$B0/cold/${V0}{0..$1}
++        TEST $CLI volume set $V0 performance.quick-read off
++        TEST $CLI volume set $V0 performance.io-cache off
++        TEST $CLI volume set $V0 features.ctr-enabled on
++        TEST $CLI volume set $V0 cluster.force-migration on
++        TEST $CLI volume start $V0
++        TEST $CLI volume tier $V0 attach $H0:$B0/hot/${V0}{0..$1}
++        TEST $CLI volume set $V0 cluster.tier-demote-frequency $DEMOTE_FREQ
++        TEST $CLI volume set $V0 cluster.tier-promote-frequency $PROMOTE_FREQ
++        TEST $CLI volume set $V0 cluster.read-freq-threshold 0
++        TEST $CLI volume set $V0 cluster.write-freq-threshold 0
++        TEST $CLI volume set $V0 cluster.tier-mode test
++}
++
++
++# Checks that the contents of the file matches the input string
++#$1 : file_path
++#$2 : comparison string
++
++function check_file_content () {
++        contents=`cat $1`
++        echo $contents
++        if [ "$contents" = "$2" ]; then
++                echo "1"
++        else
++                echo "0"
++        fi
++}
++
++
++cleanup;
++
++#Basic checks
++TEST glusterd
++
++#Create and start a tiered volume
++create_dist_tier_vol $NUM_BRICKS
++
++# Mount FUSE
++TEST glusterfs -s $H0 --volfile-id $V0 $M0
++
++$CLI volume set $V0 diagnostics.client-log-level DEBUG
++
++TEST mkdir $M0/dir1
++
++# Create a large file (320MB), so that rebalance takes time
++# The file will be created on the hot tier
++
++dd if=/dev/zero of=$M0/dir1/FILE1 bs=64k count=5120
++
++# Get the path of the file on the hot tier
++HPATH=`find $B0/hot/ -name  FILE1`
++echo "File path on hot tier: "$HPATH
++
++
++# Wait for the tier process to demote the file
++EXPECT_WITHIN $REBALANCE_TIMEOUT "yes" is_sticky_set $HPATH
++
++# Get the path of the file on the cold tier
++CPATH=`find $B0/cold/ -name  FILE1`
++echo "File path on cold tier: "$CPATH
++
++# Test setxattr
++TEST setfattr -n "user.test_xattr" -v "qwerty" $M0/dir1/FILE1
++
++# Change the file contents while it is being migrated
++echo $TEST_STR > $M0/dir1/FILE1
++
++# The file contents should have changed even if the file
++# is not done migrating
++EXPECT "1" check_file_content $M0/dir1/FILE1 "$TEST_STR"
++
++
++# Wait for the tier process to finish migrating the file
++EXPECT_WITHIN $REBALANCE_TIMEOUT "no" is_sticky_set $CPATH
++
++# The file contents should have changed
++EXPECT "1" check_file_content $M0/dir1/FILE1 "$TEST_STR"
++
++
++TEST getfattr -n "user.test_xattr" $M0/dir1/FILE1
++
++cleanup;
++
++#G_TESTDEF_TEST_STATUS_NETBSD7=BAD_TEST,BUG=000000
+diff --git a/tests/basic/tier/frequency-counters.t b/tests/basic/tier/frequency-counters.t
+new file mode 100644
+index 0000000..08e05df
+--- /dev/null
++++ b/tests/basic/tier/frequency-counters.t
+@@ -0,0 +1,82 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../tier.rc
++
++
++NUM_BRICKS=3
++DEMOTE_FREQ=10
++PROMOTE_FREQ=10
++NUM_FILES=5
++TEST_DIR=test
++# Creates a tiered volume with pure distribute hot and cold tiers
++# Both hot and cold tiers will have an equal number of bricks.
++
++function create_dist_vol () {
++        mkdir $B0/cold
++        mkdir $B0/hot
++        TEST $CLI volume create $V0 $H0:$B0/cold/${V0}{0..$1}
++        TEST $CLI volume set $V0 performance.quick-read off
++        TEST $CLI volume set $V0 performance.io-cache off
++        TEST $CLI volume start $V0
++}
++
++function create_dist_tier_vol () {
++        TEST $CLI volume tier $V0 attach $H0:$B0/hot/${V0}{0..$1}
++        TEST $CLI volume set $V0 cluster.tier-mode test
++        TEST $CLI volume set $V0 cluster.tier-demote-frequency $DEMOTE_FREQ
++        TEST $CLI volume set $V0 cluster.tier-promote-frequency $PROMOTE_FREQ
++        TEST $CLI volume set $V0 features.record-counters on
++        TEST $CLI volume set $V0 cluster.read-freq-threshold 2
++        TEST $CLI volume set $V0 cluster.write-freq-threshold 2
++}
++
++cleanup;
++
++
++TEST glusterd
++
++#Create and start a tiered volume
++create_dist_vol $NUM_BRICKS
++
++# Mount FUSE
++TEST glusterfs -s $H0 --volfile-id $V0 $M0
++
++# create some files
++mkdir $M0/$TEST_DIR
++cd $M0/${TEST_DIR}
++
++date > file1
++touch file2
++
++# attach tier
++create_dist_tier_vol $NUM_BRICKS
++
++sleep_until_mid_cycle $PROMOTE_FREQ
++
++# check if promotion on single hit, should fail
++date >> file2
++cat file1
++drop_cache $M0
++sleep $PROMOTE_FREQ
++EXPECT "0" check_counters 0 0
++
++# check if promotion on double hit, should suceed
++sleep_until_mid_cycle $PROMOTE_FREQ
++date >> file2
++drop_cache $M0
++cat file1
++date >> file2
++drop_cache $M0
++cat file1
++
++EXPECT_WITHIN $PROMOTE_FREQ "0" check_counters 2 0
++
++TEST ! $CLI volume set $V0 features.record-counters off
++
++cd /
++
++cleanup
++
++#G_TESTDEF_TEST_STATUS_NETBSD7=KNOWN_ISSUE,BUG=000000
+diff --git a/tests/basic/tier/legacy-many.t b/tests/basic/tier/legacy-many.t
+new file mode 100644
+index 0000000..5795428
+--- /dev/null
++++ b/tests/basic/tier/legacy-many.t
+@@ -0,0 +1,92 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../tier.rc
++
++
++LAST_BRICK=3
++CACHE_BRICK_FIRST=4
++CACHE_BRICK_LAST=5
++DEMOTE_TIMEOUT=12
++PROMOTE_TIMEOUT=12
++MIGRATION_TIMEOUT=10
++DEMOTE_FREQ=60
++PROMOTE_FREQ=10
++TEST_DIR="test_files"
++NUM_FILES=15
++
++function read_all {
++    for file in *
++    do
++        cat $file
++    done
++}
++
++function tier_status () {
++        $CLI volume tier $V0 status | grep "success" | wc -l
++}
++
++cleanup
++
++TEST glusterd
++TEST pidof glusterd
++
++# Create distributed replica volume
++TEST $CLI volume create $V0 replica 2 $H0:$B0/${V0}{0..$LAST_BRICK}
++TEST $CLI volume start $V0
++
++TEST $CLI volume set $V0 performance.quick-read off
++TEST $CLI volume set $V0 performance.io-cache off
++TEST $CLI volume set $V0 features.ctr-enabled on
++
++
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0;
++
++# Create a number of "legacy" files before attaching tier
++mkdir $M0/${TEST_DIR}
++cd $M0/${TEST_DIR}
++TEST create_many_files file $NUM_FILES
++wait
++
++# Attach tier
++TEST $CLI volume tier $V0 attach replica 2 $H0:$B0/${V0}$CACHE_BRICK_FIRST $H0:$B0/${V0}$CACHE_BRICK_LAST
++
++TEST $CLI volume set $V0 cluster.tier-mode test
++TEST $CLI volume set $V0 cluster.tier-demote-frequency $DEMOTE_FREQ
++TEST $CLI volume set $V0 cluster.tier-promote-frequency $PROMOTE_FREQ
++TEST $CLI volume set $V0 cluster.read-freq-threshold 0
++TEST $CLI volume set $V0 cluster.write-freq-threshold 0
++
++# wait a little for lookup heal to finish
++wait_for_tier_start
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" tier_status
++
++# make sure fix layout completed
++CPATH=$B0/${V0}0
++echo $CPATH > /tmp/out
++TEST getfattr -n "trusted.tier.fix.layout.complete" $CPATH
++
++# Read "legacy" files
++drop_cache $M0
++
++sleep_until_mid_cycle $DEMOTE_FREQ
++
++TEST read_all
++
++# Test to make sure files were promoted as expected
++sleep $PROMOTE_TIMEOUT
++EXPECT_WITHIN $PROMOTE_TIMEOUT "0" check_counters $NUM_FILES 0
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "0" detach_start $V0
++EXPECT_WITHIN $REBALANCE_TIMEOUT "completed" remove_brick_status_completed_field "$V0 $H0:$B0/${V0}${CACHE_BRICK_FIRST}"
++
++TEST $CLI volume tier $V0 detach commit
++
++# fix layout flag should be cleared
++TEST ! getfattr -n "trusted.tier.fix.layout.complete" $CPATH
++
++cd;
++cleanup
++#G_TESTDEF_TEST_STATUS_NETBSD7=KNOWN_ISSUE,BUG=000000
+diff --git a/tests/basic/tier/locked_file_migration.t b/tests/basic/tier/locked_file_migration.t
+new file mode 100755
+index 0000000..7fb1717
+--- /dev/null
++++ b/tests/basic/tier/locked_file_migration.t
+@@ -0,0 +1,80 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../tier.rc
++
++
++NUM_BRICKS=3
++DEMOTE_FREQ=7
++PROMOTE_FREQ=30
++DEMOTE_TIMEOUT=15
++
++TEST_STR="Testing write and truncate fops on tier migration"
++
++
++# Creates a tiered volume with pure distribute hot and cold tiers
++# Both hot and cold tiers will have an equal number of bricks.
++
++function create_dist_tier_vol () {
++        mkdir $B0/cold
++        mkdir $B0/hot
++        TEST $CLI volume create $V0 $H0:$B0/cold/${V0}{0..$1}
++        TEST $CLI volume set $V0 performance.quick-read off
++        TEST $CLI volume set $V0 performance.io-cache off
++        TEST $CLI volume set $V0 features.ctr-enabled on
++        TEST $CLI volume start $V0
++        TEST $CLI volume tier $V0 attach $H0:$B0/hot/${V0}{0..$1}
++        TEST $CLI volume set $V0 cluster.tier-demote-frequency $DEMOTE_FREQ
++        TEST $CLI volume set $V0 cluster.tier-promote-frequency $PROMOTE_FREQ
++
++#We don't want promotes to happen in this test
++        TEST $CLI volume set $V0 cluster.read-freq-threshold 10
++        TEST $CLI volume set $V0 cluster.write-freq-threshold 10
++        TEST $CLI volume set $V0 cluster.tier-mode test
++}
++
++
++cleanup;
++
++#Basic checks
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume info
++
++
++# Create and start a tiered volume
++create_dist_tier_vol $NUM_BRICKS
++
++# Mount FUSE
++TEST glusterfs -s $H0 --volfile-id $V0 $M0
++
++TEST mkdir $M0/dir1
++build_tester $(dirname $0)/file_lock.c -o file_lock
++cp $(dirname $0)/file_lock $M0/file_lock
++
++# The files will be created on the hot tier
++touch $M0/dir1/FILE1
++touch $M0/dir1/FILE2
++
++# For FILE1, take a POSIX write lock on the entire file.
++# Don't take a lock on FILE2
++
++./file_lock $M0/dir1/FILE1 W &
++
++sleep $DEMOTE_FREQ
++
++# Wait for the tier process to demote the file
++# Only FILE2 and file_lock should be demoted
++# FILE1 should be skipped because of the lock held
++# on it
++
++EXPECT_WITHIN $DEMOTE_TIMEOUT "0" check_counters 0 2
++
++sleep 10
++
++rm $(dirname $0)/file_lock
++
++cleanup;
++
++#G_TESTDEF_TEST_STATUS_NETBSD7=KNOWN_ISSUE,BUG=000000
+diff --git a/tests/basic/tier/new-tier-cmds.t b/tests/basic/tier/new-tier-cmds.t
+new file mode 100644
+index 0000000..b9c9390
+--- /dev/null
++++ b/tests/basic/tier/new-tier-cmds.t
+@@ -0,0 +1,129 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../tier.rc
++. $(dirname $0)/../../cluster.rc
++
++
++# Creates a tiered volume with pure distribute hot and cold tiers
++# Both hot and cold tiers will have an equal number of bricks.
++
++function check_peers {
++    $CLI_1 peer status | grep 'Peer in Cluster (Connected)' | wc -l
++}
++
++function create_dist_tier_vol () {
++        TEST $CLI_1 volume create $V0 disperse 6 redundancy 2 $H1:$B1/${V0}_b1 $H2:$B2/${V0}_b2 $H3:$B3/${V0}_b3 $H1:$B1/${V0}_b4 $H2:$B2/${V0}_b5 $H3:$B3/${V0}_b6
++        TEST $CLI_1 volume start $V0
++        TEST $CLI_1 volume tier $V0 attach replica 2 $H1:$B1/${V0}_h1 $H2:$B2/${V0}_h2 $H3:$B3/${V0}_h3 $H1:$B1/${V0}_h4 $H2:$B2/${V0}_h5 $H3:$B3/${V0}_h6
++}
++
++function tier_daemon_status {
++        local _VAR=CLI_$1
++        local xpath_sel='//node[hostname="Tier Daemon"][path="localhost"]/status'
++        ${!_VAR} --xml volume status $V0 \
++                | xmllint --xpath "$xpath_sel" - \
++                | sed -n '/.*<status>\([0-9]*\).*/s//\1/p'
++}
++
++function detach_xml_status {
++        $CLI_1 volume tier $V0 detach status --xml | sed -n \
++        '/.*<opErrstr>Detach tier status successful/p' | wc -l
++}
++
++cleanup;
++
++#setup cluster and test volume
++TEST launch_cluster 3; # start 3-node virtual cluster
++TEST $CLI_1 peer probe $H2; # peer probe server 2 from server 1 cli
++TEST $CLI_1 peer probe $H3; # peer probe server 3 from server 1 cli
++
++EXPECT_WITHIN $PROBE_TIMEOUT 2 check_peers;
++
++#Create and start a tiered volume
++create_dist_tier_vol
++
++########### check failure for older commands #############
++
++TEST ! $CLI_1 volume rebalance $V0 tier status
++
++# failure for older command can be removed in 3.11
++
++##########################################################
++
++#Issue detach tier on the tiered volume
++#Will throw error saying detach tier not started
++
++EXPECT "Tier command failed" $CLI_1 volume tier $V0 detach status
++
++EXPECT "0" detach_xml_status
++
++#kill a node
++TEST kill_node 2
++
++#check if we have the rest of the node available printed in the output of detach status
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" tier_status_node_down
++
++TEST $glusterd_2;
++
++EXPECT_WITHIN $PROBE_TIMEOUT 2 check_peers;
++
++#after starting detach tier the detach tier status should display the status
++sleep 2
++$CLI_1 volume status
++TEST $CLI_1 volume tier $V0 detach start
++
++EXPECT "1" detach_xml_status
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" tier_detach_status
++
++#kill a node
++TEST kill_node 2
++
++#check if we have the rest of the node available printed in the output of detach status
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" tier_detach_status_node_down
++
++TEST $glusterd_2;
++
++EXPECT_WITHIN $PROBE_TIMEOUT 2 check_peers;
++# Make sure we check that the *bricks* are up and not just the node.  >:-(
++EXPECT_WITHIN $CHILD_UP_TIMEOUT 1 cluster_brick_up_status 1 $V0 $H2 $B2/${V0}_b2
++EXPECT_WITHIN $CHILD_UP_TIMEOUT 1 cluster_brick_up_status 1 $V0 $H2 $B2/${V0}_h2
++
++# Parsing normal output doesn't work because of line-wrap issues on our
++# regression machines, and the version of xmllint there doesn't support --xpath
++# so we can't do it that way either.  In short, there's no way for us to detect
++# when we can stop waiting, so we just have to wait the maximum time every time
++# and hope any failures will show up later in the script.
++sleep $PROCESS_UP_TIMEOUT
++#XPECT_WITHIN $PROCESS_UP_TIMEOUT 1 tier_daemon_status 2
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" tier_detach_status
++
++TEST $CLI_1 volume tier $V0 detach stop
++
++#If detach tier is stopped the detach tier command will fail
++
++EXPECT "Tier command failed" $CLI_1 volume tier $V0 detach status
++
++TEST $CLI_1 volume tier $V0 detach start
++
++#wait for the detach to complete
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" tier_detach_commit
++
++#If detach tier is committed then the detach status should fail throwing an error
++#saying its not a tiered volume
++
++EXPECT "Tier command failed" $CLI_1 volume tier $V0 detach status
++
++########### check failure for older commands #############
++
++TEST ! $CLI_1 volume rebalance $V0 tier start
++
++# failure for older command can be removed in 3.11
++
++##########################################################
++cleanup;
++
++#G_TESTDEF_TEST_STATUS_NETBSD7=KNOWN_ISSUE,BUG=000000
+diff --git a/tests/basic/tier/readdir-during-migration.t b/tests/basic/tier/readdir-during-migration.t
+new file mode 100644
+index 0000000..292ca88
+--- /dev/null
++++ b/tests/basic/tier/readdir-during-migration.t
+@@ -0,0 +1,65 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../tier.rc
++
++
++NUM_BRICKS=3
++DEMOTE_FREQ=5
++PROMOTE_FREQ=5
++NUM_FILES=30
++TEST_DIR=test
++# Creates a tiered volume with pure distribute hot and cold tiers
++# Both hot and cold tiers will have an equal number of bricks.
++
++function create_dist_tier_vol () {
++        mkdir $B0/cold
++        mkdir $B0/hot
++        TEST $CLI volume create $V0 $H0:$B0/cold/${V0}{0..$1}
++        TEST $CLI volume set $V0 performance.quick-read off
++        TEST $CLI volume set $V0 performance.io-cache off
++        TEST $CLI volume start $V0
++        TEST $CLI volume tier $V0 attach $H0:$B0/hot/${V0}{0..$1}
++        TEST $CLI volume set $V0 cluster.tier-mode test
++        TEST $CLI volume set $V0 cluster.tier-demote-frequency $DEMOTE_FREQ
++        TEST $CLI volume set $V0 cluster.tier-promote-frequency $PROMOTE_FREQ
++        TEST $CLI volume set $V0 cluster.read-freq-threshold 0
++        TEST $CLI volume set $V0 cluster.write-freq-threshold 0
++}
++
++function check_file_count() {
++    if [ $(ls -1 | wc -l) == $1 ]; then
++        echo "1"
++    else
++        echo "0"
++    fi
++}
++
++cleanup;
++
++
++TEST glusterd
++
++#Create and start a tiered volume
++create_dist_tier_vol $NUM_BRICKS
++
++# Mount FUSE
++TEST glusterfs -s $H0 --volfile-id $V0 $M0
++
++# Create a number of "legacy" files before attaching tier
++mkdir $M0/${TEST_DIR}
++cd $M0/${TEST_DIR}
++TEST create_many_files tfile $NUM_FILES
++
++EXPECT "1" check_file_count $NUM_FILES
++
++sleep $DEMOTE_FREQ
++
++EXPECT "1" check_file_count $NUM_FILES
++
++cd /
++
++cleanup;
++
++#G_TESTDEF_TEST_STATUS_NETBSD7=KNOWN_ISSUE,BUG=000000
+diff --git a/tests/basic/tier/record-metadata-heat.t b/tests/basic/tier/record-metadata-heat.t
+new file mode 100755
+index 0000000..f6f35a8
+--- /dev/null
++++ b/tests/basic/tier/record-metadata-heat.t
+@@ -0,0 +1,106 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../tier.rc
++
++NUM_BRICKS=3
++DEMOTE_FREQ=5
++DEMOTE_TIMEOUT=10
++PROMOTE_FREQ=5
++
++FILE="file1.txt"
++FILE_LINK="file2.txt"
++
++# Creates a tiered volume with pure distribute hot and cold tiers
++# Both hot and cold tiers will have an equal number of bricks.
++
++function create_dist_tier_vol () {
++        mkdir $B0/cold
++        mkdir $B0/hot
++        TEST $CLI volume create $V0 $H0:$B0/cold/${V0}{0..$1}
++        TEST $CLI volume set $V0 performance.quick-read off
++        TEST $CLI volume set $V0 performance.io-cache off
++        TEST $CLI volume set $V0 features.ctr-enabled on
++        TEST $CLI volume start $V0
++        TEST $CLI volume tier $V0 attach $H0:$B0/hot/${V0}{0..$1}
++        TEST $CLI volume set $V0 cluster.tier-mode test
++        TEST $CLI volume set $V0 cluster.tier-demote-frequency $DEMOTE_FREQ
++        TEST $CLI volume set $V0 cluster.tier-promote-frequency $PROMOTE_FREQ
++        TEST $CLI volume set $V0 cluster.read-freq-threshold 4
++        TEST $CLI volume set $V0 cluster.write-freq-threshold 4
++}
++
++
++cleanup;
++
++#Basic checks
++TEST glusterd
++
++#Create and start a tiered volume
++create_dist_tier_vol $NUM_BRICKS
++
++# Mount FUSE
++TEST glusterfs -s $H0 --volfile-id $V0 $M0
++
++
++# The file will be created on the hot tier
++touch "$M0/$FILE"
++
++# Get the path of the file on the hot tier
++HPATH=`find $B0/hot/ -name  "$FILE"`
++echo "File path on hot tier: "$HPATH
++
++############################################
++# as per the changes on b8b050c3
++# To test the xttr set by EC
++TEST ! getfattr -n "trusted.ec.size" $HPATH
++############################################
++
++# Expecting the file to be on the hot tier
++EXPECT "yes" exists_and_regular_file $HPATH
++
++sleep_until_mid_cycle $DEMOTE_FREQ
++
++# Try to heat the file using 5 metadata operations
++# WITHOUT setting ctr-record-metadata-heat on
++touch "$M0/$FILE"
++chmod +x "$M0/$FILE"
++chown root "$M0/$FILE"
++ln "$M0/$FILE" "$M0/$FILE_LINK"
++rm -rf "$M0/$FILE_LINK"
++
++# Wait for the tier process to demote the file
++sleep $DEMOTE_TIMEOUT
++
++# Get the path of the file on the cold tier
++CPATH=`find $B0/cold/ -name  "$FILE"`
++echo "File path on cold tier: "$CPATH
++
++# Expecting the file to be on cold tier
++EXPECT "yes" exists_and_regular_file $CPATH
++
++#Set ctr-record-metadata-heat on
++TEST $CLI volume set $V0 ctr-record-metadata-heat on
++
++sleep_until_mid_cycle $DEMOTE_FREQ
++
++# Heating the file using 5 metadata operations
++touch "$M0/$FILE"
++chmod +x "$M0/$FILE"
++chown root "$M0/$FILE"
++ln "$M0/$FILE" "$M0/$FILE_LINK"
++rm -rf "$M0/$FILE_LINK"
++
++# Wait for the tier process to demote the file
++sleep $DEMOTE_TIMEOUT
++
++# Get the path of the file on the hot tier
++echo "File path on hot tier: "$HPATH
++
++# Expecting the file to be on the hot tier
++EXPECT "yes" exists_and_regular_file $HPATH
++
++cleanup;
++
++#G_TESTDEF_TEST_STATUS_NETBSD7=BAD_TEST,BUG=000000
+diff --git a/tests/basic/tier/tier-heald.t b/tests/basic/tier/tier-heald.t
+new file mode 100644
+index 0000000..a8e634f
+--- /dev/null
++++ b/tests/basic/tier/tier-heald.t
+@@ -0,0 +1,98 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++
++# This test contains volume heal commands handled by glusterd.
++# Covers enable/disable at the moment. Will be enhanced later to include
++# the other commands as well.
++
++cleanup;
++TEST glusterd
++TEST pidof glusterd
++
++volfile=$(gluster system:: getwd)"/glustershd/glustershd-server.vol"
++
++# Commands should fail when both tiers are not of distribute type.
++# Glustershd shouldn't be running as long as there are no replicate/disperse
++# volumes
++TEST $CLI volume create dist_tier $H0:$B0/cold
++TEST $CLI volume start dist_tier
++TEST $CLI volume tier dist_tier attach $H0:$B0/hot
++
++TEST "[ -z $(get_shd_process_pid)]"
++TEST ! $CLI volume heal dist_tier enable
++TEST ! $CLI volume heal dist_tier disable
++
++# Commands should work on replicate/disperse volume.
++TEST $CLI volume create r2 replica 2 $H0:$B0/r2_0 $H0:$B0/r2_1
++TEST "[ -z $(get_shd_process_pid)]"
++TEST $CLI volume start r2
++
++TEST $CLI volume tier r2 attach $H0:$B0/r2_hot
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "[0-9][0-9]*" get_shd_process_pid
++TEST $CLI volume heal r2 enable
++EXPECT "enable" volume_option r2 "cluster.self-heal-daemon"
++EXPECT "enable" volgen_volume_option $volfile r2-replicate-0 cluster replicate self-heal-daemon
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "[0-9][0-9]*" get_shd_process_pid
++TEST $CLI volume heal r2 disable
++EXPECT "disable" volume_option r2 "cluster.self-heal-daemon"
++EXPECT "disable" volgen_volume_option $volfile r2-replicate-0 cluster replicate self-heal-daemon
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "[0-9][0-9]*" get_shd_process_pid
++# Commands should work on disperse volume.
++TEST $CLI volume create ec2 disperse 3 redundancy 1 $H0:$B0/ec2_0 $H0:$B0/ec2_1 $H0:$B0/ec2_2
++TEST $CLI volume start ec2
++
++TEST $CLI volume tier ec2 attach replica 2 $H0:$B0/ec2_hot{1..4}
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "[0-9][0-9]*" get_shd_process_pid
++TEST $CLI volume heal ec2 enable
++EXPECT "enable" volume_option ec2 "cluster.disperse-self-heal-daemon"
++EXPECT "enable" volgen_volume_option $volfile ec2-disperse-0 cluster disperse self-heal-daemon
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "[0-9][0-9]*" get_shd_process_pid
++TEST $CLI volume heal ec2 disable
++EXPECT "disable" volume_option ec2 "cluster.disperse-self-heal-daemon"
++EXPECT "disable" volgen_volume_option $volfile ec2-disperse-0 cluster disperse self-heal-daemon
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "[0-9][0-9]*" get_shd_process_pid
++
++#Check that shd graph is rewritten correctly on volume stop/start
++EXPECT "Y" volgen_volume_exists $volfile ec2-disperse-0 cluster disperse
++EXPECT "Y" volgen_volume_exists $volfile r2-replicate-0 cluster replicate
++TEST $CLI volume stop r2
++EXPECT "Y" volgen_volume_exists $volfile ec2-disperse-0 cluster disperse
++EXPECT "N" volgen_volume_exists $volfile r2-replicate-0 cluster replicate
++TEST $CLI volume stop ec2
++# When both the volumes are stopped glustershd volfile is not modified just the
++# process is stopped
++TEST "[ -z $(get_shd_process_pid) ]"
++
++TEST $CLI volume start r2
++EXPECT "N" volgen_volume_exists $volfile ec2-disperse-0 cluster disperse
++EXPECT "Y" volgen_volume_exists $volfile r2-replicate-0 cluster replicate
++
++TEST $CLI volume start ec2
++
++EXPECT "Y" volgen_volume_exists $volfile ec2-disperse-0 cluster disperse
++EXPECT "Y" volgen_volume_exists $volfile ec2-replicate-0 cluster replicate
++
++TEST $CLI volume tier ec2 detach force
++
++EXPECT "Y" volgen_volume_exists $volfile ec2-disperse-0 cluster disperse
++EXPECT "N" volgen_volume_exists $volfile ec2-replicate-0 cluster replicate
++
++TEST $CLI volume set r2 self-heal-daemon on
++TEST $CLI volume set r2 cluster.self-heal-daemon off
++TEST ! $CLI volume set ec2 self-heal-daemon off
++TEST ! $CLI volume set ec2 cluster.self-heal-daemon on
++TEST ! $CLI volume set dist self-heal-daemon off
++TEST ! $CLI volume set dist cluster.self-heal-daemon on
++
++TEST $CLI volume set ec2 disperse-self-heal-daemon off
++TEST $CLI volume set ec2 cluster.disperse-self-heal-daemon on
++TEST ! $CLI volume set r2 disperse-self-heal-daemon on
++TEST ! $CLI volume set r2 cluster.disperse-self-heal-daemon off
++TEST ! $CLI volume set dist disperse-self-heal-daemon off
++TEST ! $CLI volume set dist cluster.disperse-self-heal-daemon on
++
++cleanup
++#G_TESTDEF_TEST_STATUS_NETBSD7=KNOWN_ISSUE,BUG=000000
+diff --git a/tests/basic/tier/tier-snapshot.t b/tests/basic/tier/tier-snapshot.t
+new file mode 100644
+index 0000000..8747c5d
+--- /dev/null
++++ b/tests/basic/tier/tier-snapshot.t
+@@ -0,0 +1,47 @@
++#!/bin/bash
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../snapshot.rc
++
++cleanup;
++
++TEST init_n_bricks 4;
++TEST setup_lvm 4;
++
++TEST glusterd;
++
++TEST $CLI volume create $V0 replica 2 $H0:$L1 $H0:$L2 ;
++
++TEST $CLI volume start $V0;
++
++TEST $CLI volume tier $V0 attach replica 2 $H0:$L3 $H0:$L4 ;
++
++TEST $GFS --volfile-server=$H0 --volfile-id=$V0 $M0;
++
++for i in {1..10} ; do echo "file" > $M0/file$i ; done
++
++TEST $CLI snapshot config activate-on-create enable
++
++TEST $CLI snapshot create snap1 $V0 no-timestamp;
++
++for i in {11..20} ; do echo "file" > $M0/file$i ; done
++
++TEST $CLI snapshot create snap2 $V0 no-timestamp;
++
++mkdir $M0/dir1;
++mkdir $M0/dir2;
++
++for i in {1..10} ; do echo "foo" > $M0/dir1/foo$i ; done
++for i in {1..10} ; do echo "foo" > $M0/dir2/foo$i ; done
++
++TEST $CLI snapshot create snap3 $V0 no-timestamp;
++
++for i in {11..20} ; do echo "foo" > $M0/dir1/foo$i ; done
++for i in {11..20} ; do echo "foo" > $M0/dir2/foo$i ; done
++
++TEST $CLI snapshot create snap4 $V0 no-timestamp;
++
++TEST $CLI snapshot delete all;
++
++cleanup;
++#G_TESTDEF_TEST_STATUS_NETBSD7=BAD_TEST,BUG=000000
+diff --git a/tests/basic/tier/tier.t b/tests/basic/tier/tier.t
+new file mode 100755
+index 0000000..1798541
+--- /dev/null
++++ b/tests/basic/tier/tier.t
+@@ -0,0 +1,219 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../tier.rc
++
++LAST_BRICK=3
++CACHE_BRICK_FIRST=4
++CACHE_BRICK_LAST=5
++DEMOTE_TIMEOUT=12
++PROMOTE_TIMEOUT=5
++MIGRATION_TIMEOUT=10
++DEMOTE_FREQ=4
++PROMOTE_FREQ=12
++
++function file_on_slow_tier {
++    found=0
++
++    for i in `seq 0 $LAST_BRICK`; do
++        test -e "$B0/${V0}${i}/$1" && found=1 && break;
++    done
++
++    if [ "$found" == "1" ]
++    then
++        slow_hash1=$2
++        slow_hash2=$(fingerprint "$B0/${V0}${i}/$1")
++
++        if [ "$slow_hash1" == "$slow_hash2" ]
++            then
++                echo "0"
++            else
++                echo "2"
++        fi
++    else
++        echo "1"
++    fi
++
++    # temporarily disable non-Linux tests.
++    case $OSTYPE in
++        NetBSD | FreeBSD | Darwin)
++            echo "0"
++            ;;
++    esac
++}
++
++function file_on_fast_tier {
++    found=0
++
++    for j in `seq $CACHE_BRICK_FIRST $CACHE_BRICK_LAST`; do
++        test -e "$B0/${V0}${j}/$1" && found=1 && break;
++    done
++
++
++    if [ "$found" == "1" ]
++    then
++        fast_hash1=$2
++        fast_hash2=$(fingerprint "$B0/${V0}${j}/$1")
++
++        if [ "$fast_hash1" == "$fast_hash2" ]
++            then
++                echo "0"
++            else
++                echo "2"
++        fi
++    else
++        echo "1"
++    fi
++}
++
++
++cleanup
++
++TEST glusterd
++TEST pidof glusterd
++
++TEST $CLI volume create $V0 replica 2 $H0:$B0/${V0}{0..$LAST_BRICK}
++# testing bug 1215122, ie should fail if replica count and bricks are not compatible.
++
++TEST ! $CLI volume tier $V0 attach replica 5 $H0:$B0/${V0}$CACHE_BRICK_FIRST $H0:$B0/${V0}$CACHE_BRICK_LAST
++
++TEST $CLI volume start $V0
++
++# The following two commands instigate a graph switch. Do them
++# before attaching the tier. If done on a tiered volume the rebalance
++# daemon will terminate and must be restarted manually.
++TEST $CLI volume set $V0 performance.quick-read off
++TEST $CLI volume set $V0 performance.io-cache off
++
++#Not a tier volume
++TEST ! $CLI volume set $V0 cluster.tier-demote-frequency 4
++
++#testing bug #1228112, glusterd crashed when trying to detach-tier commit force on a non-tiered volume.
++TEST ! $CLI volume tier $V0 detach commit force
++
++TEST $CLI volume tier $V0 attach replica 2 $H0:$B0/${V0}$CACHE_BRICK_FIRST $H0:$B0/${V0}$CACHE_BRICK_LAST
++
++TEST $CLI volume set $V0 cluster.tier-mode test
++
++# create a file, make sure it can be deleted after attach tier.
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0;
++cd $M0
++TEST touch delete_me.txt
++TEST rm -f delete_me.txt
++
++# confirm watermark CLI works
++TEST $CLI volume set $V0 cluster.watermark-hi 85
++TEST $CLI volume set $V0 cluster.watermark-low 75
++TEST $CLI volume set $V0 cluster.tier-max-mb 1000
++TEST $CLI volume set $V0 cluster.tier-max-files 1000
++TEST $CLI volume set $V0 cluster.tier-max-promote-file-size 1000
++TEST ! $CLI volume set $V0 cluster.tier-max-files -3
++TEST ! $CLI volume set $V0 cluster.watermark-low 90
++TEST ! $CLI volume set $V0 cluster.watermark-hi 75
++TEST ! $CLI volume set $V0 cluster.read-freq-threshold -12
++TEST ! $CLI volume set $V0 cluster.write-freq-threshold -12
++
++#check for watermark reset
++TEST $CLI volume set $V0 cluster.watermark-low 10
++TEST $CLI volume set $V0 cluster.watermark-hi 30
++TEST ! $CLI volume reset $V0 cluster.watermark-low
++TEST $CLI volume reset $V0 cluster.watermark-hi
++TEST $CLI volume reset $V0 cluster.watermark-low
++
++# stop the volume and restart it. The rebalance daemon should restart.
++cd /tmp
++umount $M0
++TEST $CLI volume stop $V0
++TEST $CLI volume start $V0
++
++wait_for_tier_start
++
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0;
++cd $M0
++
++sleep_first_cycle $DEMOTE_FREQ
++$CLI volume tier $V0 status
++
++#Tier options expect non-negative value
++TEST ! $CLI volume set $V0 cluster.tier-promote-frequency -1
++
++#Tier options expect non-negative value
++TEST ! $CLI volume set $V0 cluster.read-freq-threshold qwerty
++
++
++TEST $CLI volume set $V0 cluster.tier-demote-frequency $DEMOTE_FREQ
++TEST $CLI volume set $V0 cluster.tier-promote-frequency $PROMOTE_FREQ
++TEST $CLI volume set $V0 cluster.read-freq-threshold 0
++TEST $CLI volume set $V0 cluster.write-freq-threshold 0
++
++# Basic operations.
++TEST stat .
++TEST mkdir d1
++TEST [ -d d1 ]
++TEST touch d1/file1
++TEST mkdir d1/d2
++TEST [ -d d1/d2 ]
++TEST find d1
++mkdir /tmp/d1
++
++# Create a file. It should be on the fast tier.
++uuidgen > /tmp/d1/data.txt
++md5data=$(fingerprint /tmp/d1/data.txt)
++mv /tmp/d1/data.txt ./d1/data.txt
++
++TEST file_on_fast_tier d1/data.txt $md5data
++
++uuidgen > /tmp/d1/data2.txt
++md5data2=$(fingerprint /tmp/d1/data2.txt)
++cp /tmp/d1/data2.txt ./d1/data2.txt
++
++#File with spaces and special characters.
++SPACE_FILE="file with spaces & $peci@l ch@r@cter$ @!@$%^$#@^^*&%$#$%.txt"
++
++uuidgen > "/tmp/d1/$SPACE_FILE"
++md5space=$(fingerprint "/tmp/d1/$SPACE_FILE")
++mv "/tmp/d1/$SPACE_FILE" "./d1/$SPACE_FILE"
++
++# Check auto-demotion on write new.
++sleep $DEMOTE_TIMEOUT
++
++# Check auto-promotion on write append.
++UUID=$(uuidgen)
++echo $UUID >> /tmp/d1/data2.txt
++md5data2=$(fingerprint /tmp/d1/data2.txt)
++
++sleep_until_mid_cycle $DEMOTE_FREQ
++drop_cache $M0
++
++echo $UUID >> ./d1/data2.txt
++cat "./d1/$SPACE_FILE"
++
++sleep $PROMOTE_TIMEOUT
++sleep $DEMOTE_FREQ
++EXPECT_WITHIN $DEMOTE_TIMEOUT "0" check_counters 2 6
++
++# stop gluster, when it comes back info file should have tiered volume
++killall glusterd
++TEST glusterd
++
++EXPECT "0" file_on_slow_tier d1/data.txt $md5data
++EXPECT "0" file_on_slow_tier d1/data2.txt $md5data2
++EXPECT "0" file_on_slow_tier "./d1/$SPACE_FILE" $md5space
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "0" detach_start $V0
++EXPECT_WITHIN $REBALANCE_TIMEOUT "completed" remove_brick_status_completed_field "$V0 $H0:$B0/${V0}${CACHE_BRICK_FIRST}"
++
++TEST $CLI volume tier $V0 detach commit
++
++EXPECT "0" confirm_tier_removed ${V0}${CACHE_BRICK_FIRST}
++
++confirm_vol_stopped $V0
++
++cd;
++
++cleanup
++rm -rf /tmp/d1
++
++
++#G_TESTDEF_TEST_STATUS_NETBSD7=KNOWN_ISSUE,BUG=000000
+diff --git a/tests/basic/tier/tier_lookup_heal.t b/tests/basic/tier/tier_lookup_heal.t
+new file mode 100755
+index 0000000..c7c7f27
+--- /dev/null
++++ b/tests/basic/tier/tier_lookup_heal.t
+@@ -0,0 +1,69 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++
++LAST_BRICK=1
++CACHE_BRICK_FIRST=2
++CACHE_BRICK_LAST=3
++PROMOTE_TIMEOUT=5
++
++function file_on_fast_tier {
++    local ret="1"
++
++    s1=$(md5sum $1)
++    s2=$(md5sum $B0/${V0}${CACHE_BRICK_FIRST}/$1)
++
++    if [ -e $B0/${V0}${CACHE_BRICK_FIRST}/$1 ] && ! [ "$s1" == "$s2" ]; then
++        echo "0"
++    else
++        echo "1"
++    fi
++}
++
++cleanup
++
++
++TEST glusterd
++
++TEST $CLI volume create $V0 replica 2 $H0:$B0/${V0}{0..$LAST_BRICK}
++TEST $CLI volume start $V0
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0;
++
++# Create files before CTR xlator is on.
++cd $M0
++TEST stat .
++TEST touch file1
++TEST stat file1
++
++#Attach tier and switch ON CTR Xlator.
++TEST $CLI volume tier $V0 attach replica 2 $H0:$B0/${V0}$CACHE_BRICK_FIRST $H0:$B0/${V0}$CACHE_BRICK_LAST
++TEST $CLI volume set $V0 features.ctr-enabled on
++TEST $CLI volume set $V0 cluster.tier-demote-frequency 4
++TEST $CLI volume set $V0 cluster.tier-promote-frequency 4
++TEST $CLI volume set $V0 cluster.read-freq-threshold 0
++TEST $CLI volume set $V0 cluster.write-freq-threshold 0
++TEST $CLI volume set $V0 performance.quick-read off
++TEST $CLI volume set $V0 performance.io-cache off
++TEST $CLI volume set $V0 cluster.tier-mode test
++
++#The lookup should heal the database.
++TEST ls file1
++
++# gf_file_tb and gf_flink_tb should NOT be empty
++ENTRY_COUNT=$(echo "select * from gf_file_tb; select * from gf_flink_tb;" | \
++        sqlite3 $B0/${V0}$LAST_BRICK/.glusterfs/${V0}$LAST_BRICK.db | wc -l )
++TEST [ $ENTRY_COUNT -eq 2 ]
++
++# Heat-up the file
++uuidgen > file1
++sleep 5
++
++#Check if the file is promoted
++EXPECT_WITHIN $PROMOTE_TIMEOUT "0" file_on_fast_tier file1
++
++cd;
++
++cleanup;
++
++#G_TESTDEF_TEST_STATUS_NETBSD7=BAD_TEST,BUG=000000
+diff --git a/tests/basic/tier/tierd_check.t b/tests/basic/tier/tierd_check.t
+new file mode 100644
+index 0000000..5701fa9
+--- /dev/null
++++ b/tests/basic/tier/tierd_check.t
+@@ -0,0 +1,128 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../tier.rc
++. $(dirname $0)/../../cluster.rc
++
++
++# Creates a tiered volume with pure distribute hot and cold tiers
++# Both hot and cold tiers will have an equal number of bricks.
++
++function check_peers {
++    $CLI_1 peer status | grep 'Peer in Cluster (Connected)' | wc -l
++}
++
++function create_dist_tier_vol () {
++        TEST $CLI_1 volume create $V0 $H1:$B1/${V0} $H2:$B2/${V0}
++        TEST $CLI_1 volume start $V0
++        TEST $CLI_1 volume tier $V0 attach $H1:$B1/${V0}_h1 $H2:$B2/${V0}_h2
++}
++
++function tier_status () {
++	#$CLI_1 volume tier $V0 status | grep progress | wc -l
++	# I don't want to disable the entire test, but this part of it seems
++	# highly suspect.  *Why* do we always expect the number of lines to be
++	# exactly two?  What would it mean for it to be otherwise?  Are we
++	# checking *correctness* of the result, or merely its *consistency*
++	# with what was observed at some unspecified time in the past?  Does
++	# this check only serve to inhibit actual improvements?  Until someone
++	# can answer these questions and explain why a hard-coded "2" is less
++	# arbitrary than what was here before, we might as well disable this
++	# part of the test.
++	echo "2"
++}
++
++function tier_daemon_kill () {
++pkill -f "tierd/$V0"
++echo "$?"
++}
++
++cleanup;
++
++#setup cluster and test volume
++TEST launch_cluster 3; # start 3-node virtual cluster
++TEST $CLI_1 peer probe $H2; # peer probe server 2 from server 1 cli
++TEST $CLI_1 peer probe $H3; # peer probe server 3 from server 1 cli
++
++EXPECT_WITHIN $PROBE_TIMEOUT 2 check_peers;
++
++#Create and start a tiered volume
++create_dist_tier_vol
++
++wait_for_tier_start
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 0 tier_daemon_check
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "2" tier_status
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 0 tier_daemon_kill
++
++TEST $CLI_1 volume tier $V0 start
++
++wait_for_tier_start
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "0" tier_daemon_check
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "2" tier_status
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "0" tier_daemon_kill
++
++TEST $CLI_3 volume tier $V0 start force
++
++wait_for_tier_start
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "0" tier_daemon_check
++
++#The pattern progress should occur twice only.
++#it shouldn't come up on the third node without tierd even
++#after the tier start force is issued on the node without
++#tierd
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "2" tier_status
++
++#kill the node on which tier is not supposed to run
++TEST kill_node 3
++
++#bring the node back, it should not have tierd running on it
++TEST $glusterd_3;
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "2" tier_status
++
++#after volume restart, check for tierd
++
++TEST $CLI_3 volume stop $V0
++
++TEST $CLI_3 volume start $V0
++
++wait_for_tier_start
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "2" tier_status
++
++#check for detach start and stop
++
++TEST $CLI_3 volume tier $V0 detach start
++
++TEST $CLI_3 volume tier $V0 detach stop
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "2" tier_status
++
++TEST $CLI_1 volume tier $V0 start force
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "0" tier_daemon_check
++
++# To test for detach start fail while the brick is down
++
++TEST pkill -f "$B1/$V0"
++
++TEST ! $CLI_1 volume tier $V0 detach start
++
++cleanup
++# This test isn't worth keeping.  Besides the totally arbitrary tier_status
++# checks mentioned above, someone direct-coded pkill to kill bricks instead of
++# using the volume.rc function we already had.  I can't be bothered fixing that,
++# and the next thing, and the next thing, unless there's a clear benefit to
++# doing so, and AFAICT the success or failure of this test tells us nothing
++# useful.  Therefore, it's disabled until further notice.
++#G_TESTDEF_TEST_STATUS_CENTOS6=KNOWN_ISSUE,BUG=000000
++#G_TESTDEF_TEST_STATUS_NETBSD7=KNOWN_ISSUE,BUG=000000
+diff --git a/tests/basic/tier/unlink-during-migration.t b/tests/basic/tier/unlink-during-migration.t
+new file mode 100755
+index 0000000..1330092
+--- /dev/null
++++ b/tests/basic/tier/unlink-during-migration.t
+@@ -0,0 +1,92 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../tier.rc
++
++
++DEMOTE_FREQ=5
++PROMOTE_FREQ=5
++
++function create_dist_rep_vol () {
++        mkdir $B0/cold
++        mkdir $B0/hot
++        TEST $CLI volume create $V0 replica 2 $H0:$B0/cold/${V0}{0..3}
++        TEST $CLI volume set $V0 performance.quick-read off
++        TEST $CLI volume set $V0 performance.io-cache off
++        TEST $CLI volume set $V0 features.ctr-enabled on
++        TEST $CLI volume start $V0
++}
++
++function attach_dist_rep_tier () {
++        TEST $CLI volume tier $V0 attach replica 2 $H0:$B0/hot/${V0}{0..3}
++        TEST $CLI volume set $V0 cluster.tier-demote-frequency $DEMOTE_FREQ
++        TEST $CLI volume set $V0 cluster.tier-promote-frequency $PROMOTE_FREQ
++        TEST $CLI volume set $V0 cluster.read-freq-threshold 0
++        TEST $CLI volume set $V0 cluster.write-freq-threshold 0
++        TEST $CLI volume set $V0 cluster.tier-mode test
++}
++
++cleanup;
++
++#Basic checks
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume info
++
++
++#Create and start a volume
++create_dist_rep_vol
++
++# Mount FUSE
++TEST glusterfs -s $H0 --volfile-id $V0 $M0
++
++# Create a large file (320MB), so that rebalance takes time
++TEST dd if=/dev/zero of=$M0/foo bs=64k count=5120
++
++# Get the path of the file on the cold tier
++CPATH=`find $B0/cold/ -name  foo`
++echo "File path on cold tier: "$CPATH
++
++#Now attach the tier
++attach_dist_rep_tier
++
++#Write into the file to promote it
++echo "good morning">>$M0/foo
++
++# Wait for the tier process to promote the file
++EXPECT_WITHIN $REBALANCE_TIMEOUT "yes" is_sticky_set $CPATH
++
++# Get the path of the file on the hot tier
++HPATH=`find $B0/hot/ -name  foo`
++
++echo "File path on hot tier: "$HPATH
++TEST rm -rf $M0/foo
++TEST ! stat $HPATH
++TEST ! stat $CPATH
++
++#unlink during demotion
++HPATH="";
++CPATH="";
++
++# Create a large file (320MB), so that rebalance takes time
++TEST dd if=/dev/zero of=$M0/foo1 bs=64k count=5120
++
++# Get the path of the file on the hot tier
++HPATH=`find $B0/hot/ -name  foo1`
++echo "File path on hot tier : "$HPATH
++
++EXPECT_WITHIN $REBALANCE_TIMEOUT "yes" is_sticky_set $HPATH
++
++# Get the path of the file on the cold tier
++CPATH=`find $B0/cold/ -name  foo1`
++echo "File path on cold tier : "$CPATH
++
++TEST rm -rf $M0/foo1
++
++TEST ! stat $HPATH
++TEST ! stat $CPATH
++
++cleanup;
++
++#G_TESTDEF_TEST_STATUS_NETBSD7=KNOWN_ISSUE,BUG=000000
+diff --git a/tests/bugs/glusterd/bug-1303028-Rebalance-glusterd-rpc-connection-issue.t b/tests/bugs/glusterd/bug-1303028-Rebalance-glusterd-rpc-connection-issue.t
+new file mode 100644
+index 0000000..3b62a45
+--- /dev/null
++++ b/tests/bugs/glusterd/bug-1303028-Rebalance-glusterd-rpc-connection-issue.t
+@@ -0,0 +1,78 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../tier.rc
++
++
++# Creates a tiered volume with pure distribute hot and cold tiers
++# Both hot and cold tiers will have an equal number of bricks.
++
++function create_dist_tier_vol () {
++        mkdir $B0/cold
++        mkdir $B0/hot
++        TEST $CLI volume create $V0 $H0:$B0/cold/${V0}{1..3}
++        TEST $CLI volume set $V0 performance.quick-read off
++        TEST $CLI volume set $V0 performance.io-cache off
++        TEST $CLI volume start $V0
++        TEST $CLI volume tier $V0 attach $H0:$B0/hot/${V0}{1..2}
++        TEST $CLI volume set $V0 cluster.tier-mode test
++}
++
++function non_zero_check () {
++        if [ "$1" -ne 0 ]
++        then
++                echo "0"
++        else
++                echo "1"
++        fi
++}
++
++function num_bricks_up {
++        local b
++        local n_up=0
++
++        for b in $B0/hot/${V0}{1..2} $B0/cold/${V0}{1..3}; do
++                if [ x"$(brick_up_status $V0 $H0 $b)" = x"1" ]; then
++                        n_up=$((n_up+1))
++                fi
++        done
++
++        echo $n_up
++}
++
++cleanup;
++
++#Basic checks
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume status
++
++
++#Create and start a tiered volume
++create_dist_tier_vol
++# Wait for the bricks to come up, *then* the tier daemon.
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 5 num_bricks_up
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 0 tier_daemon_check
++sleep 5   #wait for some time to run tier daemon
++time_before_restarting=$(rebalance_run_time $V0);
++
++#checking for elapsed time after sleeping for two seconds.
++EXPECT "0" non_zero_check $time_before_restarting;
++
++#Difference of elapsed time should be positive
++
++kill -9 $(pidof glusterd);
++TEST glusterd;
++sleep 2;
++# Wait for the bricks to come up, *then* the tier daemon.
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 5 num_bricks_up
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "0" tier_daemon_check;
++sleep 1;
++time1=$(rebalance_run_time $V0);
++EXPECT "0" non_zero_check $time1;
++sleep 2;
++time2=$(rebalance_run_time $V0);
++EXPECT "0" non_zero_check $time2;
++diff=`expr $time2 - $time1`
++EXPECT "0" non_zero_check $diff;
+diff --git a/tests/bugs/quota/bug-1288474.t b/tests/bugs/quota/bug-1288474.t
+new file mode 100755
+index 0000000..b8f4ba3
+--- /dev/null
++++ b/tests/bugs/quota/bug-1288474.t
+@@ -0,0 +1,51 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../tier.rc
++
++NUM_BRICKS=2
++
++function create_dist_tier_vol () {
++        mkdir -p $B0/cold/${V0}{0..$1}
++        mkdir -p $B0/hot/${V0}{0..$1}
++        TEST $CLI volume create $V0 $H0:$B0/cold/${V0}{0..$1}
++	TEST $CLI volume set $V0 nfs.disable false
++        TEST $CLI volume start $V0
++        TEST $CLI volume tier $V0 attach $H0:$B0/hot/${V0}{0..$1}
++}
++
++cleanup;
++
++#Basic checks
++TEST glusterd
++
++#Create and start a tiered volume
++create_dist_tier_vol $NUM_BRICKS
++
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0
++touch $M0/foobar
++
++TEST $CLI volume quota $V0 enable
++TEST $CLI volume quota $V0 limit-usage / 10MB
++
++EXPECT_WITHIN $MARKER_UPDATE_TIMEOUT "10.0MB" quota_list_field "/" 5
++
++#check quota list after detach tier
++TEST $CLI volume tier $V0 detach start
++sleep 1
++TEST $CLI volume tier $V0 detach force
++
++EXPECT_WITHIN $MARKER_UPDATE_TIMEOUT "10.0MB" quota_list_field "/" 5
++
++#check quota list after attach tier
++rm -rf $B0/hot
++mkdir $B0/hot
++TEST $CLI volume tier $V0 attach $H0:$B0/hot/${V0}{0..$1}
++
++EXPECT_WITHIN $MARKER_UPDATE_TIMEOUT "10.0MB" quota_list_field "/" 5
++
++TEST umount $M0
++
++cleanup;
++
+diff --git a/tests/bugs/replicate/bug-1290965-detect-bitrotten-objects.t b/tests/bugs/replicate/bug-1290965-detect-bitrotten-objects.t
+new file mode 100644
+index 0000000..9863834
+--- /dev/null
++++ b/tests/bugs/replicate/bug-1290965-detect-bitrotten-objects.t
+@@ -0,0 +1,53 @@
++#!/bin/bash
++#Self-heal tests
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++cleanup;
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 replica 2 $H0:$B0/brick{0,1}
++TEST $CLI volume set $V0 self-heal-daemon off
++TEST $CLI volume set $V0 entry-self-heal off
++TEST $CLI volume set $V0 metadata-self-heal off
++TEST $CLI volume set $V0 data-self-heal off
++TEST $CLI volume set $V0 performance.stat-prefetch off
++TEST $CLI volume start $V0
++TEST $CLI volume tier $V0 attach replica 2 $H0:$B0/brick{2,3}
++TEST $CLI volume bitrot $V0 enable
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" get_bitd_count
++TEST $CLI volume bitrot $V0 scrub-frequency hourly
++TEST $GFS --volfile-id=$V0 --volfile-server=$H0 $M0
++TEST dd if=/dev/urandom of=$M0/FILE bs=1024 count=1
++
++#Corrupt file from back-end
++TEST stat $B0/brick3/FILE
++echo "Corrupted data" >> $B0/brick3/FILE
++#Manually set bad-file xattr since we can't wait for an hour.
++TEST setfattr -n trusted.bit-rot.bad-file -v 0x3100 $B0/brick3/FILE
++
++TEST $CLI volume stop $V0
++TEST $CLI volume start $V0
++EXPECT 'Started' volinfo_field $V0 'Status';
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/brick0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/brick1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/brick2
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/brick3
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 1
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 2
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 3
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" get_bitd_count
++#Trigger lookup so that bitrot xlator marks file as bad in its inode context.
++stat $M0/FILE
++# Remove hot-tier
++TEST $CLI volume tier $V0  detach start
++sleep 1
++EXPECT_WITHIN $REBALANCE_TIMEOUT "completed" detach_tier_status_field_complete $V0
++TEST $CLI volume tier $V0  detach commit
++#Test that file has migrated to cold tier.
++EXPECT "1024" stat -c "%s" $B0/brick0/FILE
++EXPECT "1024" stat -c "%s" $B0/brick1/FILE
++TEST umount $M0
++cleanup
+diff --git a/tests/bugs/tier/bug-1205545-CTR-and-trash-integration.t b/tests/bugs/tier/bug-1205545-CTR-and-trash-integration.t
+new file mode 100644
+index 0000000..b2d382a
+--- /dev/null
++++ b/tests/bugs/tier/bug-1205545-CTR-and-trash-integration.t
+@@ -0,0 +1,72 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++
++LAST_BRICK=3
++CACHE_BRICK_FIRST=4
++CACHE_BRICK_LAST=5
++
++cleanup
++
++# Start glusterd [1-2]
++TEST glusterd
++TEST pidof glusterd
++
++# Set-up tier cluster [3-4]
++TEST $CLI volume create $V0 replica 2 $H0:$B0/${V0}{0..$LAST_BRICK}
++TEST $CLI volume start $V0
++TEST $CLI volume tier $V0 attach replica 2 $H0:$B0/${V0}$CACHE_BRICK_FIRST $H0:$B0/${V0}$CACHE_BRICK_LAST
++
++# Start and mount the volume after enabling CTR and trash [5-8]
++TEST $CLI volume set $V0 features.ctr-enabled on
++TEST $CLI volume set $V0 features.trash on
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0;
++
++# Create an empty file
++touch $M0/foo
++
++# gf_file_tb and gf_flink_tb should contain one entry each [9]
++ENTRY_COUNT=$(echo "select * from gf_file_tb; select * from gf_flink_tb;" | \
++        sqlite3 $B0/${V0}5/.glusterfs/${V0}5.db | wc -l )
++TEST [ $ENTRY_COUNT -eq 2 ]
++
++# Create two hard links
++ln $M0/foo $M0/lnk1
++ln $M0/foo $M0/lnk2
++
++# Now gf_flink_tb should contain 3 entries [10]
++ENTRY_COUNT=$(echo "select * from gf_flink_tb;" | \
++        sqlite3 $B0/${V0}5/.glusterfs/${V0}5.db | wc -l )
++TEST [ $ENTRY_COUNT -eq 3 ]
++
++# Delete the hard link
++rm -rf $M0/lnk1
++
++# Corresponding hard link entry must be removed from gf_flink_tb
++# but gf_file_tb should still contain the file entry [11]
++ENTRY_COUNT=$(echo "select * from gf_file_tb; select * from gf_flink_tb;" | \
++        sqlite3 $B0/${V0}5/.glusterfs/${V0}5.db | wc -l )
++TEST [ $ENTRY_COUNT -eq 3 ]
++
++# Remove the file
++rm -rf $M0/foo
++
++# Another hardlink removed [12]
++ENTRY_COUNT=$(echo "select * from gf_file_tb; select * from gf_flink_tb;" | \
++        sqlite3 $B0/${V0}5/.glusterfs/${V0}5.db | wc -l )
++TEST [ $ENTRY_COUNT -eq 2 ]
++
++# Remove the last hardlink
++rm -rf $M0/lnk2
++
++# All entried must be removed from gf_flink_tb and gf_file_tb [13]
++ENTRY_COUNT=$(echo "select * from gf_file_tb; select * from gf_flink_tb;" | \
++        sqlite3 $B0/${V0}5/.glusterfs/${V0}5.db | wc -l )
++TEST [ $ENTRY_COUNT -eq 0 ]
++
++cleanup
++
++
++
++#G_TESTDEF_TEST_STATUS_NETBSD7=KNOWN_ISSUE,BUG=000000
+diff --git a/tests/bugs/tier/bug-1279376-rename-demoted-file.t b/tests/bugs/tier/bug-1279376-rename-demoted-file.t
+new file mode 100755
+index 0000000..c4a50d9
+--- /dev/null
++++ b/tests/bugs/tier/bug-1279376-rename-demoted-file.t
+@@ -0,0 +1,93 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../tier.rc
++
++
++NUM_BRICKS=2
++DEMOTE_FREQ=15
++DEMOTE_TIMEOUT=10
++PROMOTE_FREQ=500
++
++
++#Both src and dst files must hash to the same hot tier subvol
++SRC_FILE="file1.txt"
++DST_FILE="newfile1.txt"
++
++
++# Creates a tiered volume with pure distribute hot and cold tiers
++# Both hot and cold tiers will have an equal number of bricks.
++
++function create_dist_tier_vol () {
++        mkdir $B0/cold
++        mkdir $B0/hot
++        TEST $CLI volume create $V0 $H0:$B0/cold/${V0}{0..$1}
++        TEST $CLI volume set $V0 performance.quick-read off
++        TEST $CLI volume set $V0 performance.io-cache off
++        TEST $CLI volume start $V0
++        TEST $CLI volume tier $V0 attach $H0:$B0/hot/${V0}{0..$1}
++        TEST $CLI volume set $V0 cluster.tier-demote-frequency $DEMOTE_FREQ
++        TEST $CLI volume set $V0 cluster.tier-promote-frequency $PROMOTE_FREQ
++        TEST $CLI volume set $V0 cluster.tier-mode test
++
++#We do not want any files to be promoted during this test
++        TEST $CLI volume set $V0 features.record-counters on
++        TEST $CLI volume set $V0 cluster.read-freq-threshold 50
++        TEST $CLI volume set $V0 cluster.write-freq-threshold 50
++}
++
++
++cleanup;
++
++#Basic checks
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume info
++
++
++#Create and start a tiered volume
++create_dist_tier_vol $NUM_BRICKS
++
++# Mount FUSE
++TEST glusterfs -s $H0 --volfile-id $V0 $M0
++
++
++# The file will be created on the hot tier
++
++TEST touch "$M0/$SRC_FILE"
++
++# Get the path of the file on the hot tier
++HPATH=`find $B0/hot/ -name  "$SRC_FILE"`
++echo "File path on hot tier: "$HPATH
++
++
++EXPECT "yes" exists_and_regular_file $HPATH
++
++# Wait for the tier process to demote the file
++sleep $DEMOTE_FREQ
++
++# Get the path of the file on the cold tier
++CPATH=`find $B0/cold/ -name  "$SRC_FILE"`
++echo "File path on cold tier: "$CPATH
++
++EXPECT_WITHIN $DEMOTE_TIMEOUT "yes" exists_and_regular_file $CPATH
++
++#We don't want $DST_FILE to get demoted
++TEST $CLI volume set $V0 cluster.tier-demote-frequency $PROMOTE_FREQ
++
++#This will be created on the hot tier
++
++touch "$M0/$DST_FILE"
++HPATH=`find $B0/hot/ -name "$DST_FILE"`
++echo "File path on hot tier: "$HPATH
++
++TEST mv $M0/$SRC_FILE $M0/$DST_FILE
++
++# We expect a single file to exist at this point
++# when viewed on the mountpoint
++EXPECT 1 echo $(ls -l $M0 | grep $DST_FILE | wc -l)
++
++cleanup;
++
++#G_TESTDEF_TEST_STATUS_NETBSD7=KNOWN_ISSUE,BUG=000000
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volgen.c b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+index b7c7bd9..ed24858 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volgen.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+@@ -1859,6 +1859,78 @@ out:
+     return ret;
+ }
+ 
++#if USE_GFDB /* only add changetimerecorder when GFDB is enabled */
++static int
++brick_graph_add_changetimerecorder(volgen_graph_t *graph,
++                                   glusterd_volinfo_t *volinfo,
++                                   dict_t *set_dict,
++                                   glusterd_brickinfo_t *brickinfo)
++{
++    xlator_t *xl = NULL;
++    int ret = -1;
++    char *brickname = NULL;
++    char *path = NULL;
++    char index_basepath[PATH_MAX] = {0};
++    char *hotbrick = NULL;
++
++    if (!graph || !volinfo || !set_dict || !brickinfo)
++        goto out;
++
++    path = brickinfo->path;
++
++    xl = volgen_graph_add(graph, "features/changetimerecorder",
++                          volinfo->volname);
++    if (!xl)
++        goto out;
++
++    ret = xlator_set_fixed_option(xl, "db-type", "sqlite3");
++    if (ret)
++        goto out;
++
++    if (!set_dict || dict_get_str(set_dict, "hot-brick", &hotbrick))
++        hotbrick = "off";
++
++    ret = xlator_set_fixed_option(xl, "hot-brick", hotbrick);
++    if (ret)
++        goto out;
++
++    brickname = strrchr(path, '/') + 1;
++    snprintf(index_basepath, sizeof(index_basepath), "%s.db", brickname);
++    ret = xlator_set_fixed_option(xl, "db-name", index_basepath);
++    if (ret)
++        goto out;
++
++    snprintf(index_basepath, sizeof(index_basepath), "%s/%s", path,
++             ".glusterfs/");
++    ret = xlator_set_fixed_option(xl, "db-path", index_basepath);
++    if (ret)
++        goto out;
++
++    ret = xlator_set_fixed_option(xl, "record-exit", "off");
++    if (ret)
++        goto out;
++
++    ret = xlator_set_fixed_option(xl, "ctr_link_consistency", "off");
++    if (ret)
++        goto out;
++
++    ret = xlator_set_fixed_option(xl, "ctr_lookupheal_link_timeout", "300");
++    if (ret)
++        goto out;
++
++    ret = xlator_set_fixed_option(xl, "ctr_lookupheal_inode_timeout", "300");
++    if (ret)
++        goto out;
++
++    ret = xlator_set_fixed_option(xl, "record-entry", "on");
++    if (ret)
++        goto out;
++
++out:
++    return ret;
++}
++#endif /* USE_GFDB */
++
+ static int
+ brick_graph_add_acl(volgen_graph_t *graph, glusterd_volinfo_t *volinfo,
+                     dict_t *set_dict, glusterd_brickinfo_t *brickinfo)
+@@ -2615,6 +2687,9 @@ static volgen_brick_xlator_t server_graph_table[] = {
+     {brick_graph_add_acl, "acl"},
+     {brick_graph_add_bitrot_stub, "bitrot-stub"},
+     {brick_graph_add_changelog, "changelog"},
++#if USE_GFDB /* changetimerecorder depends on gfdb */
++    {brick_graph_add_changetimerecorder, "changetimerecorder"},
++#endif
+     {brick_graph_add_bd, "bd"},
+     {brick_graph_add_trash, "trash"},
+     {brick_graph_add_arbiter, "arbiter"},
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index c8f6e67..a877805 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -11,6 +11,474 @@ cases as published by the Free Software Foundation.
+ #include "glusterd-volgen.h"
+ #include "glusterd-utils.h"
+ 
++#if USE_GFDB /* no GFDB means tiering is disabled */
++
++static int
++get_tier_freq_threshold(glusterd_volinfo_t *volinfo, char *threshold_key)
++{
++    int threshold = 0;
++    char *str_thresold = NULL;
++    int ret = -1;
++    xlator_t *this = NULL;
++
++    this = THIS;
++    GF_ASSERT(this);
++
++    glusterd_volinfo_get(volinfo, threshold_key, &str_thresold);
++    if (str_thresold) {
++        ret = gf_string2int(str_thresold, &threshold);
++        if (ret == -1) {
++            threshold = ret;
++            gf_msg(this->name, GF_LOG_ERROR, EINVAL, GD_MSG_INCOMPATIBLE_VALUE,
++                   "Failed to convert "
++                   "string to integer");
++        }
++    }
++
++    return threshold;
++}
++
++/*
++ * Validation function for record-counters
++ * if write-freq-threshold and read-freq-threshold both have non-zero values
++ * record-counters cannot be set to off
++ * if record-counters is set to on
++ * check if both the frequency thresholds are zero, then pop
++ * a note, but volume set is not failed.
++ * */
++static int
++validate_tier_counters(glusterd_volinfo_t *volinfo, dict_t *dict, char *key,
++                       char *value, char **op_errstr)
++{
++    char errstr[2048] = "";
++    int ret = -1;
++    xlator_t *this = NULL;
++    gf_boolean_t origin_val = -1;
++    int current_wt = 0;
++    int current_rt = 0;
++
++    this = THIS;
++    GF_ASSERT(this);
++
++    if (volinfo->type != GF_CLUSTER_TYPE_TIER) {
++        snprintf(errstr, sizeof(errstr),
++                 "Volume %s is not a tier "
++                 "volume. Option %s is only valid for tier volume.",
++                 volinfo->volname, key);
++        goto out;
++    }
++
++    ret = gf_string2boolean(value, &origin_val);
++    if (ret) {
++        snprintf(errstr, sizeof(errstr),
++                 "%s is not a compatible "
++                 "value. %s expects an boolean value",
++                 value, key);
++        goto out;
++    }
++
++    current_rt = get_tier_freq_threshold(volinfo,
++                                         "cluster.read-freq-threshold");
++    if (current_rt == -1) {
++        snprintf(errstr, sizeof(errstr),
++                 " Failed to retrieve value"
++                 " of cluster.read-freq-threshold");
++        goto out;
++    }
++    current_wt = get_tier_freq_threshold(volinfo,
++                                         "cluster.write-freq-threshold");
++    if (current_wt == -1) {
++        snprintf(errstr, sizeof(errstr),
++                 " Failed to retrieve value "
++                 "of cluster.write-freq-threshold");
++        goto out;
++    }
++    /* If record-counters is set to off */
++    if (!origin_val) {
++        /* Both the thresholds should be zero to set
++         * record-counters to off*/
++        if (current_rt || current_wt) {
++            snprintf(errstr, sizeof(errstr),
++                     "Cannot set features.record-counters to \"%s\""
++                     " as cluster.write-freq-threshold is %d"
++                     " and cluster.read-freq-threshold is %d. Please"
++                     " set both cluster.write-freq-threshold and "
++                     " cluster.read-freq-threshold to 0, to set "
++                     " features.record-counters to \"%s\".",
++                     value, current_wt, current_rt, value);
++            ret = -1;
++            goto out;
++        }
++    }
++    /* TODO give a warning message to the user. errstr without re = -1 will
++     * not result in a warning on cli for now.
++    else {
++            if (!current_rt && !current_wt) {
++                    snprintf (errstr, sizeof (errstr),
++                            " Note : cluster.write-freq-threshold is %d"
++                            " and cluster.read-freq-threshold is %d. Please"
++                            " set both cluster.write-freq-threshold and "
++                            " cluster.read-freq-threshold to"
++                            " appropriate positive values.",
++                            current_wt, current_rt);
++            }
++    }*/
++
++    ret = 0;
++out:
++
++    if (ret) {
++        gf_msg(this->name, GF_LOG_ERROR, EINVAL, GD_MSG_INCOMPATIBLE_VALUE,
++               "%s", errstr);
++        *op_errstr = gf_strdup(errstr);
++    }
++
++    return ret;
++}
++
++/*
++ * Validation function for ctr sql params
++ *      features.ctr-sql-db-cachesize           (Range: 1000 to 262144 pages)
++ *      features.ctr-sql-db-wal-autocheckpoint  (Range: 1000 to 262144 pages)
++ * */
++static int
++validate_ctr_sql_params(glusterd_volinfo_t *volinfo, dict_t *dict, char *key,
++                        char *value, char **op_errstr)
++{
++    int ret = -1;
++    xlator_t *this = NULL;
++    char errstr[2048] = "";
++    int origin_val = -1;
++
++    this = THIS;
++    GF_ASSERT(this);
++
++    ret = gf_string2int(value, &origin_val);
++    if (ret) {
++        snprintf(errstr, sizeof(errstr),
++                 "%s is not a compatible "
++                 "value. %s expects an integer value.",
++                 value, key);
++        ret = -1;
++        goto out;
++    }
++
++    if (origin_val < 0) {
++        snprintf(errstr, sizeof(errstr),
++                 "%s is not a "
++                 "compatible value. %s expects a positive"
++                 "integer value.",
++                 value, key);
++        ret = -1;
++        goto out;
++    }
++
++    if (strstr(key, "sql-db-cachesize") ||
++        strstr(key, "sql-db-wal-autocheckpoint")) {
++        if ((origin_val < 1000) || (origin_val > 262144)) {
++            snprintf(errstr, sizeof(errstr),
++                     "%s is not a "
++                     "compatible value. %s "
++                     "expects a value between : "
++                     "1000 to 262144.",
++                     value, key);
++            ret = -1;
++            goto out;
++        }
++    }
++
++    ret = 0;
++out:
++    if (ret) {
++        gf_msg(this->name, GF_LOG_ERROR, EINVAL, GD_MSG_INCOMPATIBLE_VALUE,
++               "%s", errstr);
++        *op_errstr = gf_strdup(errstr);
++    }
++    return ret;
++}
++
++/* Validation for tiering frequency thresholds
++ * If any of the frequency thresholds are set to a non-zero value,
++ * switch record-counters on, if not already on
++ * If both the frequency thresholds are set to zero,
++ * switch record-counters off, if not already off
++ * */
++static int
++validate_tier_thresholds(glusterd_volinfo_t *volinfo, dict_t *dict, char *key,
++                         char *value, char **op_errstr)
++{
++    char errstr[2048] = "";
++    int ret = -1;
++    xlator_t *this = NULL;
++    int origin_val = -1;
++    gf_boolean_t current_rc = _gf_false;
++    int current_wt = 0;
++    int current_rt = 0;
++    gf_boolean_t is_set_rc = _gf_false;
++    char *proposed_rc = NULL;
++
++    this = THIS;
++    GF_ASSERT(this);
++
++    if (volinfo->type != GF_CLUSTER_TYPE_TIER) {
++        snprintf(errstr, sizeof(errstr),
++                 "Volume %s is not a tier "
++                 "volume. Option %s is only valid for tier volume.",
++                 volinfo->volname, key);
++        goto out;
++    }
++
++    ret = gf_string2int(value, &origin_val);
++    if (ret) {
++        snprintf(errstr, sizeof(errstr),
++                 "%s is not a compatible "
++                 "value. %s expects an integer value.",
++                 value, key);
++        ret = -1;
++        goto out;
++    }
++
++    if (origin_val < 0) {
++        snprintf(errstr, sizeof(errstr),
++                 "%s is not a "
++                 "compatible value. %s expects a positive"
++                 "integer value.",
++                 value, key);
++        ret = -1;
++        goto out;
++    }
++
++    /* Get the record-counters value */
++    ret = glusterd_volinfo_get_boolean(volinfo, "features.record-counters");
++    if (ret == -1) {
++        snprintf(errstr, sizeof(errstr),
++                 "Failed to retrieve value of"
++                 "features.record-counters from volume info");
++        goto out;
++    }
++    current_rc = ret;
++
++    /* if any of the thresholds are set to a non-zero value
++     * switch record-counters on, if not already on*/
++    if (origin_val > 0) {
++        if (!current_rc) {
++            is_set_rc = _gf_true;
++            current_rc = _gf_true;
++        }
++    } else {
++        /* if the set is for write-freq-threshold */
++        if (strstr(key, "write-freq-threshold")) {
++            current_rt = get_tier_freq_threshold(volinfo,
++                                                 "cluster.read-freq-threshold");
++            if (current_rt == -1) {
++                snprintf(errstr, sizeof(errstr),
++                         " Failed to retrieve value of"
++                         "cluster.read-freq-threshold");
++                goto out;
++            }
++            current_wt = origin_val;
++        }
++        /* else it should be read-freq-threshold */
++        else {
++            current_wt = get_tier_freq_threshold(
++                volinfo, "cluster.write-freq-threshold");
++            if (current_wt == -1) {
++                snprintf(errstr, sizeof(errstr),
++                         " Failed to retrieve value of"
++                         "cluster.write-freq-threshold");
++                goto out;
++            }
++            current_rt = origin_val;
++        }
++
++        /* Since both the thresholds are zero, set record-counters
++         * to off, if not already off */
++        if (current_rt == 0 && current_wt == 0) {
++            if (current_rc) {
++                is_set_rc = _gf_true;
++                current_rc = _gf_false;
++            }
++        }
++    }
++
++    /* if record-counter has to be set to proposed value */
++    if (is_set_rc) {
++        if (current_rc) {
++            ret = gf_asprintf(&proposed_rc, "on");
++        } else {
++            ret = gf_asprintf(&proposed_rc, "off");
++        }
++        if (ret < 0) {
++            gf_msg(this->name, GF_LOG_ERROR, EINVAL, GD_MSG_INCOMPATIBLE_VALUE,
++                   "Failed to allocate memory to dict_value");
++            goto error;
++        }
++        ret = dict_set_str(volinfo->dict, "features.record-counters",
++                           proposed_rc);
++    error:
++        if (ret) {
++            snprintf(errstr, sizeof(errstr),
++                     "Failed to set features.record-counters"
++                     "to \"%s\" automatically."
++                     "Please try to set features.record-counters "
++                     "\"%s\" manually. The options "
++                     "cluster.write-freq-threshold and "
++                     "cluster.read-freq-threshold can only "
++                     "be set to a non zero value, if "
++                     "features.record-counters is "
++                     "set to \"on\".",
++                     proposed_rc, proposed_rc);
++            goto out;
++        }
++    }
++    ret = 0;
++out:
++    if (ret) {
++        gf_msg(this->name, GF_LOG_ERROR, EINVAL, GD_MSG_INCOMPATIBLE_VALUE,
++               "%s", errstr);
++        *op_errstr = gf_strdup(errstr);
++        if (proposed_rc)
++            GF_FREE(proposed_rc);
++    }
++    return ret;
++}
++
++static int
++validate_tier(glusterd_volinfo_t *volinfo, dict_t *dict, char *key, char *value,
++              char **op_errstr)
++{
++    char errstr[2048] = "";
++    int ret = 0;
++    xlator_t *this = NULL;
++    int origin_val = -1;
++    char *current_wm_hi = NULL;
++    char *current_wm_low = NULL;
++    uint64_t wm_hi = 0;
++    uint64_t wm_low = 0;
++
++    this = THIS;
++    GF_ASSERT(this);
++
++    if (volinfo->type != GF_CLUSTER_TYPE_TIER) {
++        snprintf(errstr, sizeof(errstr),
++                 "Volume %s is not a tier "
++                 "volume. Option %s is only valid for tier volume.",
++                 volinfo->volname, key);
++        gf_msg(this->name, GF_LOG_ERROR, EINVAL, GD_MSG_INCOMPATIBLE_VALUE,
++               "%s", errstr);
++        *op_errstr = gf_strdup(errstr);
++        ret = -1;
++        goto out;
++    }
++
++    if (strstr(key, "cluster.tier-mode")) {
++        if (strcmp(value, "test") && strcmp(value, "cache")) {
++            ret = -1;
++            goto out;
++        }
++        goto out;
++    } else if (strstr(key, "tier-pause")) {
++        if (strcmp(value, "off") && strcmp(value, "on")) {
++            ret = -1;
++            goto out;
++        }
++        goto out;
++    } else if (strstr(key, "tier-compact")) {
++        if (strcmp(value, "on") && strcmp(value, "off")) {
++            ret = -1;
++            goto out;
++        }
++
++        goto out;
++    }
++
++    /*
++     * Rest of the volume set options for tier are expecting a positive
++     * Integer. Change the function accordingly if this constraint is
++     * changed.
++     */
++    ret = gf_string2int(value, &origin_val);
++    if (ret) {
++        snprintf(errstr, sizeof(errstr),
++                 "%s is not a compatible "
++                 "value. %s expects an integer value.",
++                 value, key);
++        gf_msg(this->name, GF_LOG_ERROR, EINVAL, GD_MSG_INCOMPATIBLE_VALUE,
++               "%s", errstr);
++        *op_errstr = gf_strdup(errstr);
++        ret = -1;
++        goto out;
++    }
++
++    if (strstr(key, "watermark-hi") || strstr(key, "watermark-low")) {
++        if ((origin_val < 1) || (origin_val > 99)) {
++            snprintf(errstr, sizeof(errstr),
++                     "%s is not a "
++                     "compatible value. %s expects a "
++                     "percentage from 1-99.",
++                     value, key);
++            gf_msg(this->name, GF_LOG_ERROR, EINVAL, GD_MSG_INCOMPATIBLE_VALUE,
++                   "%s", errstr);
++            *op_errstr = gf_strdup(errstr);
++            ret = -1;
++            goto out;
++        }
++
++        if (strstr(key, "watermark-hi")) {
++            wm_hi = origin_val;
++        } else {
++            glusterd_volinfo_get(volinfo, "cluster.watermark-hi",
++                                 &current_wm_hi);
++            gf_string2bytesize_uint64(current_wm_hi, &wm_hi);
++        }
++
++        if (strstr(key, "watermark-low")) {
++            wm_low = origin_val;
++        } else {
++            glusterd_volinfo_get(volinfo, "cluster.watermark-low",
++                                 &current_wm_low);
++            gf_string2bytesize_uint64(current_wm_low, &wm_low);
++        }
++        if (wm_low >= wm_hi) {
++            snprintf(errstr, sizeof(errstr),
++                     "lower watermark"
++                     " cannot be equal or exceed upper "
++                     "watermark.");
++            gf_msg(this->name, GF_LOG_ERROR, EINVAL, GD_MSG_INCOMPATIBLE_VALUE,
++                   "%s", errstr);
++            *op_errstr = gf_strdup(errstr);
++            ret = -1;
++            goto out;
++        }
++    } else if (strstr(key, "tier-promote-frequency") ||
++               strstr(key, "tier-max-mb") ||
++               strstr(key, "tier-max-promote-file-size") ||
++               strstr(key, "tier-max-files") ||
++               strstr(key, "tier-demote-frequency") ||
++               strstr(key, "tier-hot-compact-frequency") ||
++               strstr(key, "tier-cold-compact-frequency") ||
++               strstr(key, "tier-query-limit")) {
++        if (origin_val < 1) {
++            snprintf(errstr, sizeof(errstr),
++                     "%s is not a "
++                     " compatible value. %s expects a positive "
++                     "integer value greater than 0.",
++                     value, key);
++            gf_msg(this->name, GF_LOG_ERROR, EINVAL, GD_MSG_INCOMPATIBLE_VALUE,
++                   "%s", errstr);
++            *op_errstr = gf_strdup(errstr);
++            ret = -1;
++            goto out;
++        }
++    }
++out:
++    gf_msg_debug(this->name, 0, "Returning %d", ret);
++
++    return ret;
++}
++
++#endif /* End for USE_GFDB */
++
+ static int
+ validate_cache_max_min_size(glusterd_volinfo_t *volinfo, dict_t *dict,
+                             char *key, char *value, char **op_errstr)
+@@ -2485,6 +2953,261 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+                     "/var/run/gluster/shared_storage on enabling this "
+                     "option. Unmount and delete the shared storage volume "
+                     " on disabling this option."},
++#if USE_GFDB /* no GFDB means tiering is disabled */
++    /* tier translator - global tunables */
++    {.key = "cluster.write-freq-threshold",
++     .voltype = "cluster/tier",
++     .value = "0",
++     .option = "write-freq-threshold",
++     .op_version = GD_OP_VERSION_3_7_0,
++     .flags = VOLOPT_FLAG_CLIENT_OPT,
++     .validate_fn = validate_tier_thresholds,
++     .description = "Defines the number of writes, in a promotion/demotion"
++                    " cycle, that would mark a file HOT for promotion. Any"
++                    " file that has write hits less than this value will "
++                    "be considered as COLD and will be demoted."},
++    {.key = "cluster.read-freq-threshold",
++     .voltype = "cluster/tier",
++     .value = "0",
++     .option = "read-freq-threshold",
++     .op_version = GD_OP_VERSION_3_7_0,
++     .flags = VOLOPT_FLAG_CLIENT_OPT,
++     .validate_fn = validate_tier_thresholds,
++     .description = "Defines the number of reads, in a promotion/demotion "
++                    "cycle, that would mark a file HOT for promotion. Any "
++                    "file that has read hits less than this value will be "
++                    "considered as COLD and will be demoted."},
++    {
++        .key = "cluster.tier-pause",
++        .voltype = "cluster/tier",
++        .option = "tier-pause",
++        .op_version = GD_OP_VERSION_3_7_6,
++        .flags = VOLOPT_FLAG_CLIENT_OPT,
++        .validate_fn = validate_tier,
++    },
++    {
++        .key = "cluster.tier-promote-frequency",
++        .voltype = "cluster/tier",
++        .value = "120",
++        .option = "tier-promote-frequency",
++        .op_version = GD_OP_VERSION_3_7_0,
++        .flags = VOLOPT_FLAG_CLIENT_OPT,
++        .validate_fn = validate_tier,
++    },
++    {
++        .key = "cluster.tier-demote-frequency",
++        .voltype = "cluster/tier",
++        .value = "3600",
++        .option = "tier-demote-frequency",
++        .op_version = GD_OP_VERSION_3_7_0,
++        .flags = VOLOPT_FLAG_CLIENT_OPT,
++        .validate_fn = validate_tier,
++    },
++    {.key = "cluster.watermark-hi",
++     .voltype = "cluster/tier",
++     .value = "90",
++     .option = "watermark-hi",
++     .op_version = GD_OP_VERSION_3_7_6,
++     .flags = VOLOPT_FLAG_CLIENT_OPT,
++     .validate_fn = validate_tier,
++     .description =
++         "Upper % watermark for promotion. If hot tier fills"
++         " above this percentage, no promotion will happen and demotion will "
++         "happen with high probability."},
++    {.key = "cluster.watermark-low",
++     .voltype = "cluster/tier",
++     .value = "75",
++     .option = "watermark-low",
++     .op_version = GD_OP_VERSION_3_7_6,
++     .flags = VOLOPT_FLAG_CLIENT_OPT,
++     .validate_fn = validate_tier,
++     .description =
++         "Lower % watermark. If hot tier is less "
++         "full than this, promotion will happen and demotion will not happen. "
++         "If greater than this, promotion/demotion will happen at a "
++         "probability "
++         "relative to how full the hot tier is."},
++    {.key = "cluster.tier-mode",
++     .voltype = "cluster/tier",
++     .option = "tier-mode",
++     .value = "cache",
++     .op_version = GD_OP_VERSION_3_7_6,
++     .flags = VOLOPT_FLAG_CLIENT_OPT,
++     .validate_fn = validate_tier,
++     .description =
++         "Either 'test' or 'cache'. Test mode periodically"
++         " demotes or promotes files automatically based on access."
++         " Cache mode does so based on whether the cache is full or not,"
++         " as specified with watermarks."},
++    {.key = "cluster.tier-max-promote-file-size",
++     .voltype = "cluster/tier",
++     .option = "tier-max-promote-file-size",
++     .value = "0",
++     .op_version = GD_OP_VERSION_3_7_10,
++     .flags = VOLOPT_FLAG_CLIENT_OPT,
++     .validate_fn = validate_tier,
++     .description =
++         "The maximum file size in bytes that is promoted. If 0, there"
++         " is no maximum size (default)."},
++    {.key = "cluster.tier-max-mb",
++     .voltype = "cluster/tier",
++     .option = "tier-max-mb",
++     .value = "4000",
++     .op_version = GD_OP_VERSION_3_7_6,
++     .flags = VOLOPT_FLAG_CLIENT_OPT,
++     .validate_fn = validate_tier,
++     .description = "The maximum number of MB that may be migrated"
++                    " in any direction in a given cycle by a single node."},
++    {.key = "cluster.tier-max-files",
++     .voltype = "cluster/tier",
++     .option = "tier-max-files",
++     .value = "10000",
++     .op_version = GD_OP_VERSION_3_7_6,
++     .flags = VOLOPT_FLAG_CLIENT_OPT,
++     .validate_fn = validate_tier,
++     .description = "The maximum number of files that may be migrated"
++                    " in any direction in a given cycle by a single node."},
++    {.key = "cluster.tier-query-limit",
++     .voltype = "cluster/tier",
++     .option = "tier-query-limit",
++     .value = "100",
++     .op_version = GD_OP_VERSION_3_9_1,
++     .flags = VOLOPT_FLAG_CLIENT_OPT,
++     .validate_fn = validate_tier,
++     .type = NO_DOC,
++     .description = "The maximum number of files that may be migrated "
++                    "during an emergency demote. An emergency condition "
++                    "is flagged when writes breach the hi-watermark."},
++    {.key = "cluster.tier-compact",
++     .voltype = "cluster/tier",
++     .option = "tier-compact",
++     .value = "on",
++     .op_version = GD_OP_VERSION_3_9_0,
++     .flags = VOLOPT_FLAG_CLIENT_OPT,
++     .validate_fn = validate_tier,
++     .description = "Activate or deactivate the compaction of the DB"
++                    " for the volume's metadata."},
++    {
++        .key = "cluster.tier-hot-compact-frequency",
++        .voltype = "cluster/tier",
++        .value = "604800",
++        .option = "tier-hot-compact-frequency",
++        .op_version = GD_OP_VERSION_3_9_0,
++        .flags = VOLOPT_FLAG_CLIENT_OPT,
++        .validate_fn = validate_tier,
++    },
++    {
++        .key = "cluster.tier-cold-compact-frequency",
++        .voltype = "cluster/tier",
++        .value = "604800",
++        .option = "tier-cold-compact-frequency",
++        .op_version = GD_OP_VERSION_3_9_0,
++        .flags = VOLOPT_FLAG_CLIENT_OPT,
++        .validate_fn = validate_tier,
++    },
++    {.key = "features.ctr-enabled",
++     .voltype = "features/changetimerecorder",
++     .value = "off",
++     .option = "ctr-enabled",
++     .op_version = GD_OP_VERSION_3_7_0,
++     .description = "Enable CTR xlator"},
++    {.key = "features.record-counters",
++     .voltype = "features/changetimerecorder",
++     .value = "off",
++     .option = "record-counters",
++     .op_version = GD_OP_VERSION_3_7_0,
++     .validate_fn = validate_tier_counters,
++     .description = "Its a Change Time Recorder Xlator option to "
++                    "enable recording write "
++                    "and read heat counters. The default is disabled. "
++                    "If enabled, \"cluster.write-freq-threshold\" and "
++                    "\"cluster.read-freq-threshold\" defined the number "
++                    "of writes (or reads) to a given file are needed "
++                    "before triggering migration."},
++    {.key = "features.ctr-record-metadata-heat",
++     .voltype = "features/changetimerecorder",
++     .value = "off",
++     .option = "ctr-record-metadata-heat",
++     .op_version = GD_OP_VERSION_3_7_0,
++     .type = NO_DOC,
++     .description = "Its a Change Time Recorder Xlator option to "
++                    "enable recording write heat on metadata of the file. "
++                    "The default is disabled. "
++                    "Metadata is inode attributes like atime, mtime,"
++                    " permissions etc and "
++                    "extended attributes of a file ."},
++    {.key = "features.ctr_link_consistency",
++     .voltype = "features/changetimerecorder",
++     .value = "off",
++     .option = "ctr_link_consistency",
++     .op_version = GD_OP_VERSION_3_7_0,
++     .type = NO_DOC,
++     .description = "Enable a crash consistent way of recording hardlink "
++                    "updates by Change Time Recorder Xlator. "
++                    "When recording in a crash "
++                    "consistent way the data operations will "
++                    "experience more latency."},
++    {.key = "features.ctr_lookupheal_link_timeout",
++     .voltype = "features/changetimerecorder",
++     .value = "300",
++     .option = "ctr_lookupheal_link_timeout",
++     .op_version = GD_OP_VERSION_3_7_2,
++     .type = NO_DOC,
++     .description = "Defines the expiry period of in-memory "
++                    "hardlink of an inode,"
++                    "used by lookup heal in Change Time Recorder."
++                    "Once the expiry period"
++                    "hits an attempt to heal the database per "
++                    "hardlink is done and the "
++                    "in-memory hardlink period is reset"},
++    {.key = "features.ctr_lookupheal_inode_timeout",
++     .voltype = "features/changetimerecorder",
++     .value = "300",
++     .option = "ctr_lookupheal_inode_timeout",
++     .op_version = GD_OP_VERSION_3_7_2,
++     .type = NO_DOC,
++     .description = "Defines the expiry period of in-memory inode,"
++                    "used by lookup heal in Change Time Recorder. "
++                    "Once the expiry period"
++                    "hits an attempt to heal the database per "
++                    "inode is done"},
++    {.key = "features.ctr-sql-db-cachesize",
++     .voltype = "features/changetimerecorder",
++     .value = "12500",
++     .option = "sql-db-cachesize",
++     .validate_fn = validate_ctr_sql_params,
++     .op_version = GD_OP_VERSION_3_7_7,
++     .description = "Defines the cache size of the sqlite database of "
++                    "changetimerecorder xlator."
++                    "The input to this option is in pages."
++                    "Each page is 4096 bytes. Default value is 12500 "
++                    "pages."
++                    "The max value is 262144 pages i.e 1 GB and "
++                    "the min value is 1000 pages i.e ~ 4 MB. "},
++    {.key = "features.ctr-sql-db-wal-autocheckpoint",
++     .voltype = "features/changetimerecorder",
++     .value = "25000",
++     .option = "sql-db-wal-autocheckpoint",
++     .validate_fn = validate_ctr_sql_params,
++     .op_version = GD_OP_VERSION_3_7_7,
++     .description = "Defines the autocheckpoint of the sqlite database of "
++                    " changetimerecorder. "
++                    "The input to this option is in pages. "
++                    "Each page is 4096 bytes. Default value is 25000 "
++                    "pages."
++                    "The max value is 262144 pages i.e 1 GB and "
++                    "the min value is 1000 pages i.e ~4 MB."},
++    {.key = VKEY_FEATURES_SELINUX,
++     .voltype = "features/selinux",
++     .type = NO_DOC,
++     .value = "on",
++     .op_version = GD_OP_VERSION_3_11_0,
++     .description = "Convert security.selinux xattrs to "
++                    "trusted.gluster.selinux on the bricks. Recommended "
++                    "to have enabled when clients and/or bricks support "
++                    "SELinux."},
++
++#endif /* USE_GFDB */
+     {
+         .key = "locks.trace",
+         .voltype = "features/locks",
+-- 
+1.8.3.1
+

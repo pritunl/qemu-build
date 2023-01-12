@@ -1,0 +1,51 @@
+From bbf43008e6d21d649536547f500662b940562c3e Mon Sep 17 00:00:00 2001
+From: Sunny Kumar <sunkumar@redhat.com>
+Date: Mon, 11 May 2020 10:02:08 +0100
+Subject: [PATCH 373/375] build: geo-rep sub-pkg requires
+ policycoreutils-python-utils on rhel8
+
+glusterfs-geo-replication sub-package requires policycoreutils-python-utils
+on rhel8 to set relevant selinux boolean to allow rsync.
+
+Backport of:
+    >Upstream Patch: https://review.gluster.org/#/c/glusterfs/+/24433/
+    >Change-Id: Ia0fdcfdd8c7d18cd194e011f6b365bf5cb70a20a
+    >Fixes: #1236
+    >Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+
+BUG: 1825177
+Change-Id: Ia0fdcfdd8c7d18cd194e011f6b365bf5cb70a20a
+Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/200242
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfs.spec.in | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 5ed07e7..9def416 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -523,6 +523,8 @@ Requires:         util-linux
+ Requires:         %{name}-libs%{?_isa} = %{version}-%{release}
+ # required for setting selinux bools
+ %if ( 0%{?rhel} && 0%{?rhel} >= 8 )
++Requires(post):      policycoreutils-python-utils
++Requires(postun):    policycoreutils-python-utils
+ Requires:            selinux-policy-targeted
+ Requires(post):      selinux-policy-targeted
+ BuildRequires:       selinux-policy-devel
+@@ -1978,6 +1980,10 @@ fi
+ %endif
+ 
+ %changelog
++
++* Mon May 11 2020 Sunny Kumar <sunkumar@redhat.com>
++- added requires policycoreutils-python-utils on rhel8 for geo-replication
++
+ * Tue Aug 27 2019 Hari Gowtham <hgowtham@redhat.com>
+ - Added scripts to collect machine stats and component stats (#1719171)
+ 
+-- 
+1.8.3.1
+

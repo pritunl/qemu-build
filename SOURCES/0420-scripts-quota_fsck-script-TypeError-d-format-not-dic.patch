@@ -1,0 +1,46 @@
+From 42a05c7f8464f529f53bced31a64ea373e16f58b Mon Sep 17 00:00:00 2001
+From: Hari Gowtham <hgowtham@redhat.com>
+Date: Thu, 24 Oct 2019 17:40:44 +0530
+Subject: [PATCH 420/449] scripts: quota_fsck script TypeError: %d format:not
+ dict
+
+Problem: One of the prints in the script have been using
+%i as the format for printing which doesn't work.
+
+Fix: use %s as the format in the place of %i
+
+>Fixes: bz#1764129
+>Change-Id: I4480ede7bf62906ddedbe5f880a1e89c76946641
+>Signed-off-by: Hari Gowtham <hgowtham@redhat.com>
+>Upstream patch: https://review.gluster.org/#/c/glusterfs/+/23586/
+
+BUG: 1786681
+Change-Id: I4480ede7bf62906ddedbe5f880a1e89c76946641
+Signed-off-by: hari gowtham <hgowtham@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202484
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunny Kumar <sunkumar@redhat.com>
+---
+ extras/quota/quota_fsck.py | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/extras/quota/quota_fsck.py b/extras/quota/quota_fsck.py
+index 485a37a..174f2a2 100755
+--- a/extras/quota/quota_fsck.py
++++ b/extras/quota/quota_fsck.py
+@@ -58,10 +58,10 @@ def print_msg(log_type, path, xattr_dict = {}, stbuf = "", dir_size = None):
+     elif log_type == QUOTA_SIZE_MISMATCH:
+         print("mismatch")
+         if dir_size is not None:
+-            print('%24s %60s %12s %12s' % ("Size Mismatch", path, 
++            print('%24s %60s %12s %12s' % ("Size Mismatch", path,
+                 xattr_dict, dir_size))
+         else:
+-            print('%-24s %-60s %-12i %-12i' % ("Size Mismatch", path, xattr_dict,
++            print('%-24s %-60s %-12s %-12s' % ("Size Mismatch", path, xattr_dict,
+                    stbuf.st_size))
+ 
+ def size_differs_lot(s1, s2):
+-- 
+1.8.3.1
+

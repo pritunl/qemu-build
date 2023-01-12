@@ -1,0 +1,98 @@
+From a0661449cd8ba7b851fec473191733767f4541b8 Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Thu, 28 Mar 2019 17:55:54 +0530
+Subject: [PATCH 46/52] protocol/client: Do not fallback to anon-fd if fd is
+ not open
+
+If an open comes on a file when a brick is down and after the brick comes up,
+a fop comes on the fd, client xlator would still wind the fop on anon-fd
+leading to wrong behavior of the fops in some cases.
+
+Example:
+If lk fop is issued on the fd just after the brick is up in the scenario above,
+lk fop will be sent on anon-fd instead of failing it on that client xlator.
+This lock will never be freed upon close of the fd as flush on anon-fd is
+invalid and is not wound below server xlator.
+
+As a fix, failing the fop unless the fd has FALLBACK_TO_ANON_FD flag.
+
+ >Upstream-patch: https://review.gluster.org/c/glusterfs/+/15804
+ >Change-Id: I77692d056660b2858e323bdabdfe0a381807cccc
+ >fixes bz#1390914
+
+BUG: 1695057
+Change-Id: Id656bea8dde14327212fbe7ecc97519dc5b32098
+Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/166833
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/protocol/bug-1390914.t            | 36 ++++++++++++++++++++++++++++
+ xlators/protocol/client/src/client-helpers.c |  8 ++++++-
+ 2 files changed, 43 insertions(+), 1 deletion(-)
+ create mode 100644 tests/bugs/protocol/bug-1390914.t
+
+diff --git a/tests/bugs/protocol/bug-1390914.t b/tests/bugs/protocol/bug-1390914.t
+new file mode 100644
+index 0000000..e3dab92
+--- /dev/null
++++ b/tests/bugs/protocol/bug-1390914.t
+@@ -0,0 +1,36 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../fileio.rc
++cleanup;
++
++#test that fops are not wound on anon-fd when fd is not open on that brick
++TEST glusterd;
++TEST pidof glusterd
++
++TEST $CLI volume create $V0 replica 3 $H0:$B0/${V0}{1,2,3};
++TEST $CLI volume set $V0 performance.open-behind off
++TEST $CLI volume set $V0 diagnostics.client-log-level DEBUG
++TEST $CLI volume heal $V0 disable
++TEST $CLI volume start $V0
++TEST $CLI volume profile $V0 start
++TEST $GFS -s $H0 --volfile-id=$V0 --direct-io-mode=enable $M0;
++
++TEST touch $M0/1
++TEST kill_brick $V0 $H0 $B0/${V0}1
++TEST fd_open 200 'w' "$M0/1"
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 0
++
++#lk should only happen on 2 bricks, if there is a bug, it will plant a lock
++#with anon-fd on first-brick which will never be released because flush won't
++#be wound below server xlator for anon-fd
++TEST flock -x -n 200
++TEST fd_close 200
++
++TEST fd_open 200 'w' "$M0/1"
++#this lock will fail if there is a stale lock
++TEST flock -x -n 200
++TEST fd_close 200
++cleanup;
+diff --git a/xlators/protocol/client/src/client-helpers.c b/xlators/protocol/client/src/client-helpers.c
+index 55e87b3..2dd7106 100644
+--- a/xlators/protocol/client/src/client-helpers.c
++++ b/xlators/protocol/client/src/client-helpers.c
+@@ -419,7 +419,13 @@ client_get_remote_fd(xlator_t *this, fd_t *fd, int flags, int64_t *remote_fd)
+     {
+         fdctx = this_fd_get_ctx(fd, this);
+         if (!fdctx) {
+-            *remote_fd = GF_ANON_FD_NO;
++            if (fd->anonymous) {
++                *remote_fd = GF_ANON_FD_NO;
++            } else {
++                *remote_fd = -1;
++                gf_msg_debug(this->name, EBADF, "not a valid fd for gfid: %s",
++                             uuid_utoa(fd->inode->gfid));
++            }
+         } else {
+             if (__is_fd_reopen_in_progress(fdctx))
+                 *remote_fd = -1;
+-- 
+1.8.3.1
+

@@ -1,0 +1,422 @@
+From 4097a748cbb7616d78886b35e3360177d570b7a6 Mon Sep 17 00:00:00 2001
+From: Krutika Dhananjay <kdhananj@redhat.com>
+Date: Fri, 22 May 2020 13:25:26 +0530
+Subject: [PATCH 382/382] features/shard: Aggregate file size, block-count
+ before unwinding removexattr
+
+Posix translator returns pre and postbufs in the dict in {F}REMOVEXATTR fops.
+These iatts are further cached at layers like md-cache.
+Shard translator, in its current state, simply returns these values without
+updating the aggregated file size and block-count.
+
+This patch fixes this problem.
+
+Upstream patch:
+> Upstream patch link: https://review.gluster.org/c/glusterfs/+/24480
+> Change-Id: I4b2dd41ede472c5829af80a67401ec5a6376d872
+> Fixes: #1243
+> Signed-off-by: Krutika Dhananjay <kdhananj@redhat.com>
+
+Change-Id: I4b2dd41ede472c5829af80a67401ec5a6376d872
+BUG: 1823423
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/201456
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/shard/issue-1243.t      |  12 ++
+ xlators/features/shard/src/shard.c | 293 ++++++++++++++++++++++++++-----------
+ xlators/features/shard/src/shard.h |   1 +
+ 3 files changed, 224 insertions(+), 82 deletions(-)
+
+diff --git a/tests/bugs/shard/issue-1243.t b/tests/bugs/shard/issue-1243.t
+index b0c092c..ba22d2b 100644
+--- a/tests/bugs/shard/issue-1243.t
++++ b/tests/bugs/shard/issue-1243.t
+@@ -1,6 +1,7 @@
+ #!/bin/bash
+ 
+ . $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
+ 
+ cleanup;
+ 
+@@ -22,10 +23,21 @@ TEST $CLI volume set $V0 md-cache-timeout 10
+ # Write data into a file such that its size crosses shard-block-size
+ TEST dd if=/dev/zero of=$M0/foo bs=1048576 count=8 oflag=direct
+ 
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
++TEST $GFS --volfile-id=$V0 --volfile-server=$H0 $M0
++
+ # Execute a setxattr on the file.
+ TEST setfattr -n trusted.libvirt -v some-value $M0/foo
+ 
+ # Size of the file should be the aggregated size, not the shard-block-size
+ EXPECT '8388608' stat -c %s $M0/foo
+ 
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
++TEST $GFS --volfile-id=$V0 --volfile-server=$H0 $M0
++
++# Execute a removexattr on the file.
++TEST setfattr -x trusted.libvirt $M0/foo
++
++# Size of the file should be the aggregated size, not the shard-block-size
++EXPECT '8388608' stat -c %s $M0/foo
+ cleanup
+diff --git a/xlators/features/shard/src/shard.c b/xlators/features/shard/src/shard.c
+index 6ae4c41..2e2ef5d 100644
+--- a/xlators/features/shard/src/shard.c
++++ b/xlators/features/shard/src/shard.c
+@@ -442,6 +442,9 @@ void shard_local_wipe(shard_local_t *local) {
+   loc_wipe(&local->int_entrylk.loc);
+   loc_wipe(&local->newloc);
+ 
++  if (local->name)
++    GF_FREE(local->name);
++
+   if (local->int_entrylk.basename)
+     GF_FREE(local->int_entrylk.basename);
+   if (local->fd)
+@@ -5819,46 +5822,216 @@ int32_t shard_readdirp(call_frame_t *frame, xlator_t *this, fd_t *fd,
+   return 0;
+ }
+ 
+-int32_t shard_removexattr(call_frame_t *frame, xlator_t *this, loc_t *loc,
+-                          const char *name, dict_t *xdata) {
+-  int op_errno = EINVAL;
++int32_t
++shard_modify_and_set_iatt_in_dict(dict_t *xdata, shard_local_t *local,
++                                  char *key)
++{
++    int ret = 0;
++    struct iatt *tmpbuf = NULL;
++    struct iatt *stbuf = NULL;
++    data_t *data = NULL;
+ 
+-  if (frame->root->pid != GF_CLIENT_PID_GSYNCD) {
+-    GF_IF_NATIVE_XATTR_GOTO(SHARD_XATTR_PREFIX "*", name, op_errno, out);
+-  }
++    if (!xdata)
++        return 0;
+ 
+-  if (xdata && (frame->root->pid != GF_CLIENT_PID_GSYNCD)) {
+-    dict_del(xdata, GF_XATTR_SHARD_BLOCK_SIZE);
+-    dict_del(xdata, GF_XATTR_SHARD_FILE_SIZE);
+-  }
++    data = dict_get(xdata, key);
++    if (!data)
++        return 0;
+ 
+-  STACK_WIND_TAIL(frame, FIRST_CHILD(this),
+-                  FIRST_CHILD(this)->fops->removexattr, loc, name, xdata);
+-  return 0;
+-out:
+-  shard_common_failure_unwind(GF_FOP_REMOVEXATTR, frame, -1, op_errno);
+-  return 0;
++    tmpbuf = data_to_iatt(data, key);
++    stbuf = GF_MALLOC(sizeof(struct iatt), gf_common_mt_char);
++    if (stbuf == NULL) {
++        local->op_ret = -1;
++        local->op_errno = ENOMEM;
++        goto err;
++    }
++    *stbuf = *tmpbuf;
++    stbuf->ia_size = local->prebuf.ia_size;
++    stbuf->ia_blocks = local->prebuf.ia_blocks;
++    ret = dict_set_iatt(xdata, key, stbuf, false);
++    if (ret < 0) {
++        local->op_ret = -1;
++        local->op_errno = ENOMEM;
++        goto err;
++    }
++    return 0;
++
++err:
++    GF_FREE(stbuf);
++    return -1;
+ }
+ 
+-int32_t shard_fremovexattr(call_frame_t *frame, xlator_t *this, fd_t *fd,
+-                           const char *name, dict_t *xdata) {
+-  int op_errno = EINVAL;
++int32_t
++shard_common_remove_xattr_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
++                              int32_t op_ret, int32_t op_errno, dict_t *xdata)
++{
++    int ret = -1;
++    shard_local_t *local = NULL;
+ 
+-  if (frame->root->pid != GF_CLIENT_PID_GSYNCD) {
+-    GF_IF_NATIVE_XATTR_GOTO(SHARD_XATTR_PREFIX "*", name, op_errno, out);
+-  }
++    local = frame->local;
+ 
+-  if (xdata && (frame->root->pid != GF_CLIENT_PID_GSYNCD)) {
+-    dict_del(xdata, GF_XATTR_SHARD_BLOCK_SIZE);
+-    dict_del(xdata, GF_XATTR_SHARD_FILE_SIZE);
+-  }
++    if (op_ret < 0) {
++        local->op_ret = op_ret;
++        local->op_errno = op_errno;
++        goto err;
++    }
+ 
+-  STACK_WIND_TAIL(frame, FIRST_CHILD(this),
+-                  FIRST_CHILD(this)->fops->fremovexattr, fd, name, xdata);
+-  return 0;
+-out:
+-  shard_common_failure_unwind(GF_FOP_FREMOVEXATTR, frame, -1, op_errno);
+-  return 0;
++    ret = shard_modify_and_set_iatt_in_dict(xdata, local, GF_PRESTAT);
++    if (ret < 0)
++        goto err;
++
++    ret = shard_modify_and_set_iatt_in_dict(xdata, local, GF_POSTSTAT);
++    if (ret < 0)
++        goto err;
++
++    if (local->fd)
++        SHARD_STACK_UNWIND(fremovexattr, frame, local->op_ret, local->op_errno,
++                           xdata);
++    else
++        SHARD_STACK_UNWIND(removexattr, frame, local->op_ret, local->op_errno,
++                           xdata);
++    return 0;
++
++err:
++    shard_common_failure_unwind(local->fop, frame, local->op_ret,
++                                local->op_errno);
++    return 0;
++}
++
++int32_t
++shard_post_lookup_remove_xattr_handler(call_frame_t *frame, xlator_t *this)
++{
++    shard_local_t *local = NULL;
++
++    local = frame->local;
++
++    if (local->op_ret < 0) {
++        shard_common_failure_unwind(local->fop, frame, local->op_ret,
++                                    local->op_errno);
++        return 0;
++    }
++
++    if (local->fd)
++        STACK_WIND(frame, shard_common_remove_xattr_cbk, FIRST_CHILD(this),
++                   FIRST_CHILD(this)->fops->fremovexattr, local->fd,
++                   local->name, local->xattr_req);
++    else
++        STACK_WIND(frame, shard_common_remove_xattr_cbk, FIRST_CHILD(this),
++                   FIRST_CHILD(this)->fops->removexattr, &local->loc,
++                   local->name, local->xattr_req);
++    return 0;
++}
++
++int32_t
++shard_common_remove_xattr(call_frame_t *frame, xlator_t *this,
++                          glusterfs_fop_t fop, loc_t *loc, fd_t *fd,
++                          const char *name, dict_t *xdata)
++{
++    int ret = -1;
++    int op_errno = ENOMEM;
++    uint64_t block_size = 0;
++    shard_local_t *local = NULL;
++    inode_t *inode = loc ? loc->inode : fd->inode;
++
++    if ((IA_ISDIR(inode->ia_type)) || (IA_ISLNK(inode->ia_type))) {
++        if (loc)
++            STACK_WIND_TAIL(frame, FIRST_CHILD(this),
++                            FIRST_CHILD(this)->fops->removexattr, loc, name,
++                            xdata);
++        else
++            STACK_WIND_TAIL(frame, FIRST_CHILD(this),
++                            FIRST_CHILD(this)->fops->fremovexattr, fd, name,
++                            xdata);
++        return 0;
++    }
++
++    /* If shard's special xattrs are attempted to be removed,
++     * fail the fop with EPERM (except if the client is gsyncd).
++     */
++    if (frame->root->pid != GF_CLIENT_PID_GSYNCD) {
++        GF_IF_NATIVE_XATTR_GOTO(SHARD_XATTR_PREFIX "*", name, op_errno, err);
++    }
++
++    /* Repeat the same check for bulk-removexattr */
++    if (xdata && (frame->root->pid != GF_CLIENT_PID_GSYNCD)) {
++        dict_del(xdata, GF_XATTR_SHARD_BLOCK_SIZE);
++        dict_del(xdata, GF_XATTR_SHARD_FILE_SIZE);
++    }
++
++    ret = shard_inode_ctx_get_block_size(inode, this, &block_size);
++    if (ret) {
++        gf_msg(this->name, GF_LOG_ERROR, 0, SHARD_MSG_INODE_CTX_GET_FAILED,
++               "Failed to get block size from inode ctx of %s",
++               uuid_utoa(inode->gfid));
++        goto err;
++    }
++
++    if (!block_size || frame->root->pid == GF_CLIENT_PID_GSYNCD) {
++        if (loc)
++            STACK_WIND_TAIL(frame, FIRST_CHILD(this),
++                            FIRST_CHILD(this)->fops->removexattr, loc, name,
++                            xdata);
++        else
++            STACK_WIND_TAIL(frame, FIRST_CHILD(this),
++                            FIRST_CHILD(this)->fops->fremovexattr, fd, name,
++                            xdata);
++        return 0;
++    }
++
++    local = mem_get0(this->local_pool);
++    if (!local)
++        goto err;
++
++    frame->local = local;
++    local->fop = fop;
++    if (loc) {
++        if (loc_copy(&local->loc, loc) != 0)
++            goto err;
++    }
++
++    if (fd) {
++        local->fd = fd_ref(fd);
++        local->loc.inode = inode_ref(fd->inode);
++        gf_uuid_copy(local->loc.gfid, fd->inode->gfid);
++    }
++
++    if (name) {
++        local->name = gf_strdup(name);
++        if (!local->name)
++            goto err;
++    }
++
++    if (xdata)
++        local->xattr_req = dict_ref(xdata);
++
++    /* To-Do: Switch from LOOKUP which is path-based, to FSTAT if the fop is
++     * on an fd. This comes under a generic class of bugs in shard tracked by
++     * bz #1782428.
++     */
++    shard_lookup_base_file(frame, this, &local->loc,
++                           shard_post_lookup_remove_xattr_handler);
++    return 0;
++err:
++    shard_common_failure_unwind(fop, frame, -1, op_errno);
++    return 0;
++}
++
++int32_t
++shard_removexattr(call_frame_t *frame, xlator_t *this, loc_t *loc,
++                  const char *name, dict_t *xdata)
++{
++    shard_common_remove_xattr(frame, this, GF_FOP_REMOVEXATTR, loc, NULL, name,
++                              xdata);
++    return 0;
++}
++
++int32_t
++shard_fremovexattr(call_frame_t *frame, xlator_t *this, fd_t *fd,
++                   const char *name, dict_t *xdata)
++{
++    shard_common_remove_xattr(frame, this, GF_FOP_FREMOVEXATTR, NULL, fd, name,
++                              xdata);
++    return 0;
+ }
+ 
+ int32_t shard_fgetxattr_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+@@ -5933,10 +6106,6 @@ int32_t shard_common_set_xattr_cbk(call_frame_t *frame, void *cookie,
+                                    xlator_t *this, int32_t op_ret,
+                                    int32_t op_errno, dict_t *xdata) {
+     int ret = -1;
+-    struct iatt *prebuf = NULL;
+-    struct iatt *postbuf = NULL;
+-    struct iatt *stbuf = NULL;
+-    data_t *data = NULL;
+     shard_local_t *local = NULL;
+ 
+     local = frame->local;
+@@ -5947,52 +6116,14 @@ int32_t shard_common_set_xattr_cbk(call_frame_t *frame, void *cookie,
+         goto err;
+     }
+ 
+-    if (!xdata)
+-        goto unwind;
+-
+-    data = dict_get(xdata, GF_PRESTAT);
+-    if (data) {
+-        stbuf = data_to_iatt(data, GF_PRESTAT);
+-        prebuf = GF_MALLOC(sizeof(struct iatt), gf_common_mt_char);
+-        if (prebuf == NULL) {
+-            local->op_ret = -1;
+-            local->op_errno = ENOMEM;
+-            goto err;
+-        }
+-        *prebuf = *stbuf;
+-        prebuf->ia_size = local->prebuf.ia_size;
+-        prebuf->ia_blocks = local->prebuf.ia_blocks;
+-        ret = dict_set_iatt(xdata, GF_PRESTAT, prebuf, false);
+-        if (ret < 0) {
+-            local->op_ret = -1;
+-            local->op_errno = ENOMEM;
+-            goto err;
+-        }
+-        prebuf = NULL;
+-    }
++    ret = shard_modify_and_set_iatt_in_dict(xdata, local, GF_PRESTAT);
++    if (ret < 0)
++        goto err;
+ 
+-    data = dict_get(xdata, GF_POSTSTAT);
+-    if (data) {
+-        stbuf = data_to_iatt(data, GF_POSTSTAT);
+-        postbuf = GF_MALLOC(sizeof(struct iatt), gf_common_mt_char);
+-        if (postbuf == NULL) {
+-            local->op_ret = -1;
+-            local->op_errno = ENOMEM;
+-            goto err;
+-        }
+-        *postbuf = *stbuf;
+-        postbuf->ia_size = local->prebuf.ia_size;
+-        postbuf->ia_blocks = local->prebuf.ia_blocks;
+-        ret = dict_set_iatt(xdata, GF_POSTSTAT, postbuf, false);
+-        if (ret < 0) {
+-            local->op_ret = -1;
+-            local->op_errno = ENOMEM;
+-            goto err;
+-        }
+-        postbuf = NULL;
+-    }
++    ret = shard_modify_and_set_iatt_in_dict(xdata, local, GF_POSTSTAT);
++    if (ret < 0)
++        goto err;
+ 
+-unwind:
+     if (local->fd)
+         SHARD_STACK_UNWIND(fsetxattr, frame, local->op_ret, local->op_errno,
+                            xdata);
+@@ -6002,8 +6133,6 @@ unwind:
+     return 0;
+ 
+ err:
+-    GF_FREE(prebuf);
+-    GF_FREE(postbuf);
+     shard_common_failure_unwind(local->fop, frame, local->op_ret,
+                                 local->op_errno);
+     return 0;
+diff --git a/xlators/features/shard/src/shard.h b/xlators/features/shard/src/shard.h
+index 04abd62..1721417 100644
+--- a/xlators/features/shard/src/shard.h
++++ b/xlators/features/shard/src/shard.h
+@@ -318,6 +318,7 @@ typedef struct shard_local {
+     uint32_t deletion_rate;
+     gf_boolean_t cleanup_required;
+     uuid_t base_gfid;
++    char *name;
+ } shard_local_t;
+ 
+ typedef struct shard_inode_ctx {
+-- 
+1.8.3.1
+

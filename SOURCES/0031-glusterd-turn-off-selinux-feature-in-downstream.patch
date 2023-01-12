@@ -1,0 +1,34 @@
+From c3176144e531e22bfe97d0fef3b0e3e449fb1d32 Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Mon, 16 Apr 2018 13:47:12 +0530
+Subject: [PATCH 31/52] glusterd: turn off selinux feature in downstream
+
+In RHGS 3.4.0 selinux feature was never meant to be qualified.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I0cd5eb5207a757c8b6ef789980c061f211410bd5
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/135716
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index 11265bf..d1244e4 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -2842,7 +2842,7 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+     {.key = VKEY_FEATURES_SELINUX,
+      .voltype = "features/selinux",
+      .type = NO_DOC,
+-     .value = "on",
++     .value = "off",
+      .op_version = GD_OP_VERSION_3_11_0,
+      .description = "Convert security.selinux xattrs to "
+                     "trusted.gluster.selinux on the bricks. Recommended "
+-- 
+1.8.3.1
+

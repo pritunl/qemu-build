@@ -1,0 +1,454 @@
+From 48f6929590157d9a1697e11c02441207afdc1bed Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez <xhernandez@redhat.com>
+Date: Fri, 27 Mar 2020 23:56:15 +0100
+Subject: [PATCH 362/362] write-behind: fix data corruption
+
+There was a bug in write-behind that allowed a previous completed write
+to overwrite the overlapping region of data from a future write.
+
+Suppose we want to send three writes (W1, W2 and W3). W1 and W2 are
+sequential, and W3 writes at the same offset of W2:
+
+    W2.offset = W3.offset = W1.offset + W1.size
+
+Both W1 and W2 are sent in parallel. W3 is only sent after W2 completes.
+So W3 should *always* overwrite the overlapping part of W2.
+
+Suppose write-behind processes the requests from 2 concurrent threads:
+
+    Thread 1                    Thread 2
+
+    <received W1>
+                                <received W2>
+    wb_enqueue_tempted(W1)
+    /* W1 is assigned gen X */
+                                wb_enqueue_tempted(W2)
+                                /* W2 is assigned gen X */
+
+                                wb_process_queue()
+                                  __wb_preprocess_winds()
+                                    /* W1 and W2 are sequential and all
+                                     * other requisites are met to merge
+                                     * both requests. */
+                                    __wb_collapse_small_writes(W1, W2)
+                                    __wb_fulfill_request(W2)
+
+                                  __wb_pick_unwinds() -> W2
+                                  /* In this case, since the request is
+                                   * already fulfilled, wb_inode->gen
+                                   * is not updated. */
+
+                                wb_do_unwinds()
+                                  STACK_UNWIND(W2)
+
+                                /* The application has received the
+                                 * result of W2, so it can send W3. */
+                                <received W3>
+
+                                wb_enqueue_tempted(W3)
+                                /* W3 is assigned gen X */
+
+                                wb_process_queue()
+                                  /* Here we have W1 (which contains
+                                   * the conflicting W2) and W3 with
+                                   * same gen, so they are interpreted
+                                   * as concurrent writes that do not
+                                   * conflict. */
+                                  __wb_pick_winds() -> W3
+
+                                wb_do_winds()
+                                  STACK_WIND(W3)
+
+    wb_process_queue()
+      /* Eventually W1 will be
+       * ready to be sent */
+      __wb_pick_winds() -> W1
+      __wb_pick_unwinds() -> W1
+        /* Here wb_inode->gen is
+         * incremented. */
+
+    wb_do_unwinds()
+      STACK_UNWIND(W1)
+
+    wb_do_winds()
+      STACK_WIND(W1)
+
+So, as we can see, W3 is sent before W1, which shouldn't happen.
+
+The problem is that wb_inode->gen is only incremented for requests that
+have not been fulfilled but, after a merge, the request is marked as
+fulfilled even though it has not been sent to the brick. This allows
+that future requests are assigned to the same generation, which could
+be internally reordered.
+
+Solution:
+
+Increment wb_inode->gen before any unwind, even if it's for a fulfilled
+request.
+
+Special thanks to Stefan Ring for writing a reproducer that has been
+crucial to identify the issue.
+
+Upstream patch:
+> Upstream patch link: https://review.gluster.org/c/glusterfs/+/24263
+> Change-Id: Id4ab0f294a09aca9a863ecaeef8856474662ab45
+> Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+> Fixes: #884
+
+Change-Id: Id4ab0f294a09aca9a863ecaeef8856474662ab45
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+BUG: 1819059
+Reviewed-on: https://code.engineering.redhat.com/gerrit/196250
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/write-behind/issue-884.c                | 267 +++++++++++++++++++++
+ tests/bugs/write-behind/issue-884.t                |  40 +++
+ .../performance/write-behind/src/write-behind.c    |   4 +-
+ 3 files changed, 309 insertions(+), 2 deletions(-)
+ create mode 100644 tests/bugs/write-behind/issue-884.c
+ create mode 100755 tests/bugs/write-behind/issue-884.t
+
+diff --git a/tests/bugs/write-behind/issue-884.c b/tests/bugs/write-behind/issue-884.c
+new file mode 100644
+index 0000000..e9c33b3
+--- /dev/null
++++ b/tests/bugs/write-behind/issue-884.c
+@@ -0,0 +1,267 @@
++
++#define _GNU_SOURCE
++
++#include <stdlib.h>
++#include <stdio.h>
++#include <string.h>
++#include <time.h>
++#include <assert.h>
++#include <errno.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <pthread.h>
++
++#include <glusterfs/api/glfs.h>
++
++/* Based on a reproducer by Stefan Ring. It seems to be quite sensible to any
++ * timing modification, so the code has been maintained as is, only with minor
++ * changes. */
++
++struct glfs *glfs;
++
++pthread_mutex_t the_mutex = PTHREAD_MUTEX_INITIALIZER;
++pthread_cond_t the_cond = PTHREAD_COND_INITIALIZER;
++
++typedef struct _my_aiocb {
++    int64_t size;
++    volatile int64_t seq;
++    int which;
++} my_aiocb;
++
++typedef struct _worker_data {
++    my_aiocb cb;
++    struct iovec iov;
++    int64_t offset;
++} worker_data;
++
++typedef struct {
++    worker_data wdata[2];
++
++    volatile unsigned busy;
++} all_data_t;
++
++all_data_t all_data;
++
++static void
++completion_fnc(struct glfs_fd *fd, ssize_t ret, struct glfs_stat *pre,
++               struct glfs_stat *post, void *arg)
++{
++    void *the_thread;
++    my_aiocb *cb = (my_aiocb *)arg;
++    long seq = cb->seq;
++
++    assert(ret == cb->size);
++
++    pthread_mutex_lock(&the_mutex);
++    pthread_cond_broadcast(&the_cond);
++
++    all_data.busy &= ~(1 << cb->which);
++    cb->seq = -1;
++
++    the_thread = (void *)pthread_self();
++    printf("worker %d is done from thread %p, seq %ld!\n", cb->which,
++           the_thread, seq);
++
++    pthread_mutex_unlock(&the_mutex);
++}
++
++static void
++init_wdata(worker_data *data, int which)
++{
++    data->cb.which = which;
++    data->cb.seq = -1;
++
++    data->iov.iov_base = malloc(1024 * 1024);
++    memset(data->iov.iov_base, 6,
++           1024 * 1024); /* tail part never overwritten */
++}
++
++static void
++init()
++{
++    all_data.busy = 0;
++
++    init_wdata(&all_data.wdata[0], 0);
++    init_wdata(&all_data.wdata[1], 1);
++}
++
++static void
++do_write(struct glfs_fd *fd, int content, int size, int64_t seq,
++         worker_data *wdata, const char *name)
++{
++    int ret;
++
++    wdata->cb.size = size;
++    wdata->cb.seq = seq;
++
++    if (content >= 0)
++        memset(wdata->iov.iov_base, content, size);
++    wdata->iov.iov_len = size;
++
++    pthread_mutex_lock(&the_mutex);
++    printf("(%d) dispatching write \"%s\", offset %lx, len %x, seq %ld\n",
++           wdata->cb.which, name, (long)wdata->offset, size, (long)seq);
++    pthread_mutex_unlock(&the_mutex);
++    ret = glfs_pwritev_async(fd, &wdata->iov, 1, wdata->offset, 0,
++                             completion_fnc, &wdata->cb);
++    assert(ret >= 0);
++}
++
++#define IDLE 0  // both workers must be idle
++#define ANY 1   // use any worker, other one may be busy
++
++int
++get_worker(int waitfor, int64_t excl_seq)
++{
++    int which;
++
++    pthread_mutex_lock(&the_mutex);
++
++    while (waitfor == IDLE && (all_data.busy & 3) != 0 ||
++           waitfor == ANY &&
++               ((all_data.busy & 3) == 3 ||
++                excl_seq >= 0 && (all_data.wdata[0].cb.seq == excl_seq ||
++                                  all_data.wdata[1].cb.seq == excl_seq)))
++        pthread_cond_wait(&the_cond, &the_mutex);
++
++    if (!(all_data.busy & 1))
++        which = 0;
++    else
++        which = 1;
++
++    all_data.busy |= (1 << which);
++
++    pthread_mutex_unlock(&the_mutex);
++
++    return which;
++}
++
++static int
++doit(struct glfs_fd *fd)
++{
++    int ret;
++    int64_t seq = 0;
++    int64_t offset = 0;     // position in file, in blocks
++    int64_t base = 0x1000;  // where to place the data, in blocks
++
++    int async_mode = ANY;
++
++    init();
++
++    for (;;) {
++        int which;
++        worker_data *wdata;
++
++        // for growing to the first offset
++        for (;;) {
++            int gap = base + 0x42 - offset;
++            if (!gap)
++                break;
++            if (gap > 80)
++                gap = 80;
++
++            which = get_worker(IDLE, -1);
++            wdata = &all_data.wdata[which];
++
++            wdata->offset = offset << 9;
++            do_write(fd, 0, gap << 9, seq++, wdata, "gap-filling");
++
++            offset += gap;
++        }
++
++        // 8700
++        which = get_worker(IDLE, -1);
++        wdata = &all_data.wdata[which];
++
++        wdata->offset = (base + 0x42) << 9;
++        do_write(fd, 1, 62 << 9, seq++, wdata, "!8700");
++
++        // 8701
++        which = get_worker(IDLE, -1);
++        wdata = &all_data.wdata[which];
++
++        wdata->offset = (base + 0x42) << 9;
++        do_write(fd, 2, 55 << 9, seq++, wdata, "!8701");
++
++        // 8702
++        which = get_worker(async_mode, -1);
++        wdata = &all_data.wdata[which];
++
++        wdata->offset = (base + 0x79) << 9;
++        do_write(fd, 3, 54 << 9, seq++, wdata, "!8702");
++
++        // 8703
++        which = get_worker(async_mode, -1);
++        wdata = &all_data.wdata[which];
++
++        wdata->offset = (base + 0xaf) << 9;
++        do_write(fd, 4, 81 << 9, seq++, wdata, "!8703");
++
++        // 8704
++        // this writes both 5s and 6s
++        // the range of 5s is the one that overwrites 8703
++
++        which = get_worker(async_mode, seq - 1);
++        wdata = &all_data.wdata[which];
++
++        memset(wdata->iov.iov_base, 5, 81 << 9);
++        wdata->offset = (base + 0xaf) << 9;
++        do_write(fd, -1, 1623 << 9, seq++, wdata, "!8704");
++
++        offset = base + 0x706;
++        base += 0x1000;
++        if (base >= 0x100000)
++            break;
++    }
++
++    printf("done!\n");
++    fflush(stdout);
++
++    pthread_mutex_lock(&the_mutex);
++
++    while ((all_data.busy & 3) != 0)
++        pthread_cond_wait(&the_cond, &the_mutex);
++
++    pthread_mutex_unlock(&the_mutex);
++
++    ret = glfs_close(fd);
++    assert(ret >= 0);
++    /*
++        ret = glfs_fini(glfs);
++        assert(ret >= 0);
++    */
++    return 0;
++}
++
++int
++main(int argc, char *argv[])
++{
++    int ret;
++    int open_flags = O_RDWR | O_DIRECT | O_TRUNC;
++    struct glfs_fd *fd;
++
++    glfs = glfs_new(argv[1]);
++    if (!glfs) {
++        printf("glfs_new!\n");
++        goto out;
++    }
++    ret = glfs_set_volfile_server(glfs, "tcp", "localhost", 24007);
++    if (ret < 0) {
++        printf("set_volfile!\n");
++        goto out;
++    }
++    ret = glfs_init(glfs);
++    if (ret) {
++        printf("init!\n");
++        goto out;
++    }
++    fd = glfs_open(glfs, argv[2], open_flags);
++    if (!fd) {
++        printf("open!\n");
++        goto out;
++    }
++    srand(time(NULL));
++    return doit(fd);
++out:
++    return 1;
++}
+diff --git a/tests/bugs/write-behind/issue-884.t b/tests/bugs/write-behind/issue-884.t
+new file mode 100755
+index 0000000..2bcf7d1
+--- /dev/null
++++ b/tests/bugs/write-behind/issue-884.t
+@@ -0,0 +1,40 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++
++# This test tries to detect a race condition in write-behind. It's based on a
++# reproducer written by Stefan Ring that is able to hit it sometimes. On my
++# system, it happened around 10% of the runs. This means that if this bug
++# appears again, this test will fail once every 10 runs. Most probably this
++# failure will be hidden by the automatic test retry of the testing framework.
++#
++# Please, if this test fails, it needs to be analyzed in detail.
++
++function run() {
++    "${@}" >/dev/null
++}
++
++cleanup
++
++TEST glusterd
++TEST pidof glusterd
++
++TEST $CLI volume create $V0 $H0:$B0/$V0
++# This makes it easier to hit the issue
++TEST $CLI volume set $V0 client-log-level TRACE
++TEST $CLI volume start $V0
++
++TEST $GFS --volfile-server=$H0 --volfile-id=$V0 $M0
++
++build_tester $(dirname $0)/issue-884.c -lgfapi
++
++TEST touch $M0/testfile
++
++# This program generates a file of 535694336 bytes with a fixed pattern
++TEST run $(dirname $0)/issue-884 $V0 testfile
++
++# This is the md5sum of the expected pattern without corruption
++EXPECT "ad105f9349345a70fc697632cbb5eec8" echo "$(md5sum $B0/$V0/testfile | awk '{ print $1; }')"
++
++cleanup
+diff --git a/xlators/performance/write-behind/src/write-behind.c b/xlators/performance/write-behind/src/write-behind.c
+index 70e281a..90a0bcf 100644
+--- a/xlators/performance/write-behind/src/write-behind.c
++++ b/xlators/performance/write-behind/src/write-behind.c
+@@ -1284,14 +1284,14 @@ __wb_pick_unwinds(wb_inode_t *wb_inode, list_head_t *lies)
+ 
+         wb_inode->window_current += req->orig_size;
+ 
++        wb_inode->gen++;
++
+         if (!req->ordering.fulfilled) {
+             /* burden increased */
+             list_add_tail(&req->lie, &wb_inode->liability);
+ 
+             req->ordering.lied = 1;
+ 
+-            wb_inode->gen++;
+-
+             uuid_utoa_r(req->gfid, gfid);
+             gf_msg_debug(wb_inode->this->name, 0,
+                          "(unique=%" PRIu64
+-- 
+1.8.3.1
+

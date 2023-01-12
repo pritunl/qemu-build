@@ -1,0 +1,55 @@
+From 37df54966d5b7f01ad24d329bac5da1cf17f2abe Mon Sep 17 00:00:00 2001
+From: Sunny Kumar <sunkumar@redhat.com>
+Date: Wed, 12 Jun 2019 16:10:52 +0530
+Subject: [PATCH 182/192] geo-rep : fix mountbroker setup
+
+Problem:
+
+Unable to setup mountbroker root directory while creating geo-replication
+session for non-root user.
+
+Casue:
+With patch[1] which defines the max-port for glusterd one extra sapce
+got added in field of 'option max-port'.
+[1]. https://review.gluster.org/#/c/glusterfs/+/21872/
+
+In geo-rep spliting of key-value pair form vol file was done on the
+basis of space so this additional space caused "ValueError: too many values
+to unpack".
+
+Solution:
+Use split so that it can treat consecutive whitespace as a single separator.
+
+Backport of:
+
+ >Upstream Patch: https://review.gluster.org/#/c/glusterfs/+/22716/
+ >Fixes: bz#1709248
+ >Change-Id: Ia22070a43f95d66d84cb35487f23f9ee58b68c73
+ >Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+
+BUG: 1708043
+Change-Id: Ic6d535a6faad62ce185c6aa5adc18f5fdf8f27be
+Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/173149
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ geo-replication/src/peer_mountbroker.py.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/geo-replication/src/peer_mountbroker.py.in b/geo-replication/src/peer_mountbroker.py.in
+index 54f95c4..ce33f97 100644
+--- a/geo-replication/src/peer_mountbroker.py.in
++++ b/geo-replication/src/peer_mountbroker.py.in
+@@ -47,7 +47,7 @@ class MountbrokerUserMgmt(object):
+             for line in f:
+                 line = line.strip()
+                 if line.startswith("option "):
+-                    key, value = line.split(" ")[1:]
++                    key, value = line.split()[1:]
+                     self._options[key] = value
+                 if line.startswith("#"):
+                     self.commented_lines.append(line)
+-- 
+1.8.3.1
+

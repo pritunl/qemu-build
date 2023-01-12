@@ -1,0 +1,50 @@
+From 39932e6bbc8de25813387bb1394cc7942b79ef46 Mon Sep 17 00:00:00 2001
+From: anand <anekkunt@redhat.com>
+Date: Wed, 18 Nov 2015 16:13:46 +0530
+Subject: [PATCH 13/52] glusterd: fix info file checksum mismatch during
+ upgrade
+
+peers are  moving rejected state when upgrading from RHS2.1 to RHGS3.1.2
+due to checksum mismatch.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Ifea6b7dfe8477c7f17eefc5ca87ced58aaa21c84
+Signed-off-by: anand <anekkunt@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/61774
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-store.c | 16 ++++++++++++----
+ 1 file changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-store.c b/xlators/mgmt/glusterd/src/glusterd-store.c
+index 51ca3d1..fb52957 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-store.c
++++ b/xlators/mgmt/glusterd/src/glusterd-store.c
+@@ -1009,10 +1009,18 @@ glusterd_volume_exclude_options_write(int fd, glusterd_volinfo_t *volinfo)
+             goto out;
+     }
+ 
+-    snprintf(buf, sizeof(buf), "%d", volinfo->op_version);
+-    ret = gf_store_save_value(fd, GLUSTERD_STORE_KEY_VOL_OP_VERSION, buf);
+-    if (ret)
+-        goto out;
++    if (conf->op_version >= GD_OP_VERSION_RHS_3_0) {
++        snprintf (buf, sizeof (buf), "%d", volinfo->op_version);
++        ret = gf_store_save_value (fd, GLUSTERD_STORE_KEY_VOL_OP_VERSION, buf);
++        if (ret)
++            goto out;
++
++        snprintf (buf, sizeof (buf), "%d", volinfo->client_op_version);
++        ret = gf_store_save_value (fd, GLUSTERD_STORE_KEY_VOL_CLIENT_OP_VERSION,
++                                   buf);
++        if (ret)
++            goto out;
++    }
+ 
+     snprintf(buf, sizeof(buf), "%d", volinfo->client_op_version);
+     ret = gf_store_save_value(fd, GLUSTERD_STORE_KEY_VOL_CLIENT_OP_VERSION,
+-- 
+1.8.3.1
+

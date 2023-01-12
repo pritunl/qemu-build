@@ -1,0 +1,62 @@
+From 88523814fe296c9cc9f7619e06210830f59c5edf Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez <xhernandez@redhat.com>
+Date: Fri, 12 Mar 2021 10:32:09 +0100
+Subject: [PATCH 539/539] extras: disable lookup-optimize in virt and block
+ groups
+
+lookup-optimize doesn't provide any benefit for virtualized
+environments and gluster-block workloads, but it's known to cause
+corruption in some cases when sharding is also enabled and the volume
+is expanded or shrunk.
+
+For this reason, we disable lookup-optimize by default on those
+environments.
+
+Backport of:
+> Upstream-patch-link: https://github.com/gluster/glusterfs/pull/2254
+> Fixes: #2253
+> Change-Id: I25861aa50b335556a995a9c33318dd3afb41bf71
+> Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+
+BUG: 1939372
+Change-Id: I25861aa50b335556a995a9c33318dd3afb41bf71
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/231173
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/group-distributed-virt | 1 +
+ extras/group-gluster-block    | 1 +
+ extras/group-virt.example     | 1 +
+ 3 files changed, 3 insertions(+)
+
+diff --git a/extras/group-distributed-virt b/extras/group-distributed-virt
+index a960b76..6da3de0 100644
+--- a/extras/group-distributed-virt
++++ b/extras/group-distributed-virt
+@@ -8,3 +8,4 @@ user.cifs=off
+ client.event-threads=4
+ server.event-threads=4
+ performance.client-io-threads=on
++cluster.lookup-optimize=off
+diff --git a/extras/group-gluster-block b/extras/group-gluster-block
+index 1e39801..b8d3e8d 100644
+--- a/extras/group-gluster-block
++++ b/extras/group-gluster-block
+@@ -25,3 +25,4 @@ features.shard-block-size=64MB
+ user.cifs=off
+ server.allow-insecure=on
+ cluster.choose-local=off
++cluster.lookup-optimize=off
+diff --git a/extras/group-virt.example b/extras/group-virt.example
+index 3a441eb..155f5f5 100644
+--- a/extras/group-virt.example
++++ b/extras/group-virt.example
+@@ -21,3 +21,4 @@ server.tcp-user-timeout=20
+ server.keepalive-time=10
+ server.keepalive-interval=2
+ server.keepalive-count=5
++cluster.lookup-optimize=off
+-- 
+1.8.3.1
+

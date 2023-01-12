@@ -1,0 +1,210 @@
+From d148248aa3f0dfe7356a13d6fd029f0c6b3746cf Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Wed, 8 May 2019 10:56:31 +0530
+Subject: [PATCH 162/169] geo-rep: Fix sync-method config
+
+Problem:
+When 'use_tarssh' is set to true, it exits with successful
+message but the default 'rsync' was used as sync-engine.
+The new config 'sync-method' is not allowed to set from cli.
+
+Analysis and Fix:
+The 'use_tarssh' config is deprecated with new
+config framework and 'sync-method' is the new
+config to choose sync-method i.e. tarssh or rsync.
+This patch fixes the 'sync-method' config. The allowed
+values are tarssh and rsync.
+
+Backport of:
+ > Patch: https://review.gluster.org/22683
+ > Change-Id: I0edb0319cad0455b29e49f2f08a64ce324735e84
+ > BUG: 1707686
+ > Signed-off-by: Kotresh HR <khiremat@redhat.com>
+
+Change-Id: I0edb0319cad0455b29e49f2f08a64ce324735e84
+fixes: bz#1708067
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172394
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunny Kumar <sunkumar@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ geo-replication/gsyncd.conf.in                    | 9 +++++----
+ geo-replication/syncdaemon/resource.py            | 7 ++++---
+ tests/00-geo-rep/georep-basic-dr-rsync-arbiter.t  | 4 ++--
+ tests/00-geo-rep/georep-basic-dr-rsync.t          | 4 ++--
+ tests/00-geo-rep/georep-basic-dr-tarssh-arbiter.t | 6 +++---
+ tests/00-geo-rep/georep-basic-dr-tarssh.t         | 6 +++---
+ tests/geo-rep.rc                                  | 3 ++-
+ 7 files changed, 21 insertions(+), 18 deletions(-)
+
+diff --git a/geo-replication/gsyncd.conf.in b/geo-replication/gsyncd.conf.in
+index 6160c7c..c2e4f0d 100644
+--- a/geo-replication/gsyncd.conf.in
++++ b/geo-replication/gsyncd.conf.in
+@@ -128,10 +128,11 @@ value=
+ value=5
+ type=int
+ 
+-[use-tarssh]
+-value=false
+-type=bool
+-help=Use sync-mode as tarssh
++[sync-method]
++value=rsync
++help=Sync method for data sync. Available methods are tar over ssh and rsync. Default is rsync.
++validation=choice
++allowed_values=tarssh,rsync
+ 
+ [remote-gsyncd]
+ value =
+diff --git a/geo-replication/syncdaemon/resource.py b/geo-replication/syncdaemon/resource.py
+index f54ccd9..522279b 100644
+--- a/geo-replication/syncdaemon/resource.py
++++ b/geo-replication/syncdaemon/resource.py
+@@ -1512,7 +1512,7 @@ class SSH(object):
+ 
+         return po
+ 
+-    def tarssh(self, files, slaveurl, log_err=False):
++    def tarssh(self, files, log_err=False):
+         """invoke tar+ssh
+         -z (compress) can be use if needed, but omitting it now
+         as it results in weird error (tar+ssh errors out (errcode: 2)
+@@ -1520,10 +1520,11 @@ class SSH(object):
+         if not files:
+             raise GsyncdError("no files to sync")
+         logging.debug("files: " + ", ".join(files))
+-        (host, rdir) = slaveurl.split(':')
++        (host, rdir) = self.slaveurl.split(':')
++
+         tar_cmd = ["tar"] + \
+             ["--sparse", "-cf", "-", "--files-from", "-"]
+-        ssh_cmd = gconf.get("ssh-command-tar").split() + \
++        ssh_cmd = gconf.get("ssh-command").split() + \
+             gconf.get("ssh-options-tar").split() + \
+             ["-p", str(gconf.get("ssh-port"))] + \
+             [host, "tar"] + \
+diff --git a/tests/00-geo-rep/georep-basic-dr-rsync-arbiter.t b/tests/00-geo-rep/georep-basic-dr-rsync-arbiter.t
+index 1a55ed2..8b90347 100644
+--- a/tests/00-geo-rep/georep-basic-dr-rsync-arbiter.t
++++ b/tests/00-geo-rep/georep-basic-dr-rsync-arbiter.t
+@@ -159,7 +159,7 @@ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 chown_file_ok ${slave_mnt}/changelog_chown_f1
+ 
+ #logrotate
+ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 directory_ok ${slave_mnt}/logrotate
+-EXPECT_WITHIN $GEO_REP_TIMEOUT 0 arequal_checksum ${master_mnt}/logrotate ${slave_mnt}/logrotate
++EXPECT_WITHIN $GEO_REP_TIMEOUT "x0" arequal_checksum ${master_mnt}/logrotate ${slave_mnt}/logrotate
+ 
+ #CREATE+RENAME
+ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 create_rename_ok ${slave_mnt}/create_rename_test_file
+@@ -209,7 +209,7 @@ TEST create_rename_with_existing_destination ${master_mnt}
+ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 verify_rename_with_existing_destination ${slave_mnt}
+ 
+ #Verify arequal for whole volume
+-EXPECT_WITHIN $GEO_REP_TIMEOUT 0 arequal_checksum ${master_mnt} ${slave_mnt}
++EXPECT_WITHIN $GEO_REP_TIMEOUT "x0" arequal_checksum ${master_mnt} ${slave_mnt}
+ 
+ #Stop Geo-rep
+ TEST $GEOREP_CLI $master $slave stop
+diff --git a/tests/00-geo-rep/georep-basic-dr-rsync.t b/tests/00-geo-rep/georep-basic-dr-rsync.t
+index d0c0fc9..428e9ed 100644
+--- a/tests/00-geo-rep/georep-basic-dr-rsync.t
++++ b/tests/00-geo-rep/georep-basic-dr-rsync.t
+@@ -160,7 +160,7 @@ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 chown_file_ok ${slave_mnt}/changelog_chown_f1
+ 
+ #logrotate
+ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 directory_ok ${slave_mnt}/logrotate
+-EXPECT_WITHIN $GEO_REP_TIMEOUT 0 arequal_checksum ${master_mnt}/logrotate ${slave_mnt}/logrotate
++EXPECT_WITHIN $GEO_REP_TIMEOUT "x0" arequal_checksum ${master_mnt}/logrotate ${slave_mnt}/logrotate
+ 
+ #CREATE+RENAME
+ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 create_rename_ok ${slave_mnt}/create_rename_test_file
+@@ -210,7 +210,7 @@ TEST create_rename_with_existing_destination ${master_mnt}
+ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 verify_rename_with_existing_destination ${slave_mnt}
+ 
+ #Verify arequal for whole volume
+-EXPECT_WITHIN $GEO_REP_TIMEOUT 0 arequal_checksum ${master_mnt} ${slave_mnt}
++EXPECT_WITHIN $GEO_REP_TIMEOUT "x0" arequal_checksum ${master_mnt} ${slave_mnt}
+ 
+ #Stop Geo-rep
+ TEST $GEOREP_CLI $master $slave stop
+diff --git a/tests/00-geo-rep/georep-basic-dr-tarssh-arbiter.t b/tests/00-geo-rep/georep-basic-dr-tarssh-arbiter.t
+index cb530ad..8fed929 100644
+--- a/tests/00-geo-rep/georep-basic-dr-tarssh-arbiter.t
++++ b/tests/00-geo-rep/georep-basic-dr-tarssh-arbiter.t
+@@ -81,7 +81,7 @@ TEST $GEOREP_CLI $master $slave config use_meta_volume true
+ TEST $CLI volume set $GMV0 changelog.rollover-time 3
+ 
+ #Config tarssh as sync-engine
+-TEST $GEOREP_CLI $master $slave config use_tarssh true
++TEST $GEOREP_CLI $master $slave config sync-method tarssh
+ 
+ #Wait for common secret pem file to be created
+ EXPECT_WITHIN $GEO_REP_TIMEOUT  0 check_common_secret_file
+@@ -162,7 +162,7 @@ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 chown_file_ok ${slave_mnt}/changelog_chown_f1
+ 
+ #logrotate
+ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 directory_ok ${slave_mnt}/logrotate
+-EXPECT_WITHIN $GEO_REP_TIMEOUT 0 arequal_checksum ${master_mnt}/logrotate ${slave_mnt}/logrotate
++EXPECT_WITHIN $GEO_REP_TIMEOUT "x0" arequal_checksum ${master_mnt}/logrotate ${slave_mnt}/logrotate
+ 
+ #CREATE+RENAME
+ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 create_rename_ok ${slave_mnt}/create_rename_test_file
+@@ -208,7 +208,7 @@ TEST create_rename_with_existing_destination ${master_mnt}
+ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 verify_rename_with_existing_destination ${slave_mnt}
+ 
+ #Verify arequal for whole volume
+-EXPECT_WITHIN $GEO_REP_TIMEOUT 0 arequal_checksum ${master_mnt} ${slave_mnt}
++EXPECT_WITHIN $GEO_REP_TIMEOUT "x0" arequal_checksum ${master_mnt} ${slave_mnt}
+ 
+ #Stop Geo-rep
+ TEST $GEOREP_CLI $master $slave stop
+diff --git a/tests/00-geo-rep/georep-basic-dr-tarssh.t b/tests/00-geo-rep/georep-basic-dr-tarssh.t
+index 9e2f613..feb2de7 100644
+--- a/tests/00-geo-rep/georep-basic-dr-tarssh.t
++++ b/tests/00-geo-rep/georep-basic-dr-tarssh.t
+@@ -81,7 +81,7 @@ TEST $GEOREP_CLI $master $slave config use_meta_volume true
+ TEST $CLI volume set $GMV0 changelog.rollover-time 3
+ 
+ #Config tarssh as sync-engine
+-TEST $GEOREP_CLI $master $slave config use_tarssh true
++TEST $GEOREP_CLI $master $slave config sync-method tarssh
+ 
+ #Wait for common secret pem file to be created
+ EXPECT_WITHIN $GEO_REP_TIMEOUT  0 check_common_secret_file
+@@ -162,7 +162,7 @@ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 chown_file_ok ${slave_mnt}/changelog_chown_f1
+ 
+ #logrotate
+ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 directory_ok ${slave_mnt}/logrotate
+-EXPECT_WITHIN $GEO_REP_TIMEOUT 0 arequal_checksum ${master_mnt}/logrotate ${slave_mnt}/logrotate
++EXPECT_WITHIN $GEO_REP_TIMEOUT "x0" arequal_checksum ${master_mnt}/logrotate ${slave_mnt}/logrotate
+ 
+ #CREATE+RENAME
+ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 create_rename_ok ${slave_mnt}/create_rename_test_file
+@@ -208,7 +208,7 @@ TEST create_rename_with_existing_destination ${master_mnt}
+ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 verify_rename_with_existing_destination ${slave_mnt}
+ 
+ #Verify arequal for whole volume
+-EXPECT_WITHIN $GEO_REP_TIMEOUT 0 arequal_checksum ${master_mnt} ${slave_mnt}
++EXPECT_WITHIN $GEO_REP_TIMEOUT "x0" arequal_checksum ${master_mnt} ${slave_mnt}
+ 
+ #Stop Geo-rep
+ TEST $GEOREP_CLI $master $slave stop
+diff --git a/tests/geo-rep.rc b/tests/geo-rep.rc
+index e357ba8..2035b9f 100644
+--- a/tests/geo-rep.rc
++++ b/tests/geo-rep.rc
+@@ -168,7 +168,8 @@ function arequal_checksum()
+ {
+     master=$1
+     slave=$2
+-    diff <(arequal-checksum -p $master) <(arequal-checksum -p $slave) | wc -l
++    ret=$(diff <(arequal-checksum -p $master) <(arequal-checksum -p $slave) | wc -l)
++    echo x$ret
+ }
+ 
+ function symlink_ok()
+-- 
+1.8.3.1
+

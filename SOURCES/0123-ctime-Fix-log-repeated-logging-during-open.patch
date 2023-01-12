@@ -1,0 +1,79 @@
+From 03c0395a1ead769167046713a99662bc5c5233fa Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Fri, 19 Apr 2019 11:34:37 +0530
+Subject: [PATCH 123/124] ctime: Fix log repeated logging during open
+
+The log "posix set mdata failed, No ctime" logged repeatedly
+after the fix [1]. Those could be internal fops. This patch
+fixes the same.
+
+[1] https://review.gluster.org/22540
+
+Backport of:
+ > Patch: https://review.gluster.org/22591
+ > fixes: bz#1701457
+ > Change-Id: I42799a90b976982cedb0ca11fa224d555eb05650
+ > Signed-off-by: Kotresh HR <khiremat@redhat.com>
+
+BUG: 1699709
+Change-Id: I42799a90b976982cedb0ca11fa224d555eb05650
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/168688
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/storage/posix/src/posix-metadata.c | 15 +++++----------
+ 1 file changed, 5 insertions(+), 10 deletions(-)
+
+diff --git a/xlators/storage/posix/src/posix-metadata.c b/xlators/storage/posix/src/posix-metadata.c
+index 7ff5225..e96f222 100644
+--- a/xlators/storage/posix/src/posix-metadata.c
++++ b/xlators/storage/posix/src/posix-metadata.c
+@@ -429,11 +429,6 @@ posix_set_mdata_xattr(xlator_t *this, const char *real_path, int fd,
+             }
+         }
+ 
+-        if ((flag->ctime == 0) && (flag->mtime == 0) && (flag->atime == 0)) {
+-            ret = 0;
+-            goto unlock;
+-        }
+-
+         /* Earlier, mdata was updated only if the existing time is less
+          * than the time to be updated. This would fail the scenarios
+          * where mtime can be set to any time using the syscall. Hence
+@@ -621,13 +616,9 @@ posix_set_ctime(call_frame_t *frame, xlator_t *this, const char *real_path,
+ 
+     if (priv->ctime) {
+         (void)posix_get_mdata_flag(frame->root->flags, &flag);
+-        if (frame->root->ctime.tv_sec == 0) {
+-            gf_msg(this->name, GF_LOG_WARNING, errno, P_MSG_SETMDATA_FAILED,
+-                   "posix set mdata failed, No ctime : %s gfid:%s", real_path,
+-                   inode ? uuid_utoa(inode->gfid) : "No inode");
++        if ((flag.ctime == 0) && (flag.mtime == 0) && (flag.atime == 0)) {
+             goto out;
+         }
+-
+         ret = posix_set_mdata_xattr(this, real_path, fd, inode,
+                                     &frame->root->ctime, stbuf, &flag,
+                                     _gf_false);
+@@ -656,6 +647,9 @@ posix_set_parent_ctime(call_frame_t *frame, xlator_t *this,
+ 
+     if (inode && priv->ctime) {
+         (void)posix_get_parent_mdata_flag(frame->root->flags, &flag);
++        if ((flag.ctime == 0) && (flag.mtime == 0) && (flag.atime == 0)) {
++            goto out;
++        }
+         ret = posix_set_mdata_xattr(this, real_path, fd, inode,
+                                     &frame->root->ctime, stbuf, &flag,
+                                     _gf_false);
+@@ -665,6 +659,7 @@ posix_set_parent_ctime(call_frame_t *frame, xlator_t *this,
+                    uuid_utoa(inode->gfid));
+         }
+     }
++out:
+     return;
+ }
+ 
+-- 
+1.8.3.1
+

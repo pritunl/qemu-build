@@ -1,0 +1,61 @@
+From 302f3f87c9aa00c17ec3b49a81c8a4441d2bdf5f Mon Sep 17 00:00:00 2001
+From: Hari Gowtham <hgowtham@redhat.com>
+Date: Mon, 15 Apr 2019 10:01:40 +0530
+Subject: [PATCH 097/124] glusterd/tier: while doing an attach tier, the self
+ heal daemon is not getting started
+
+Problem: on a replicated volume, if attach tier is done,
+The shd will be restarted. But here the restart fails because of the
+graph not getting generated properly. The dict which is used for graph
+creation doesn't get the values copied properly in prepare_shd_volume_options()
+glusterd_prepare_shd_volume_options_for_tier() fails and skips the copy.
+
+This patch reverts the changes back to the way it was in 3.4 and
+help in fixing the issue. Using the old dict_set_str works.
+
+label: DOWNSTREAM ONLY
+
+Change-Id: I21534ca177511e018ba76886e899b3b1a4ac4716
+Signed-off-by: Hari Gowtham <hgowtham@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167825
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-volgen.c | 19 +++++++++++++------
+ 1 file changed, 13 insertions(+), 6 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volgen.c b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+index 012f38e..1f53beb 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volgen.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+@@ -4895,14 +4895,21 @@ glusterd_prepare_shd_volume_options_for_tier(glusterd_volinfo_t *volinfo,
+                                              dict_t *set_dict)
+ {
+     int ret = -1;
++    char           *key             = NULL;
+ 
+-    ret = volgen_set_shd_key_enable(set_dict, volinfo->tier_info.cold_type);
+-    if (ret)
+-        goto out;
++    key = volgen_get_shd_key (volinfo->tier_info.cold_type);
++    if (key) {
++        ret = dict_set_str (set_dict, key, "enable");
++        if (ret)
++            goto out;
++    }
+ 
+-    ret = volgen_set_shd_key_enable(set_dict, volinfo->tier_info.hot_type);
+-    if (ret)
+-        goto out;
++    key = volgen_get_shd_key (volinfo->tier_info.hot_type);
++    if (key) {
++        ret = dict_set_str (set_dict, key, "enable");
++        if (ret)
++            goto out;
++    }
+ out:
+     return ret;
+ }
+-- 
+1.8.3.1
+

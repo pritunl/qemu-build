@@ -1,0 +1,123 @@
+From f25a92028ecc2018953a6375bba43a21d3a93566 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawa@redhat.com>
+Date: Thu, 4 Apr 2019 16:18:51 +0530
+Subject: [PATCH 42/52] spec: (client|server) Builds are failing on rhel-6
+
+Problem: 1) For sever-rpm gluster build is throwing an error
+            undefined reference to `dlcose` on RHEL 6
+         2) For server-rpm build is throwing reference for
+            For Not found for rot-13.so and symlink-cache.so
+         3) For client-rpms build is throwing an error
+            File Not found for all files with exclude
+            file in without_server check
+
+Solution: 1) For server-rpm add LIB_DL link in Makefile
+             and remove reference for rot.so and symlink-cache.so
+             from glusterfs.spec.in
+          2) Remove exclude files list as they are not
+             being build
+
+Label: DOWNSTREAM ONLY
+Change-Id: I2b41604cbc8525b91231b0c5caee588c5d5d6b08
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/166962
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfs.spec.in                     | 54 -----------------------------------
+ xlators/mgmt/glusterd/src/Makefile.am |  2 +-
+ 2 files changed, 1 insertion(+), 55 deletions(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index df8d116..7c7f7c0 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -1097,72 +1097,18 @@ exit 0
+ %{_tmpfilesdir}/gluster.conf
+ %endif
+ %if ( 0%{?_without_extra_xlators:1} )
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/encryption/rot-13.so
+ %exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/quiesce.so
+ %exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/playground/template.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/testing/performance/symlink-cache.so
+ %endif
+ %if ( 0%{?_without_regression_tests:1} )
+ %exclude %{_datadir}/glusterfs/run-tests.sh
+ %exclude %{_datadir}/glusterfs/tests
+ %endif
+ %if 0%{?_without_server:1}
+-%exclude %{_sysconfdir}/glusterfs/gluster-rsyslog-5.8.conf
+-%exclude %{_sysconfdir}/glusterfs/gluster-rsyslog-7.2.conf
+-%exclude %{_sysconfdir}/glusterfs/glusterd.vol
+-%exclude %{_sysconfdir}/glusterfs/glusterfs-georep-logrotate
+-%exclude %{_sysconfdir}/glusterfs/glusterfs-logrotate
+-%exclude %{_sysconfdir}/glusterfs/group-db-workload
+-%exclude %{_sysconfdir}/glusterfs/group-distributed-virt
+-%exclude %{_sysconfdir}/glusterfs/group-gluster-block
+-%exclude %{_sysconfdir}/glusterfs/group-metadata-cache
+-%exclude %{_sysconfdir}/glusterfs/group-nl-cache
+-%exclude %{_sysconfdir}/glusterfs/group-virt.example
+-%exclude %{_sysconfdir}/glusterfs/logger.conf.example
+-%exclude %{_sysconfdir}/rsyslog.d/gluster.conf.example
+-%exclude %{_prefix}/bin/glusterfind
+-%exclude %{_prefix}/lib/firewalld/services/glusterfs.xml
+-%exclude %{_prefix}/lib/systemd/system/glusterd.service
+-%exclude %{_prefix}/lib/systemd/system/glusterfssharedstorage.service
+-%exclude %{_prefix}/lib/tmpfiles.d/gluster.conf
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/arbiter.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/bit-rot.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/bitrot-stub.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/index.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/leases.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/locks.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/marker.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/posix-locks.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/quota.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/quotad.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/sdfs.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/selinux.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/snapview-server.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/thin-arbiter.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/trash.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/upcall.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/mgmt/glusterd.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/performance/decompounder.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/protocol/server.so
+-%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/storage/posix.so
+-%exclude %{_libexecdir}/glusterfs/*
+-%exclude %{_sbindir}/conf.py
+-%exclude %{_sbindir}/gcron.py
+-%exclude %{_sbindir}/gf_attach
+-%exclude %{_sbindir}/gfind_missing_files
+-%exclude %{_sbindir}/glfsheal
+-%exclude %{_sbindir}/gluster
+-%exclude %{_sbindir}/gluster-setgfid2path
+-%exclude %{_sbindir}/glusterd
+-%exclude %{_sbindir}/snap_scheduler.py
+ %if ( 0%{?_with_systemd:1} )
+ %exclude %{_datadir}/glusterfs/scripts/control-cpu-load.sh
+ %exclude %{_datadir}/glusterfs/scripts/control-mem.sh
+ %endif
+-%exclude %{_datadir}/glusterfs/scripts/post-upgrade-script-for-quota.sh
+-%exclude %{_datadir}/glusterfs/scripts/pre-upgrade-script-for-quota.sh
+-%exclude %{_datadir}/glusterfs/scripts/stop-all-gluster-processes.sh
+-%exclude %{_sharedstatedir}/glusterd/*
+ %endif
+ 
+ %files api
+diff --git a/xlators/mgmt/glusterd/src/Makefile.am b/xlators/mgmt/glusterd/src/Makefile.am
+index 6d09e37..c8dd8e3 100644
+--- a/xlators/mgmt/glusterd/src/Makefile.am
++++ b/xlators/mgmt/glusterd/src/Makefile.am
+@@ -6,7 +6,7 @@ xlatordir = $(libdir)/glusterfs/$(PACKAGE_VERSION)/xlator/mgmt
+ glusterd_la_CPPFLAGS = $(AM_CPPFLAGS) \
+ 	-DFILTERDIR=\"$(libdir)/glusterfs/$(PACKAGE_VERSION)/filter\" \
+ 	-DXLATORDIR=\"$(libdir)/glusterfs/$(PACKAGE_VERSION)/xlator\"
+-glusterd_la_LDFLAGS = -module $(GF_XLATOR_DEFAULT_LDFLAGS)
++glusterd_la_LDFLAGS = -module $(GF_XLATOR_DEFAULT_LDFLAGS) $(LIB_DL)
+ glusterd_la_SOURCES = glusterd.c glusterd-handler.c glusterd-sm.c \
+ 	glusterd-op-sm.c glusterd-utils.c glusterd-rpc-ops.c \
+ 	glusterd-store.c glusterd-handshake.c glusterd-pmap.c \
+-- 
+1.8.3.1
+

@@ -1,0 +1,69 @@
+From 058a853a1438b2a62586c545f71150ade3de23b7 Mon Sep 17 00:00:00 2001
+From: schaffung <ssivakum@redhat.com>
+Date: Wed, 10 Feb 2021 13:43:48 +0530
+Subject: [PATCH 531/532] Glustereventsd Default port change (#2091)
+
+Issue : The default port of glustereventsd is currently 24009
+which is preventing glustereventsd from binding to the UDP port
+due to selinux policies.
+
+Fix: Changing the default port to be bound by chanding it to something
+in the ephemeral range.
+
+>Fixes: #2080
+>Change-Id: Ibdc87f83f82f69660dca95d6d14b226e10d8bd33
+>Signed-off-by: srijan-sivakumar <ssivakum@redhat.com>
+Upstream Patch : https://github.com/gluster/glusterfs/pull/2091
+
+BUG: 1814744
+Change-Id: Ibdc87f83f82f69660dca95d6d14b226e10d8bd33
+Signed-off-by: srijan-sivakumar <ssivakum@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/227249
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ events/src/eventsconfig.json   | 2 +-
+ extras/firewalld/glusterfs.xml | 2 +-
+ libglusterfs/src/events.c      | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/events/src/eventsconfig.json b/events/src/eventsconfig.json
+index 89e5b9c..14d8f84 100644
+--- a/events/src/eventsconfig.json
++++ b/events/src/eventsconfig.json
+@@ -1,5 +1,5 @@
+ {
+     "log-level": "INFO",
+-    "port": 24009,
++    "port": 55555,
+     "disable-events-log": false
+ }
+diff --git a/extras/firewalld/glusterfs.xml b/extras/firewalld/glusterfs.xml
+index 7e17644..dc74b2e 100644
+--- a/extras/firewalld/glusterfs.xml
++++ b/extras/firewalld/glusterfs.xml
+@@ -4,7 +4,7 @@
+ <description>Default ports for gluster-distributed storage</description>
+ <port protocol="tcp" port="24007"/>    <!--For glusterd -->
+ <port protocol="tcp" port="24008"/>    <!--For glusterd RDMA port management -->
+-<port protocol="tcp" port="24009"/>    <!--For glustereventsd -->
++<port protocol="tcp" port="55555"/>    <!--For glustereventsd -->
+ <port protocol="tcp" port="38465"/>    <!--Gluster NFS service -->
+ <port protocol="tcp" port="38466"/>    <!--Gluster NFS service -->
+ <port protocol="tcp" port="38467"/>    <!--Gluster NFS service -->
+diff --git a/libglusterfs/src/events.c b/libglusterfs/src/events.c
+index 4d720ca..3659606 100644
+--- a/libglusterfs/src/events.c
++++ b/libglusterfs/src/events.c
+@@ -26,7 +26,7 @@
+ #include "glusterfs/events.h"
+ 
+ #define EVENT_HOST "127.0.0.1"
+-#define EVENT_PORT 24009
++#define EVENT_PORT 55555
+ 
+ int
+ _gf_event(eventtypes_t event, const char *fmt, ...)
+-- 
+1.8.3.1
+

@@ -1,0 +1,39 @@
+From 02e7afdfb740db7cfa1a2f0f79933172d172ff27 Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Tue, 7 Jan 2020 15:32:13 +0530
+Subject: [PATCH 386/449] glusterd: increase the StartLimitBurst
+
+Based on https://bugzilla.redhat.com/show_bug.cgi?id=1782200#c6
+increasing the limit.
+
+> upstream patch link: https://review.gluster.org/#/c/glusterfs/+/23970/
+> fixes: bz#1782200
+> Change-Id: Ia885c7bdb2a90f0946c5268da894f6a4da5a69b7
+> Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+
+BUG: 1663557
+Change-Id: Ia885c7bdb2a90f0946c5268da894f6a4da5a69b7
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202252
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/systemd/glusterd.service.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/extras/systemd/glusterd.service.in b/extras/systemd/glusterd.service.in
+index b944762..699aea3 100644
+--- a/extras/systemd/glusterd.service.in
++++ b/extras/systemd/glusterd.service.in
+@@ -17,7 +17,7 @@ TimeoutSec=300
+ SuccessExitStatus=15
+ Restart=on-abnormal
+ RestartSec=60
+-StartLimitBurst=3
++StartLimitBurst=6
+ StartLimitIntervalSec=3600
+ StartLimitInterval=3600
+ 
+-- 
+1.8.3.1
+

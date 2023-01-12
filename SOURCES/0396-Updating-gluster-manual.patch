@@ -1,0 +1,56 @@
+From 728aab1c1cfcf352d4ca1fde0b80044dc24bd9fa Mon Sep 17 00:00:00 2001
+From: Rishubh Jain <risjain@redhat.com>
+Date: Sun, 18 Aug 2019 18:02:57 +0530
+Subject: [PATCH 396/449] Updating gluster manual.
+
+Adding disperse-data to gluster manual under
+volume create command
+
+> Upstream Patch Link: https://review.gluster.org/#/c/glusterfs/+/23258/
+> Change-Id: Ic9eb47c9e71a1d7a11af9394c615c8e90f8d1d69
+> Fixes: bz#1668239
+> Signed-off-by: Rishubh Jain <risjain@redhat.com>
+> Signed-off-by: Sheetal Pamecha <spamecha@redhat.com>
+
+BUG: 1667954
+Change-Id: Ic9eb47c9e71a1d7a11af9394c615c8e90f8d1d69
+Signed-off-by: Sheetal Pamecha <spamecha@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202342
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ doc/gluster.8                          | 2 +-
+ tests/basic/glusterd/disperse-create.t | 4 ++++
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/doc/gluster.8 b/doc/gluster.8
+index 88cbf44..66bdb48 100644
+--- a/doc/gluster.8
++++ b/doc/gluster.8
+@@ -41,7 +41,7 @@ List all volumes in cluster
+ \fB\ volume status [all | <VOLNAME> [nfs|shd|<BRICK>|quotad|tierd]] [detail|clients|mem|inode|fd|callpool|tasks|client-list] \fR
+ Display status of all or specified volume(s)/brick
+ .TP
+-\fB\ volume create <NEW-VOLNAME> [stripe <COUNT>] [replica <COUNT>] [disperse [<COUNT>]] [redundancy <COUNT>] [transport <tcp|rdma|tcp,rdma>] <NEW-BRICK> ... \fR
++\fB\ volume create <NEW-VOLNAME> [stripe <COUNT>] [[replica <COUNT> [arbiter <COUNT>]]|[replica 2 thin-arbiter 1]] [disperse [<COUNT>]] [disperse-data <COUNT>] [redundancy <COUNT>] [transport <tcp|rdma|tcp,rdma>] <NEW-BRICK> ... <TA-BRICK> \fR
+ Create a new volume of the specified type using the specified bricks and transport type (the default transport type is tcp).
+ To create a volume with both transports (tcp and rdma), give 'transport tcp,rdma' as an option.
+ .TP
+diff --git a/tests/basic/glusterd/disperse-create.t b/tests/basic/glusterd/disperse-create.t
+index 384c675..db8a621 100644
+--- a/tests/basic/glusterd/disperse-create.t
++++ b/tests/basic/glusterd/disperse-create.t
+@@ -20,6 +20,10 @@ TEST $CLI volume create $V0 disperse 3 redundancy 1 $H0:$B0/b7 $H0:$B0/b8 $H0:$B
+ EXPECT "1 x \(2 \+ 1\) = 3" volinfo_field $V0 "Number of Bricks"
+ 
+ TEST $CLI volume delete $V0
++TEST $CLI volume create $V0 disperse-data 2 $H0:$B0/b10 $H0:$B0/b11 $H0:$B0/b12
++EXPECT "1 x \(2 \+ 1\) = 3" volinfo_field $V0 "Number of Bricks"
++
++TEST $CLI volume delete $V0
+ TEST $CLI volume create $V0 redundancy 1 $H0:$B0/b10 $H0:$B0/b11 $H0:$B0/b12
+ EXPECT "1 x \(2 \+ 1\) = 3" volinfo_field $V0 "Number of Bricks"
+ 
+-- 
+1.8.3.1
+

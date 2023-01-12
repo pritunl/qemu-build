@@ -1,0 +1,70 @@
+From 92aadb6a5eeec75edf7f5a11a0ebd861dd85ca6b Mon Sep 17 00:00:00 2001
+From: N Balachandran <nbalacha@redhat.com>
+Date: Mon, 20 May 2019 15:23:42 +0530
+Subject: [PATCH 148/169] cluster/dht: Lookup all files when processing
+ directory
+
+A rebalance process currently only looks up files
+that it is supposed to migrate. This could cause issues
+when lookup-optimize is enabled as the dir layout can be
+updated with the commit hash before all files are looked up.
+This is expecially problematic if one of the rebalance processes
+fails to complete as clients will try to access files whose
+linkto files might not have been created.
+Each process will now lookup every file in the directory it is
+processing.
+Pros: Less likely that files will be inaccessible.
+Cons: More lookup requests sent to the bricks and a potential
+performance hit.
+Note: this does not handle races such as when a layout is updated on disk
+just as the create fop is sent by the client.
+
+upstream : https://review.gluster.org/#/c/glusterfs/+/22746/
+
+>Change-Id: I22b55846effc08d3b827c3af9335229335f67fb8
+>fixes: bz#1711764
+
+BUG#1714124
+
+Change-Id: Ica6a9459befe53957f080001a2dda525b3b14d1c
+Signed-off-by: N Balachandran <nbalacha@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172080
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Mohit Agrawal <moagrawa@redhat.com>
+---
+ xlators/cluster/dht/src/dht-rebalance.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/xlators/cluster/dht/src/dht-rebalance.c b/xlators/cluster/dht/src/dht-rebalance.c
+index efbe8a4..559f046 100644
+--- a/xlators/cluster/dht/src/dht-rebalance.c
++++ b/xlators/cluster/dht/src/dht-rebalance.c
+@@ -2741,12 +2741,6 @@ gf_defrag_migrate_single_file(void *opaque)
+         goto out;
+     }
+ 
+-    if (!gf_defrag_should_i_migrate(this, rebal_entry->local_subvol_index,
+-                                    entry->d_stat.ia_gfid)) {
+-        gf_msg_debug(this->name, 0, "Don't migrate %s ", entry_loc.path);
+-        goto out;
+-    }
+-
+     gf_uuid_copy(entry_loc.gfid, entry->d_stat.ia_gfid);
+ 
+     gf_uuid_copy(entry_loc.pargfid, loc->gfid);
+@@ -2772,6 +2766,12 @@ gf_defrag_migrate_single_file(void *opaque)
+         goto out;
+     }
+ 
++    if (!gf_defrag_should_i_migrate(this, rebal_entry->local_subvol_index,
++                                    entry->d_stat.ia_gfid)) {
++        gf_msg_debug(this->name, 0, "Don't migrate %s ", entry_loc.path);
++        goto out;
++    }
++
+     iatt_ptr = &iatt;
+ 
+     hashed_subvol = dht_subvol_get_hashed(this, &entry_loc);
+-- 
+1.8.3.1
+

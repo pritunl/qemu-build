@@ -1,0 +1,55 @@
+From d7b84014cbb19e65dfae6248af47cc23fabc64e5 Mon Sep 17 00:00:00 2001
+From: Sunny Kumar <sunkumar@redhat.com>
+Date: Wed, 22 Apr 2020 15:09:16 +0100
+Subject: [PATCH 366/367] snapshot: fix python3 issue in gcron
+
+`$gcron.py test_vol Job`
+Traceback:
+  File "/usr/sbin/gcron.py", line 189, in <module>
+    main()
+  File "/usr/sbin/gcron.py", line 121, in main
+    initLogger(script_name)
+  File "/usr/sbin/gcron.py", line 44, in initLogger
+    logfile = os.path.join(out.strip(), script_name[:-3]+".log")
+  File "/usr/lib64/python3.6/posixpath.py", line 94, in join
+    genericpath._check_arg_types('join', a, *p)
+  File "/usr/lib64/python3.6/genericpath.py", line 151, in _check_arg_types
+    raise TypeError("Can't mix strings and bytes in path components") from None
+TypeError: Can't mix strings and bytes in path components
+
+Solution: Added the 'universal_newlines' flag to Popen.
+
+Backport of:
+
+   >Upstream Patch: https://review.gluster.org/#/c/glusterfs/+/24364/
+   >Change-Id: I4c7a0e5bce605e4c134f6786c9dd8162b89fc77f
+   >Fixes: #1193
+   >Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+
+BUG: 1825195
+Change-Id: I4c7a0e5bce605e4c134f6786c9dd8162b89fc77f
+Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/198641
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/snap_scheduler/gcron.py | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/extras/snap_scheduler/gcron.py b/extras/snap_scheduler/gcron.py
+index 1127be0..cc16310 100755
+--- a/extras/snap_scheduler/gcron.py
++++ b/extras/snap_scheduler/gcron.py
+@@ -38,7 +38,8 @@ def initLogger(script_name):
+     sh.setFormatter(formatter)
+ 
+     process = subprocess.Popen(["gluster", "--print-logdir"],
+-                               stdout=subprocess.PIPE)
++                               stdout=subprocess.PIPE,
++                               universal_newlines=True)
+     out, err = process.communicate()
+     if process.returncode == 0:
+         logfile = os.path.join(out.strip(), script_name[:-3]+".log")
+-- 
+1.8.3.1
+

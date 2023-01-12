@@ -1,0 +1,70 @@
+From 039a3f81209706261fc809eac94564e81a3377da Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Wed, 25 Sep 2019 14:55:19 +0530
+Subject: [PATCH 300/302] cli: remove the warning displayed when remove brick
+ start issued
+
+remove-brick start command gives displays below error:
+
+It is recommended that remove-brick be run with cluster.force-migration
+option disabled to prevent possible data corruption. Doing so will ensure
+that files that receive writes during migration will not be migrated and
+will need to be manually copied after the remove-brick commit operation.
+Please check the value of the option and update accordingly.
+Do you want to continue with your current cluster.force-migration settings? (y/n)
+
+As we are not qualifying cluster.force-migration for 3.5.0,
+we should not display this message. So, removing it.
+
+Label: DOWNSTREAM ONLY
+
+BUG: 1755227
+Change-Id: I409f2059d43c5e867788f19d2ccb8d6d839520f7
+fixes: bz#1755227
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/182009
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ cli/src/cli-cmd-parser.c |  2 --
+ cli/src/cli-cmd-volume.c | 11 -----------
+ 2 files changed, 13 deletions(-)
+
+diff --git a/cli/src/cli-cmd-parser.c b/cli/src/cli-cmd-parser.c
+index 92ceb8e..4456a7b 100644
+--- a/cli/src/cli-cmd-parser.c
++++ b/cli/src/cli-cmd-parser.c
+@@ -2101,8 +2101,6 @@ cli_cmd_volume_remove_brick_parse(struct cli_state *state, const char **words,
+         wordcount--;
+         if (!strcmp("start", w)) {
+             command = GF_OP_CMD_START;
+-            if (question)
+-                *question = 1;
+         } else if (!strcmp("commit", w)) {
+             command = GF_OP_CMD_COMMIT;
+         } else if (!strcmp("stop", w)) {
+diff --git a/cli/src/cli-cmd-volume.c b/cli/src/cli-cmd-volume.c
+index a42e663..6b958bd 100644
+--- a/cli/src/cli-cmd-volume.c
++++ b/cli/src/cli-cmd-volume.c
+@@ -2088,17 +2088,6 @@ cli_cmd_volume_remove_brick_cbk(struct cli_state *state,
+             "Remove-brick force will not migrate files from the "
+             "removed bricks, so they will no longer be available"
+             " on the volume.\nDo you want to continue?";
+-    } else if (command == GF_OP_CMD_START) {
+-        question =
+-            "It is recommended that remove-brick be run with"
+-            " cluster.force-migration option disabled to prevent"
+-            " possible data corruption. Doing so will ensure that"
+-            " files that receive writes during migration will not"
+-            " be migrated and will need to be manually copied"
+-            " after the remove-brick commit operation. Please"
+-            " check the value of the option and update accordingly."
+-            " \nDo you want to continue with your current"
+-            " cluster.force-migration settings?";
+     }
+ 
+     if (!brick_count) {
+-- 
+1.8.3.1
+

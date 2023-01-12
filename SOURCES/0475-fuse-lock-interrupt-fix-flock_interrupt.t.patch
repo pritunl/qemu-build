@@ -1,0 +1,46 @@
+From 47d8c316f622850d060af90d1d939528ace5607a Mon Sep 17 00:00:00 2001
+From: Csaba Henk <csaba@redhat.com>
+Date: Thu, 14 Feb 2019 02:01:38 +0100
+Subject: [PATCH 475/478] fuse lock interrupt: fix flock_interrupt.t
+
+Upstream:
+> Reviewed-on: https://review.gluster.org/22213
+> updates: bz#1193929
+> Change-Id: I347de62755100cd69e3cf341434767ae23fd1ba4
+> Signed-off-by: Csaba Henk <csaba@redhat.com>
+
+BUG: 1821743
+Change-Id: I0088f804bca215152e7ca2c490402c11f7b5333a
+Signed-off-by: Csaba Henk <csaba@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/216158
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/features/flock_interrupt.t | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/tests/features/flock_interrupt.t b/tests/features/flock_interrupt.t
+index 8603b65..964a4bc 100644
+--- a/tests/features/flock_interrupt.t
++++ b/tests/features/flock_interrupt.t
+@@ -22,12 +22,12 @@ EXPECT 'Started' volinfo_field $V0 'Status';
+ TEST $GFS --volfile-id=$V0 --volfile-server=$H0 $M0;
+ TEST touch $M0/testfile;
+ 
+-function flock_interrupt {
+-        flock $MO/testfile sleep 3 & flock -w 1 $M0/testfile true;
+-        echo ok;
+-}
++echo > got_lock
++flock $M0/testfile sleep 6 & { sleep 0.3; flock -w 2 $M0/testfile true; echo ok > got_lock; } &
+ 
+-EXPECT_WITHIN 2 ok flock_interrupt;
++EXPECT_WITHIN 4 ok cat got_lock;
+ 
+ ## Finish up
++sleep 7;
++rm -f got_lock;
+ cleanup;
+-- 
+1.8.3.1
+

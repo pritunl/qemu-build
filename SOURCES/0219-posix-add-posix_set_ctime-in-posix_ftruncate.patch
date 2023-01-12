@@ -1,0 +1,35 @@
+From d9781ed4964d9e752fc880c8cd8afcbd2c561ebe Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Wed, 26 Jun 2019 15:58:33 +0530
+Subject: [PATCH 219/221] posix : add posix_set_ctime() in posix_ftruncate()
+
+Upstream references :
+> release 6: https://review.gluster.org/#/c/glusterfs/+/22965/
+> mainline: https://review.gluster.org/#/c/glusterfs/+/22948/
+
+Change-Id: I0cb5320fea71306e0283509ae47024f23874b53b
+fixes: bz#1720163
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/174837
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/storage/posix/src/posix-inode-fd-ops.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/xlators/storage/posix/src/posix-inode-fd-ops.c b/xlators/storage/posix/src/posix-inode-fd-ops.c
+index fc847d6..c949f68 100644
+--- a/xlators/storage/posix/src/posix-inode-fd-ops.c
++++ b/xlators/storage/posix/src/posix-inode-fd-ops.c
+@@ -5059,6 +5059,8 @@ posix_ftruncate(call_frame_t *frame, xlator_t *this, fd_t *fd, off_t offset,
+         goto out;
+     }
+ 
++    posix_set_ctime(frame, this, NULL, pfd->fd, fd->inode, &postop);
++
+     op_ret = 0;
+ 
+ out:
+-- 
+1.8.3.1
+

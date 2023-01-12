@@ -1,0 +1,38 @@
+From 8074906ace5fbd71b5d24cc3da5571ebdebed859 Mon Sep 17 00:00:00 2001
+From: Rinku Kothiya <rkothiya@redhat.com>
+Date: Thu, 2 Jan 2020 11:27:47 +0000
+Subject: [PATCH 352/353] spec: fixed missing dependencies for
+ glusterfs-cloudsync-plugins
+
+RPMDiff raises a warning, subpackage glusterfs-cloudsync-plugins
+on x86_64 consumes library libglusterfs.so.0()(64bit) from
+subpackage glusterfs-libs but does not have explicit package
+version requirement, which is fixed using this patch.
+
+Label: DOWNSTREAM ONLY
+
+BUG: 1775564
+
+Change-Id: I05ea46ac2c92090f01c07dfbd6e0d66498f1c586
+Signed-off-by: Rinku Kothiya <rkothiya@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/188619
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfs.spec.in | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 671ee27..e95e539 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -374,6 +374,7 @@ This package provides the GlusterFS CLI application and its man page
+ %package cloudsync-plugins
+ Summary:          Cloudsync Plugins
+ BuildRequires:    libcurl-devel
++Requires:         glusterfs-libs = %{version}-%{release}
+ 
+ %description cloudsync-plugins
+ GlusterFS is a distributed file-system capable of scaling to several
+-- 
+1.8.3.1
+

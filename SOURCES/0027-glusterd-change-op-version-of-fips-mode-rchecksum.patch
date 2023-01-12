@@ -1,0 +1,50 @@
+From 9be3c4745b161f1815f77cd19b550ac9795845f5 Mon Sep 17 00:00:00 2001
+From: Ravishankar N <ravishankar@redhat.com>
+Date: Thu, 20 Sep 2018 22:01:05 +0530
+Subject: [PATCH 27/52] glusterd: change op-version of fips-mode-rchecksum
+
+..to GD_OP_VERSION_3_13_3 since GD_OP_VERSION_4_0_0 is not present in
+rhgs-3.4.1
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I759272748177d174b15123faffc2305f7a5ec58f
+Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/150714
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/glusterfs/globals.h            | 2 ++
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c | 2 +-
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/libglusterfs/src/glusterfs/globals.h b/libglusterfs/src/glusterfs/globals.h
+index a278f18..4a82889 100644
+--- a/libglusterfs/src/glusterfs/globals.h
++++ b/libglusterfs/src/glusterfs/globals.h
+@@ -118,6 +118,8 @@
+ 
+ #define GD_OP_VERSION_3_13_2 31302 /* Op-version for GlusterFS 3.13.2 */
+ 
++#define GD_OP_VERSION_3_13_3 31303 /* Op-version for GlusterFS 3.13.3 */
++
+ #define GD_OP_VERSION_4_0_0 40000 /* Op-version for GlusterFS 4.0.0 */
+ 
+ #define GD_OP_VERSION_4_1_0 40100 /* Op-version for GlusterFS 4.1.0 */
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index 84f2705..2bd0a9c 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -2329,7 +2329,7 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+         .key = "storage.fips-mode-rchecksum",
+         .type = NO_DOC,
+         .voltype = "storage/posix",
+-        .op_version = GD_OP_VERSION_4_0_0,
++        .op_version = GD_OP_VERSION_3_13_3,
+     },
+     {
+         .option = "force-create-mode",
+-- 
+1.8.3.1
+

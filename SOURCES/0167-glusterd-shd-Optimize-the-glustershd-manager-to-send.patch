@@ -1,0 +1,64 @@
+From 321080e55f0ae97115a9542ba5de8494e7610860 Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Tue, 14 May 2019 23:12:44 +0530
+Subject: [PATCH 167/169] glusterd/shd: Optimize the glustershd manager to send
+ reconfigure
+
+Traditionally all svc manager will execute process stop and then
+followed by start each time when they called. But that is not
+required by shd, because the attach request implemented in the shd
+multiplex has the intelligence to check whether a detach is required
+prior to attaching the graph. So there is no need to send an explicit
+detach request if we are sure that the next call is an attach request
+
+Upstream patch: https://review.gluster.org/#/c/glusterfs/+/22729/
+>Change-Id: I9157c8dcaffdac038f73286bcf5646a3f1d3d8ec
+>fixes: bz#1710054
+>Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+
+Change-Id: I56aaaf3b4d28215307e160c1ba0e09bb74c30fbe
+BUG: 1716865
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172289
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ libglusterfs/src/graph.c                     | 1 -
+ xlators/mgmt/glusterd/src/glusterd-shd-svc.c | 9 +++++----
+ 2 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/libglusterfs/src/graph.c b/libglusterfs/src/graph.c
+index 18fb2d9..27d9335 100644
+--- a/libglusterfs/src/graph.c
++++ b/libglusterfs/src/graph.c
+@@ -1497,7 +1497,6 @@ glusterfs_process_svc_detach(glusterfs_ctx_t *ctx, gf_volfile_t *volfile_obj)
+         parent_graph->last_xl = glusterfs_get_last_xlator(parent_graph);
+         parent_graph->xl_count -= graph->xl_count;
+         parent_graph->leaf_count -= graph->leaf_count;
+-        default_notify(xl, GF_EVENT_PARENT_DOWN, xl);
+         parent_graph->id++;
+         ret = 0;
+     }
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+index 981cc87..d81d760 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+@@ -311,10 +311,11 @@ glusterd_shdsvc_manager(glusterd_svc_t *svc, void *data, int flags)
+          */
+         ret = svc->stop(svc, SIGTERM);
+     } else if (volinfo) {
+-        ret = svc->stop(svc, SIGTERM);
+-        if (ret)
+-            goto out;
+-
++        if (volinfo->status != GLUSTERD_STATUS_STARTED) {
++            ret = svc->stop(svc, SIGTERM);
++            if (ret)
++                goto out;
++        }
+         if (volinfo->status == GLUSTERD_STATUS_STARTED) {
+             ret = svc->start(svc, flags);
+             if (ret)
+-- 
+1.8.3.1
+

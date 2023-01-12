@@ -1,0 +1,38 @@
+From 968e5e698a070f9e6905a86c9c8338c36fcfa339 Mon Sep 17 00:00:00 2001
+From: moagrawa <moagrawa@redhat.com>
+Date: Mon, 15 Jan 2018 18:21:27 +0530
+Subject: [PATCH 20/52] spec: unpackaged files found for RHEL-7 client build
+
+Problem: unpackages files found for RHEL-7 client build
+
+Solution: Update glusterfs.specs.in to exclude unpackage files
+Label: DOWNSTREAM ONLY
+
+Change-Id: I761188a6a8447105b53bf3334ded963c645cab5b
+Signed-off-by: moagrawa <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/127758
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Milind Changire <mchangir@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfs.spec.in | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 208a82d..ec06176 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -1141,8 +1141,10 @@ exit 0
+ %exclude %{_sbindir}/gluster-setgfid2path
+ %exclude %{_sbindir}/glusterd
+ %exclude %{_sbindir}/snap_scheduler.py
++%if ( 0%{?_with_systemd:1} )
+ %exclude %{_datadir}/glusterfs/scripts/control-cpu-load.sh
+ %exclude %{_datadir}/glusterfs/scripts/control-mem.sh
++%endif
+ %exclude %{_datadir}/glusterfs/scripts/post-upgrade-script-for-quota.sh
+ %exclude %{_datadir}/glusterfs/scripts/pre-upgrade-script-for-quota.sh
+ %exclude %{_datadir}/glusterfs/scripts/stop-all-gluster-processes.sh
+-- 
+1.8.3.1
+

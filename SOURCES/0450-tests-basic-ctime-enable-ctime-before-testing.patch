@@ -1,0 +1,35 @@
+From 09dce9ce8e946a86209b6f057bf14323036fa12a Mon Sep 17 00:00:00 2001
+From: Shwetha K Acharya <sacharya@redhat.com>
+Date: Wed, 10 Jun 2020 11:44:56 +0530
+Subject: [PATCH 450/451] tests/basic/ctime: enable ctime before testing
+
+This is to ensure that this test successfully runs, even if
+ctime is disabled by default (which is the case in downstream.)
+
+Label: DOWNSTREAM ONLY
+
+BUG: 1844359
+Change-Id: I91e80b3d8a56fc089aeb58b0254812111d394842
+Signed-off-by: Shwetha K Acharya <sacharya@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202874
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/basic/ctime/ctime-utimesat.t | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/tests/basic/ctime/ctime-utimesat.t b/tests/basic/ctime/ctime-utimesat.t
+index 540e57a..da12fbe 100644
+--- a/tests/basic/ctime/ctime-utimesat.t
++++ b/tests/basic/ctime/ctime-utimesat.t
+@@ -14,6 +14,7 @@ TEST $CLI volume set $V0 performance.read-after-open off
+ TEST $CLI volume set $V0 performance.open-behind off
+ TEST $CLI volume set $V0 performance.write-behind off
+ TEST $CLI volume set $V0 performance.io-cache off
++TEST $CLI volume set $V0 ctime on
+ 
+ TEST $CLI volume start $V0
+ 
+-- 
+1.8.3.1
+

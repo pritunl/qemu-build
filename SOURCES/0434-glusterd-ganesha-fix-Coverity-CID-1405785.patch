@@ -1,0 +1,39 @@
+From 2ea3fc203671429d0aa9994e5bbd57f6a604523d Mon Sep 17 00:00:00 2001
+From: Xie Changlong <xiechanglong@cmss.chinamobile.com>
+Date: Mon, 28 Oct 2019 17:43:28 +0800
+Subject: [PATCH 434/449] glusterd/ganesha: fix Coverity CID 1405785
+
+To avoid double free
+
+> upstream patch link: https://review.gluster.org/#/c/glusterfs/+/23630/
+> updates: bz#789278
+> Change-Id: I15ae54ed696295d4cb015668722e77983b062ccb
+> Signed-off-by: Xie Changlong <xiechanglong@cmss.chinamobile.com>
+
+BUG: 1787310
+Change-Id: I15ae54ed696295d4cb015668722e77983b062ccb
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202623
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-ganesha.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-ganesha.c b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+index 06f028f..caba34f 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-ganesha.c
++++ b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+@@ -659,8 +659,8 @@ tear_down_cluster(gf_boolean_t run_teardown)
+                          "Failed to close dir %s. Reason :"
+                          " %s",
+                          CONFDIR, strerror(errno));
+-            goto exit;
+         }
++        goto exit;
+     }
+ 
+ out:
+-- 
+1.8.3.1
+

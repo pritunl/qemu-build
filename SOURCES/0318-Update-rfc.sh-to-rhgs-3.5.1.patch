@@ -1,0 +1,114 @@
+From 1f03327887645be2500cd29f69f7a77a4f5d0164 Mon Sep 17 00:00:00 2001
+From: Rinku Kothiya <rkothiya@redhat.com>
+Date: Mon, 18 Nov 2019 14:25:12 -0500
+Subject: [PATCH 318/335] Update rfc.sh to rhgs-3.5.1
+
+Removed the checks for updates and fixes from rfc.sh
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I436c959aa3b3366cd313b29f41c2466c4072efd7
+Signed-off-by: Rinku Kothiya <rkothiya@redhat.com>
+---
+ rfc.sh | 47 ++++++++---------------------------------------
+ 1 file changed, 8 insertions(+), 39 deletions(-)
+
+diff --git a/rfc.sh b/rfc.sh
+index 69ddd2b..918fb11 100755
+--- a/rfc.sh
++++ b/rfc.sh
+@@ -129,13 +129,8 @@ editor_mode()
+ 
+     if [ $(basename "$1") = "COMMIT_EDITMSG" ]; then
+         # see note above function warn_reference_missing for regex elaboration
+-        # Lets first check for github issues
+-        ref=$(git log -n1 --format='%b' | grep -ow -E "([fF][iI][xX][eE][sS]|[uU][pP][dD][aA][tT][eE][sS])(:)?[[:space:]]+(gluster\/glusterfs)?#[[:digit:]]+" | awk -F '#' '{print $2}');
+-        if [ "x${ref}" = "x" ]; then
+-            # if not found, check for bugs
+-            ref=$(git log -n1 --format='%b' | grep -ow -E "([fF][iI][xX][eE][sS]|[uU][pP][dD][aA][tT][eE][sS])(:)?[[:space:]]+bz#[[:digit:]]+" | awk -F '#' '{print $2}');
+-        fi
+ 
++        ref=$(git log -n1 --format='%b' | grep -ow -E "^[bB][uU][gG](:)[[:space:]]+[[:digit:]]+")
+         if [ "x${ref}" != "x" ]; then
+             return;
+         fi
+@@ -157,16 +152,6 @@ editor_mode()
+                 bz_string=""
+             fi
+ 
+-            echo "Select yes '(y)' if this patch fixes the bug/feature completely,"
+-            echo -n "or is the last of the patchset which brings feature (Y/n): "
+-            read fixes
+-            fixes_string="fixes"
+-            if [ "${fixes}" = 'N' ] || [ "${fixes}" = 'n' ]; then
+-                fixes_string="updates"
+-            fi
+-
+-            sed "/^Change-Id:/{p; s/^.*$/${fixes_string}: ${bz_string}#${bug}/;}" $1 > $1.new && \
+-                mv $1.new $1;
+             return;
+         done
+     fi
+@@ -234,8 +219,8 @@ check_patches_for_coding_style()
+ #   IOW, the above helps us find the pattern with leading or training spaces
+ #   or non word consituents like , or ;
+ #
+-#   [fF][iI][xX][eE][sS]|[uU][pP][dD][aA][tT][eE][sS])
+-#      Finds 'fixes' OR 'updates' in any case combination
++#   [bB][uU][gG]
++#      Finds 'bug' in any case
+ #
+ #   (:)?
+ #      Followed by an optional : (colon)
+@@ -256,28 +241,11 @@ warn_reference_missing()
+     echo ""
+     echo "=== Missing a reference in commit! ==="
+     echo ""
+-    echo "Gluster commits are made with a reference to a bug or a github issue"
+-    echo ""
+-    echo "Submissions that are enhancements (IOW, not functional"
+-    echo "bug fixes, but improvements of any nature to the code) are tracked"
+-    echo "using github issues [1]."
++    echo "You must give BUG: <bugid>"
+     echo ""
+-    echo "Submissions that are bug fixes are tracked using Bugzilla [2]."
++    echo "for example:"
+     echo ""
+-    echo "A check on the commit message, reveals that there is no bug or"
+-    echo "github issue referenced in the commit message"
+-    echo ""
+-    echo "[1] https://github.com/gluster/glusterfs/issues/new"
+-    echo "[2] https://bugzilla.redhat.com/enter_bug.cgi?product=GlusterFS"
+-    echo ""
+-    echo "Please file an issue or a bug report and reference the same in the"
+-    echo "commit message using the following tags:"
+-    echo "GitHub Issues:"
+-    echo "\"Fixes: gluster/glusterfs#n\" OR \"Updates: gluster/glusterfs#n\","
+-    echo "\"Fixes: #n\" OR \"Updates: #n\","
+-    echo "Bugzilla ID:"
+-    echo "\"Fixes: bz#n\" OR \"Updates: bz#n\","
+-    echo "where n is the issue or bug number"
++    echo "BUG: 1234567"
+     echo ""
+     echo "You may abort the submission choosing 'N' below and use"
+     echo "'git commit --amend' to add the issue reference before posting"
+@@ -312,7 +280,7 @@ main()
+     assert_diverge;
+ 
+     # see note above function warn_reference_missing for regex elaboration
+-    reference=$(git log -n1 --format='%b' | grep -ow -E "([fF][iI][xX][eE][sS]|[uU][pP][dD][aA][tT][eE][sS])(:)?[[:space:]]+(gluster\/glusterfs)?(bz)?#[[:digit:]]+" | awk -F '#' '{print $2}');
++    reference=$(git log -n1 --format='%b' | grep -ow -E "^[bB][uU][gG](:)[[:space:]]+[[:digit:]]+" | awk  '{print $2}')
+ 
+     # If this is a commit against master and does not have a bug ID or a github
+     # issue reference. Warn the contributor that one of the 2 is required
+@@ -320,6 +288,7 @@ main()
+         warn_reference_missing;
+     fi
+ 
++
+     # TODO: add clang-format command here. It will after the changes are done everywhere else
+     clang_format=$(clang-format --version)
+     if [ ! -z "${clang_format}" ]; then
+-- 
+1.8.3.1
+

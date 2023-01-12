@@ -1,0 +1,43 @@
+From 2bbb097d087bb5ef142775500708f11ccd31bac0 Mon Sep 17 00:00:00 2001
+From: Liguang Li <liguang.lee6@gmail.com>
+Date: Fri, 21 Jun 2019 12:18:58 +0800
+Subject: [PATCH 254/255] Detach iot_worker to release its resources
+
+When iot_worker terminates, its resources have not been reaped, which
+will consumes lots of memory.
+
+Detach iot_worker to automically release its resources back to the
+system.
+
+> upstream patch : https://review.gluster.org/#/c/glusterfs/+/22918/
+
+>fixes: bz#1729107
+>Change-Id: I71fabb2940e76ad54dc56b4c41aeeead2644b8bb
+>Signed-off-by: Liguang Li <liguang.lee6@gmail.com>
+
+BUG:1729108
+Change-Id: I71fabb2940e76ad54dc56b4c41aeeead2644b8bb
+Signed-off-by: Liguang Li <liguang.lee6@gmail.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/176106
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Ravishankar Narayanankutty <ravishankar@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/performance/io-threads/src/io-threads.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/xlators/performance/io-threads/src/io-threads.c b/xlators/performance/io-threads/src/io-threads.c
+index 060d923..1d96691 100644
+--- a/xlators/performance/io-threads/src/io-threads.c
++++ b/xlators/performance/io-threads/src/io-threads.c
+@@ -835,6 +835,7 @@ __iot_workers_scale(iot_conf_t *conf)
+         ret = gf_thread_create(&thread, &conf->w_attr, iot_worker, conf,
+                                "iotwr%03hx", conf->curr_count & 0x3ff);
+         if (ret == 0) {
++            pthread_detach(thread);
+             conf->curr_count++;
+             gf_msg_debug(conf->this->name, 0,
+                          "scaled threads to %d (queue_size=%d/%d)",
+-- 
+1.8.3.1
+

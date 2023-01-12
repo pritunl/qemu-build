@@ -1,0 +1,48 @@
+From 070698ede9c3765c95364e8207c8311dbf895499 Mon Sep 17 00:00:00 2001
+From: kiyer <kiyer@redhat.com>
+Date: Tue, 8 Dec 2020 15:18:49 +0530
+Subject: [PATCH 501/511] Cli: Removing old syntax of tier cmds from help menu
+
+Remove old syntax of attach-tier and detach-tier
+commands from help menu.
+
+Label: DOWNSTREAM ONLY
+BUG: 1813866
+
+Change-Id: If86e4828b475fb593a5105ca8deac96374f9542d
+Signed-off-by: kiyer <kiyer@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/220510
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ cli/src/cli-cmd-volume.c | 13 -------------
+ 1 file changed, 13 deletions(-)
+
+diff --git a/cli/src/cli-cmd-volume.c b/cli/src/cli-cmd-volume.c
+index 6f5bf8b..b6bef80 100644
+--- a/cli/src/cli-cmd-volume.c
++++ b/cli/src/cli-cmd-volume.c
+@@ -3331,19 +3331,6 @@ struct cli_cmd tier_cmds[] = {
+     {"volume tier <VOLNAME> detach <start|stop|status|commit|[force]>",
+      cli_cmd_volume_tier_cbk, "Detach the hot tier from <VOLNAME>"},
+ 
+-    {"volume attach-tier <VOLNAME> [<replica COUNT>] <NEW-BRICK>...",
+-     cli_cmd_volume_tier_cbk,
+-     "NOTE: this is old syntax, will be deprecated in next release. "
+-     "Please use gluster volume tier <vol> attach "
+-     "[<replica COUNT>] <NEW-BRICK>..."},
+-
+-    {"volume detach-tier <VOLNAME> "
+-     "<start|stop|status|commit|force>",
+-     cli_cmd_volume_tier_cbk,
+-     "NOTE: this is old syntax, will be deprecated in next release. "
+-     "Please use gluster volume tier <vol> detach "
+-     "{start|stop|commit} [force]"},
+-
+     {"volume tier <VOLNAME> status\n"
+      "volume tier <VOLNAME> start [force]\n"
+      "volume tier <VOLNAME> stop\n"
+-- 
+1.8.3.1
+

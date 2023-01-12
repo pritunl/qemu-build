@@ -1,0 +1,41 @@
+From f77d4a024cb9b17de7d5add064b34adfb0455d17 Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Mon, 24 Jun 2019 18:32:52 +0530
+Subject: [PATCH 206/221] glusterd: ignore user.* options from compatibility
+ check in brick mux
+
+user.* options are just custom and they don't contribute anything in
+terms of determining the volume compatibility in brick multiplexing
+
+> upstream patch : https://review.gluster.org/#/c/glusterfs/+/22933/
+
+>Fixes: bz#1723402
+>Change-Id: Ic7e0181ab72993d29cab345cde64ae1340bf4faf
+>Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+
+BUG: 1722509
+Change-Id: Ic7e0181ab72993d29cab345cde64ae1340bf4faf
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/174589
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-utils.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index 7768b8e..c6e9bb0 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -2425,6 +2425,9 @@ unsafe_option(dict_t *this, char *key, data_t *value, void *arg)
+     if (fnmatch("*diagnostics.client-log*", key, 0) == 0) {
+         return _gf_false;
+     }
++    if (fnmatch("user.*", key, 0) == 0) {
++        return _gf_false;
++    }
+ 
+     return _gf_true;
+ }
+-- 
+1.8.3.1
+

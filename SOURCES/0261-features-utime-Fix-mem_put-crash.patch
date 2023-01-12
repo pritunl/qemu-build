@@ -1,0 +1,52 @@
+From 1aa175f353325775517daf1d48a19799e0cafc7a Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Mon, 22 Jul 2019 20:55:33 +0530
+Subject: [PATCH 261/261] features/utime: Fix mem_put crash
+
+Problem:
+When frame->local is not null FRAME_DESTROY calls mem_put on it.
+Since the stub is already destroyed in call_resume(), it leads
+to crash
+
+Fix:
+Set frame->local to NULL before calling call_resume()
+
+Backport of:
+ > Patch: https://review.gluster.org/23091
+ > fixes: bz#1593542
+ > Change-Id: I0f8adf406f4cefdb89d7624ba7a9d9c2eedfb1de
+ > Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+
+BUG: 1715422
+Change-Id: I0f8adf406f4cefdb89d7624ba7a9d9c2eedfb1de
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/176726
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/features/utime/src/utime.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/xlators/features/utime/src/utime.c b/xlators/features/utime/src/utime.c
+index 2a986e7..e3a80b6 100644
+--- a/xlators/features/utime/src/utime.c
++++ b/xlators/features/utime/src/utime.c
+@@ -139,12 +139,14 @@ gf_utime_set_mdata_setxattr_cbk(call_frame_t *frame, void *cookie,
+                                 xlator_t *this, int op_ret, int op_errno,
+                                 dict_t *xdata)
+ {
++    call_stub_t *stub = frame->local;
+     /* Don't fail lookup if mdata setxattr fails */
+     if (op_ret) {
+         gf_msg(this->name, GF_LOG_ERROR, op_errno, UTIME_MSG_SET_MDATA_FAILED,
+                "dict set of key for set-ctime-mdata failed");
+     }
+-    call_resume(frame->local);
++    frame->local = NULL;
++    call_resume(stub);
+     return 0;
+ }
+ 
+-- 
+1.8.3.1
+

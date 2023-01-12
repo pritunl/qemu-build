@@ -1,0 +1,240 @@
+From 2b1738402276f43d7cb64542b74cb50145e46d77 Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Wed, 16 Oct 2019 14:25:47 +0530
+Subject: [PATCH 309/309] geo-rep: Fix config upgrade on non-participating node
+
+After upgrade, if the config files are of old format, it
+gets migrated to new format. Monitor process migrates it.
+Since monitor doesn't run on nodes where bricks are not
+hosted, it doesn't get migrated there. So this patch fixes
+the config upgrade on nodes which doesn't host bricks.
+This happens during config either on get/set/reset.
+
+Backport of:
+ > Patch: https://review.gluster.org/23555
+ > Change-Id: Ibade2f2310b0f3affea21a3baa1ae0eb71162cba
+ > Signed-off-by: Kotresh HR <khiremat@redhat.com>
+ > fixes: bz#1762220
+
+Change-Id: Ibade2f2310b0f3affea21a3baa1ae0eb71162cba
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+BUG: 1760939
+Reviewed-on: https://code.engineering.redhat.com/gerrit/183461
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ geo-replication/syncdaemon/gsyncd.py     |   3 +-
+ tests/00-geo-rep/georep-config-upgrade.t | 132 +++++++++++++++++++++++++++++++
+ tests/00-geo-rep/gsyncd.conf.old         |  47 +++++++++++
+ 3 files changed, 181 insertions(+), 1 deletion(-)
+ create mode 100644 tests/00-geo-rep/georep-config-upgrade.t
+ create mode 100644 tests/00-geo-rep/gsyncd.conf.old
+
+diff --git a/geo-replication/syncdaemon/gsyncd.py b/geo-replication/syncdaemon/gsyncd.py
+index 6ae5269..7b48d82 100644
+--- a/geo-replication/syncdaemon/gsyncd.py
++++ b/geo-replication/syncdaemon/gsyncd.py
+@@ -255,7 +255,8 @@ def main():
+     if args.subcmd == "slave":
+         override_from_args = True
+ 
+-    if args.subcmd == "monitor":
++    if config_file is not None and \
++       args.subcmd in ["monitor", "config-get", "config-set", "config-reset"]:
+         ret = gconf.is_config_file_old(config_file, args.master, extra_tmpl_args["slavevol"])
+         if ret is not None:
+            gconf.config_upgrade(config_file, ret)
+diff --git a/tests/00-geo-rep/georep-config-upgrade.t b/tests/00-geo-rep/georep-config-upgrade.t
+new file mode 100644
+index 0000000..557461c
+--- /dev/null
++++ b/tests/00-geo-rep/georep-config-upgrade.t
+@@ -0,0 +1,132 @@
++#!/bin/bash
++
++. $(dirname $0)/../include.rc
++. $(dirname $0)/../volume.rc
++. $(dirname $0)/../geo-rep.rc
++. $(dirname $0)/../env.rc
++
++SCRIPT_TIMEOUT=300
++OLD_CONFIG_PATH=$(dirname $0)/gsyncd.conf.old
++WORKING_DIR=/var/lib/glusterd/geo-replication/master_127.0.0.1_slave
++
++##Cleanup and start glusterd
++cleanup;
++TEST glusterd;
++TEST pidof glusterd
++
++##Variables
++GEOREP_CLI="$CLI volume geo-replication"
++master=$GMV0
++SH0="127.0.0.1"
++slave=${SH0}::${GSV0}
++num_active=2
++num_passive=2
++master_mnt=$M0
++slave_mnt=$M1
++
++############################################################
++#SETUP VOLUMES AND GEO-REPLICATION
++############################################################
++
++##create_and_start_master_volume
++TEST $CLI volume create $GMV0 replica 2 $H0:$B0/${GMV0}{1,2,3,4};
++TEST $CLI volume start $GMV0
++
++##create_and_start_slave_volume
++TEST $CLI volume create $GSV0 replica 2 $H0:$B0/${GSV0}{1,2,3,4};
++TEST $CLI volume start $GSV0
++
++##Create, start and mount meta_volume
++TEST $CLI volume create $META_VOL replica 3 $H0:$B0/${META_VOL}{1,2,3};
++TEST $CLI volume start $META_VOL
++TEST mkdir -p $META_MNT
++TEST glusterfs -s $H0 --volfile-id $META_VOL $META_MNT
++
++##Mount master
++TEST glusterfs -s $H0 --volfile-id $GMV0 $M0
++
++##Mount slave
++TEST glusterfs -s $H0 --volfile-id $GSV0 $M1
++
++############################################################
++#BASIC GEO-REPLICATION TESTS
++############################################################
++
++#Create geo-rep session
++TEST create_georep_session $master $slave
++
++#Config gluster-command-dir
++TEST $GEOREP_CLI $master $slave config gluster-command-dir ${GLUSTER_CMD_DIR}
++
++#Config gluster-command-dir
++TEST $GEOREP_CLI $master $slave config slave-gluster-command-dir ${GLUSTER_CMD_DIR}
++
++#Enable_metavolume
++TEST $GEOREP_CLI $master $slave config use_meta_volume true
++
++#Wait for common secret pem file to be created
++EXPECT_WITHIN $GEO_REP_TIMEOUT  0 check_common_secret_file
++
++#Verify the keys are distributed
++EXPECT_WITHIN $GEO_REP_TIMEOUT  0 check_keys_distributed
++
++#Start_georep
++TEST $GEOREP_CLI $master $slave start
++
++EXPECT_WITHIN $GEO_REP_TIMEOUT  2 check_status_num_rows "Active"
++EXPECT_WITHIN $GEO_REP_TIMEOUT  2 check_status_num_rows "Passive"
++
++TEST $GEOREP_CLI $master $slave config sync-method tarssh
++
++#Stop Geo-rep
++TEST $GEOREP_CLI $master $slave stop
++
++#Copy old config file
++mv -f $WORKING_DIR/gsyncd.conf $WORKING_DIR/gsyncd.conf.org
++cp -p $OLD_CONFIG_PATH $WORKING_DIR/gsyncd.conf
++
++#Check if config get all updates config_file
++TEST ! grep "sync-method" $WORKING_DIR/gsyncd.conf
++TEST $GEOREP_CLI $master $slave config
++TEST grep "sync-method" $WORKING_DIR/gsyncd.conf
++
++#Check if config get updates config_file
++rm -f $WORKING_DIR/gsyncd.conf
++cp -p $OLD_CONFIG_PATH $WORKING_DIR/gsyncd.conf
++TEST ! grep "sync-method" $WORKING_DIR/gsyncd.conf
++TEST $GEOREP_CLI $master $slave config sync-method
++TEST grep "sync-method" $WORKING_DIR/gsyncd.conf
++
++#Check if config set updates config_file
++rm -f $WORKING_DIR/gsyncd.conf
++cp -p $OLD_CONFIG_PATH $WORKING_DIR/gsyncd.conf
++TEST ! grep "sync-method" $WORKING_DIR/gsyncd.conf
++TEST $GEOREP_CLI $master $slave config sync-xattrs false
++TEST grep "sync-method" $WORKING_DIR/gsyncd.conf
++
++#Check if config reset updates config_file
++rm -f $WORKING_DIR/gsyncd.conf
++cp -p $OLD_CONFIG_PATH $WORKING_DIR/gsyncd.conf
++TEST ! grep "sync-method" $WORKING_DIR/gsyncd.conf
++TEST $GEOREP_CLI $master $slave config \!sync-xattrs
++TEST grep "sync-method" $WORKING_DIR/gsyncd.conf
++
++#Check if geo-rep start updates config_file
++rm -f $WORKING_DIR/gsyncd.conf
++cp -p $OLD_CONFIG_PATH $WORKING_DIR/gsyncd.conf
++TEST ! grep "sync-method" $WORKING_DIR/gsyncd.conf
++TEST $GEOREP_CLI $master $slave start
++TEST grep "sync-method" $WORKING_DIR/gsyncd.conf
++
++#Stop geo-rep
++TEST $GEOREP_CLI $master $slave stop
++
++#Delete Geo-rep
++TEST $GEOREP_CLI $master $slave delete
++
++#Cleanup authorized keys
++sed -i '/^command=.*SSH_ORIGINAL_COMMAND#.*/d' ~/.ssh/authorized_keys
++sed -i '/^command=.*gsyncd.*/d' ~/.ssh/authorized_keys
++
++cleanup;
++#G_TESTDEF_TEST_STATUS_NETBSD7=BAD_TEST,BUG=000000
+diff --git a/tests/00-geo-rep/gsyncd.conf.old b/tests/00-geo-rep/gsyncd.conf.old
+new file mode 100644
+index 0000000..519acaf
+--- /dev/null
++++ b/tests/00-geo-rep/gsyncd.conf.old
+@@ -0,0 +1,47 @@
++[__meta__]
++version = 2.0
++
++[peersrx . .]
++remote_gsyncd = /usr/local/libexec/glusterfs/gsyncd
++georep_session_working_dir = /var/lib/glusterd/geo-replication/${mastervol}_${remotehost}_${slavevol}/
++ssh_command_tar = ssh -oPasswordAuthentication=no -oStrictHostKeyChecking=no -i /var/lib/glusterd/geo-replication/tar_ssh.pem
++changelog_log_file = /var/log/glusterfs/geo-replication/${mastervol}/${eSlave}${local_id}-changes.log
++working_dir = /var/lib/misc/glusterfsd/${mastervol}/${eSlave}
++ignore_deletes = false
++pid_file = /var/lib/glusterd/geo-replication/${mastervol}_${remotehost}_${slavevol}/monitor.pid
++state_file = /var/lib/glusterd/geo-replication/${mastervol}_${remotehost}_${slavevol}/monitor.status
++gluster_command_dir = /usr/local/sbin/
++gluster_params = aux-gfid-mount acl
++ssh_command = ssh -oPasswordAuthentication=no -oStrictHostKeyChecking=no -i /var/lib/glusterd/geo-replication/secret.pem
++state_detail_file = /var/lib/glusterd/geo-replication/${mastervol}_${remotehost}_${slavevol}/${eSlave}-detail.status
++state_socket_unencoded = /var/lib/glusterd/geo-replication/${mastervol}_${remotehost}_${slavevol}/${eSlave}.socket
++socketdir = /var/run/gluster
++log_file = /var/log/glusterfs/geo-replication/${mastervol}/${eSlave}.log
++gluster_log_file = /var/log/glusterfs/geo-replication/${mastervol}/${eSlave}${local_id}.gluster.log
++special_sync_mode = partial
++change_detector = changelog
++pid-file = /var/lib/glusterd/geo-replication/${mastervol}_${remotehost}_${slavevol}/monitor.pid
++state-file = /var/lib/glusterd/geo-replication/${mastervol}_${remotehost}_${slavevol}/monitor.status
++
++[__section_order__]
++peersrx . . = 0
++peersrx . %5essh%3a = 2
++peersrx . = 3
++peers master slave = 4
++
++[peersrx . %5Essh%3A]
++remote_gsyncd = /nonexistent/gsyncd
++
++[peersrx .]
++gluster_command_dir = /usr/local/sbin/
++gluster_params = aux-gfid-mount acl
++log_file = /var/log/glusterfs/geo-replication-slaves/${session_owner}:${local_node}${local_id}.${slavevol}.log
++log_file_mbr = /var/log/glusterfs/geo-replication-slaves/mbr/${session_owner}:${local_node}${local_id}.${slavevol}.log
++gluster_log_file = /var/log/glusterfs/geo-replication-slaves/${session_owner}:${local_node}${local_id}.${slavevol}.gluster.log
++
++[peers master slave]
++session_owner = 0732cbd1-3ec5-4920-ab0d-aa5a896d5214
++master.stime_xattr_name = trusted.glusterfs.0732cbd1-3ec5-4920-ab0d-aa5a896d5214.07a9005c-ace4-4f67-b3c0-73938fb236c4.stime
++volume_id = 0732cbd1-3ec5-4920-ab0d-aa5a896d5214
++use_tarssh = true
++
+-- 
+1.8.3.1
+

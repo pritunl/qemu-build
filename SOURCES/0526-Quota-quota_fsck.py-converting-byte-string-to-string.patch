@@ -1,0 +1,44 @@
+From baeca3c9b70548463ceea0ae27e6f98cf06e96b7 Mon Sep 17 00:00:00 2001
+From: srijan-sivakumar <ssivakum@redhat.com>
+Date: Tue, 28 Jul 2020 22:27:34 +0530
+Subject: [PATCH 526/526] Quota quota_fsck.py, converting byte string to string
+
+Issue: The quota_fsck.py script throws an TypeError
+due to the fact that the data is read as bytes and then
+the string operations are applied on the. Now, in python3
+string is unicode and hence we get the type error.
+
+Code Changes:
+Decoding the bytes value into utf-8 format.
+
+>Change-Id: Ia1ff52a821d664a371c8166692ff506ae39f6e40
+>Signed-off-by: srijan-sivakumar <ssivakum@redhat.com>
+>Fixes: #1401
+Upstream patch: https://review.gluster.org/c/glusterfs/+/24785
+
+BUG: 1719171
+Change-Id: Ia1ff52a821d664a371c8166692ff506ae39f6e40
+Signed-off-by: srijan-sivakumar <ssivakum@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/224780
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Kshithij Iyer <kiyer@redhat.com>
+Reviewed-by: Rinku Kothiya <rkothiya@redhat.com>
+---
+ extras/quota/quota_fsck.py | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/extras/quota/quota_fsck.py b/extras/quota/quota_fsck.py
+index 174f2a2..ea8d638 100755
+--- a/extras/quota/quota_fsck.py
++++ b/extras/quota/quota_fsck.py
+@@ -157,6 +157,7 @@ def get_quota_xattr_brick(dpath):
+     xattr_dict['parents'] = {}
+ 
+     for xattr in pairs:
++        xattr = xattr.decode("utf-8")
+         xattr_key = xattr.split("=")[0]
+         if re.search("# file:", xattr_key):
+             # skip the file comment
+-- 
+1.8.3.1
+

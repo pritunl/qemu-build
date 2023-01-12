@@ -1,0 +1,230 @@
+From a577dd0a3cbf435681f10d095a0dca0595c6a354 Mon Sep 17 00:00:00 2001
+From: Milind Changire <mchangir@redhat.com>
+Date: Sat, 9 Feb 2019 14:01:28 +0530
+Subject: [PATCH 38/52] spec: avoid creation of temp file in lua script
+
+Avoiding creation of temporary file to execute bash shell script from a
+lua scriptlet increases install time security.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Ie5b9035f292402b18dea768aca8bc82a1e7fa615
+Signed-off-by: Milind Changire <mchangir@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/162621
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfs.spec.in | 120 ++++++------------------------------------------------
+ 1 file changed, 12 insertions(+), 108 deletions(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 9db5a34..df8d116 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -1542,15 +1542,7 @@ if [ $? -eq 0 ]; then
+ fi
+ ]]
+ 
+--- Since we run pretrans scripts only for RPMs built for a server build,
+--- we can now use os.tmpname() since it is available on RHEL6 and later
+--- platforms which are server platforms.
+-tmpname = os.tmpname()
+-tmpfile = io.open(tmpname, "w")
+-tmpfile:write(script)
+-tmpfile:close()
+-ok, how, val = os.execute("/bin/bash " .. tmpname)
+-os.remove(tmpname)
++ok, how, val = os.execute(script)
+ if not (ok == 0) then
+    error("Detected running glusterfs processes", ok)
+ end
+@@ -1584,15 +1576,7 @@ if [ $? -eq 0 ]; then
+ fi
+ ]]
+ 
+--- Since we run pretrans scripts only for RPMs built for a server build,
+--- we can now use os.tmpname() since it is available on RHEL6 and later
+--- platforms which are server platforms.
+-tmpname = os.tmpname()
+-tmpfile = io.open(tmpname, "w")
+-tmpfile:write(script)
+-tmpfile:close()
+-ok, how, val = os.execute("/bin/bash " .. tmpname)
+-os.remove(tmpname)
++ok, how, val = os.execute(script)
+ if not (ok == 0) then
+    error("Detected running glusterfs processes", ok)
+ end
+@@ -1626,15 +1610,7 @@ if [ $? -eq 0 ]; then
+ fi
+ ]]
+ 
+--- Since we run pretrans scripts only for RPMs built for a server build,
+--- we can now use os.tmpname() since it is available on RHEL6 and later
+--- platforms which are server platforms.
+-tmpname = os.tmpname()
+-tmpfile = io.open(tmpname, "w")
+-tmpfile:write(script)
+-tmpfile:close()
+-ok, how, val = os.execute("/bin/bash " .. tmpname)
+-os.remove(tmpname)
++ok, how, val = os.execute(script)
+ if not (ok == 0) then
+    error("Detected running glusterfs processes", ok)
+ end
+@@ -1668,15 +1644,7 @@ if [ $? -eq 0 ]; then
+ fi
+ ]]
+ 
+--- Since we run pretrans scripts only for RPMs built for a server build,
+--- we can now use os.tmpname() since it is available on RHEL6 and later
+--- platforms which are server platforms.
+-tmpname = os.tmpname()
+-tmpfile = io.open(tmpname, "w")
+-tmpfile:write(script)
+-tmpfile:close()
+-ok, how, val = os.execute("/bin/bash " .. tmpname)
+-os.remove(tmpname)
++ok, how, val = os.execute(script)
+ if not (ok == 0) then
+    error("Detected running glusterfs processes", ok)
+ end
+@@ -1709,15 +1677,7 @@ if [ $? -eq 0 ]; then
+ fi
+ ]]
+ 
+--- Since we run pretrans scripts only for RPMs built for a server build,
+--- we can now use os.tmpname() since it is available on RHEL6 and later
+--- platforms which are server platforms.
+-tmpname = os.tmpname()
+-tmpfile = io.open(tmpname, "w")
+-tmpfile:write(script)
+-tmpfile:close()
+-ok, how, val = os.execute("/bin/bash " .. tmpname)
+-os.remove(tmpname)
++ok, how, val = os.execute(script)
+ if not (ok == 0) then
+    error("Detected running glusterfs processes", ok)
+ end
+@@ -1750,15 +1710,7 @@ if [ $? -eq 0 ]; then
+ fi
+ ]]
+ 
+--- Since we run pretrans scripts only for RPMs built for a server build,
+--- we can now use os.tmpname() since it is available on RHEL6 and later
+--- platforms which are server platforms.
+-tmpname = os.tmpname()
+-tmpfile = io.open(tmpname, "w")
+-tmpfile:write(script)
+-tmpfile:close()
+-ok, how, val = os.execute("/bin/bash " .. tmpname)
+-os.remove(tmpname)
++ok, how, val = os.execute(script)
+ if not (ok == 0) then
+    error("Detected running glusterfs processes", ok)
+ end
+@@ -1792,15 +1744,7 @@ if [ $? -eq 0 ]; then
+ fi
+ ]]
+ 
+--- Since we run pretrans scripts only for RPMs built for a server build,
+--- we can now use os.tmpname() since it is available on RHEL6 and later
+--- platforms which are server platforms.
+-tmpname = os.tmpname()
+-tmpfile = io.open(tmpname, "w")
+-tmpfile:write(script)
+-tmpfile:close()
+-ok, how, val = os.execute("/bin/bash " .. tmpname)
+-os.remove(tmpname)
++ok, how, val = os.execute(script)
+ if not (ok == 0) then
+    error("Detected running glusterfs processes", ok)
+ end
+@@ -1835,15 +1779,7 @@ if [ $? -eq 0 ]; then
+ fi
+ ]]
+ 
+--- Since we run pretrans scripts only for RPMs built for a server build,
+--- we can now use os.tmpname() since it is available on RHEL6 and later
+--- platforms which are server platforms.
+-tmpname = os.tmpname()
+-tmpfile = io.open(tmpname, "w")
+-tmpfile:write(script)
+-tmpfile:close()
+-ok, how, val = os.execute("/bin/bash " .. tmpname)
+-os.remove(tmpname)
++ok, how, val = os.execute(script)
+ if not (ok == 0) then
+    error("Detected running glusterfs processes", ok)
+ end
+@@ -1878,15 +1814,7 @@ if [ $? -eq 0 ]; then
+ fi
+ ]]
+ 
+--- Since we run pretrans scripts only for RPMs built for a server build,
+--- we can now use os.tmpname() since it is available on RHEL6 and later
+--- platforms which are server platforms.
+-tmpname = os.tmpname()
+-tmpfile = io.open(tmpname, "w")
+-tmpfile:write(script)
+-tmpfile:close()
+-ok, how, val = os.execute("/bin/bash " .. tmpname)
+-os.remove(tmpname)
++ok, how, val = os.execute(script)
+ if not (ok == 0) then
+    error("Detected running glusterfs processes", ok)
+ end
+@@ -1921,15 +1849,7 @@ if [ $? -eq 0 ]; then
+ fi
+ ]]
+ 
+--- Since we run pretrans scripts only for RPMs built for a server build,
+--- we can now use os.tmpname() since it is available on RHEL6 and later
+--- platforms which are server platforms.
+-tmpname = os.tmpname()
+-tmpfile = io.open(tmpname, "w")
+-tmpfile:write(script)
+-tmpfile:close()
+-ok, how, val = os.execute("/bin/bash " .. tmpname)
+-os.remove(tmpname)
++ok, how, val = os.execute(script)
+ if not (ok == 0) then
+    error("Detected running glusterfs processes", ok)
+ end
+@@ -1965,15 +1885,7 @@ if [ $? -eq 0 ]; then
+ fi
+ ]]
+ 
+--- Since we run pretrans scripts only for RPMs built for a server build,
+--- we can now use os.tmpname() since it is available on RHEL6 and later
+--- platforms which are server platforms.
+-tmpname = os.tmpname()
+-tmpfile = io.open(tmpname, "w")
+-tmpfile:write(script)
+-tmpfile:close()
+-ok, how, val = os.execute("/bin/bash " .. tmpname)
+-os.remove(tmpname)
++ok, how, val = os.execute(script)
+ if not (ok == 0) then
+    error("Detected running glusterfs processes", ok)
+ end
+@@ -2008,15 +1920,7 @@ if [ $? -eq 0 ]; then
+ fi
+ ]]
+ 
+--- Since we run pretrans scripts only for RPMs built for a server build,
+--- we can now use os.tmpname() since it is available on RHEL6 and later
+--- platforms which are server platforms.
+-tmpname = os.tmpname()
+-tmpfile = io.open(tmpname, "w")
+-tmpfile:write(script)
+-tmpfile:close()
+-ok, how, val = os.execute("/bin/bash " .. tmpname)
+-os.remove(tmpname)
++ok, how, val = os.execute(script)
+ if not (ok == 0) then
+    error("Detected running glusterfs processes", ok)
+ end
+-- 
+1.8.3.1
+

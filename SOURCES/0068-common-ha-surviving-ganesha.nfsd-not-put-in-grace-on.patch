@@ -1,0 +1,58 @@
+From aabc623f99d22a2a9e1d52f3ca7de1dc5b49946d Mon Sep 17 00:00:00 2001
+From: "Kaleb S. KEITHLEY" <kkeithle@redhat.com>
+Date: Tue, 13 Jun 2017 07:36:50 -0400
+Subject: [PATCH 068/124] common-ha: surviving ganesha.nfsd not put in grace on
+ fail-over
+
+Behavior change is seen in new HA in RHEL 7.4 Beta. Up to now clone
+RAs have been created with "pcs resource create ... meta notify=true".
+Their notify method is invoked with pre-start or post-stop when one of
+the clone RAs is started or stopped.
+
+In 7.4 Beta the notify method we observe that the notify method is not
+invoked when one of the clones is stopped (or started).
+
+Ken Gaillot, one of the pacemaker devs, wrote:
+  With the above command, pcs puts the notify=true meta-attribute
+  on the primitive instead of the clone. Looking at the pcs help,
+  that seems expected (--clone notify=true would put it on the clone,
+  meta notify=true puts it on the primitive). If you drop the "meta"
+  above, I think it will work again.
+
+And indeed his suggested fix does work on both RHEL 7.4 Beta and RHEL
+7.3 and presumably Fedora.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Idbb539f1366df6d39f77431c357dff4e53a2df6d
+Signed-off-by: Kaleb S. KEITHLEY <kkeithle@redhat.com>
+Reviewed-on: https://review.gluster.org/17534
+Smoke: Gluster Build System <jenkins@build.gluster.org>
+Reviewed-by: soumya k <skoduri@redhat.com>
+NetBSD-regression: NetBSD Build System <jenkins@build.gluster.org>
+CentOS-regression: Gluster Build System <jenkins@build.gluster.org>
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167153
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/ganesha/scripts/ganesha-ha.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/extras/ganesha/scripts/ganesha-ha.sh b/extras/ganesha/scripts/ganesha-ha.sh
+index cedc3fa..537c965 100644
+--- a/extras/ganesha/scripts/ganesha-ha.sh
++++ b/extras/ganesha/scripts/ganesha-ha.sh
+@@ -445,7 +445,7 @@ setup_create_resources()
+     # ganesha-active crm_attribute
+     sleep 5
+ 
+-    pcs resource create nfs-grace ocf:heartbeat:ganesha_grace --clone meta notify=true
++    pcs resource create nfs-grace ocf:heartbeat:ganesha_grace --clone notify=true
+     if [ $? -ne 0 ]; then
+         logger "warning: pcs resource create nfs-grace ocf:heartbeat:ganesha_grace --clone failed"
+     fi
+-- 
+1.8.3.1
+

@@ -1,0 +1,152 @@
+From cddd253c5e3f0a7c3b91c35cea8ad1921cb43b98 Mon Sep 17 00:00:00 2001
+From: Kinglong Mee <kinglongmee@gmail.com>
+Date: Thu, 18 Jul 2019 11:43:01 +0800
+Subject: [PATCH 454/456] features/locks: avoid use after freed of frame for
+ blocked lock
+
+The fop contains blocked lock may use freed frame info when other
+unlock fop has unwind the blocked lock.
+
+Because the blocked lock is added to block list in inode lock(or
+other lock), after that, when out of the inode lock, the fop
+contains the blocked lock should not use it.
+
+Upstream Patch - https://review.gluster.org/#/c/glusterfs/+/23155/
+
+>Change-Id: Icb309a1cc78380dc982b26d50c18d67e4f2c8915
+>fixes: bz#1737291
+>Signed-off-by: Kinglong Mee <mijinlong@horiscale.com>
+
+Change-Id: Icb309a1cc78380dc982b26d50c18d67e4f2c8915
+BUG: 1812789
+Reviewed-on: https://code.engineering.redhat.com/gerrit/206465
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Xavi Hernandez Juan <xhernandez@redhat.com>
+---
+ xlators/features/locks/src/common.c    | 4 ++++
+ xlators/features/locks/src/entrylk.c   | 4 ++--
+ xlators/features/locks/src/inodelk.c   | 7 +++++--
+ xlators/features/locks/src/posix.c     | 5 +++--
+ xlators/features/locks/src/reservelk.c | 2 --
+ 5 files changed, 14 insertions(+), 8 deletions(-)
+
+diff --git a/xlators/features/locks/src/common.c b/xlators/features/locks/src/common.c
+index 6e7fb4b..1406e70 100644
+--- a/xlators/features/locks/src/common.c
++++ b/xlators/features/locks/src/common.c
+@@ -1080,6 +1080,10 @@ pl_setlk(xlator_t *this, pl_inode_t *pl_inode, posix_lock_t *lock,
+                    lock->fl_type == F_UNLCK ? "Unlock" : "Lock",
+                    lock->client_pid, lkowner_utoa(&lock->owner),
+                    lock->user_flock.l_start, lock->user_flock.l_len);
++
++            pl_trace_block(this, lock->frame, NULL, NULL, F_SETLKW,
++                           &lock->user_flock, NULL);
++
+             lock->blocked = 1;
+             __insert_lock(pl_inode, lock);
+             ret = -1;
+diff --git a/xlators/features/locks/src/entrylk.c b/xlators/features/locks/src/entrylk.c
+index ced5eca..93c649c 100644
+--- a/xlators/features/locks/src/entrylk.c
++++ b/xlators/features/locks/src/entrylk.c
+@@ -552,6 +552,8 @@ __lock_blocked_add(xlator_t *this, pl_inode_t *pinode, pl_dom_list_t *dom,
+     gf_msg_trace(this->name, 0, "Blocking lock: {pinode=%p, basename=%s}",
+                  pinode, lock->basename);
+ 
++    entrylk_trace_block(this, lock->frame, NULL, NULL, NULL, lock->basename,
++                        ENTRYLK_LOCK, lock->type);
+ out:
+     return -EAGAIN;
+ }
+@@ -932,8 +934,6 @@ out:
+                           op_ret, op_errno);
+     unwind:
+         STACK_UNWIND_STRICT(entrylk, frame, op_ret, op_errno, NULL);
+-    } else {
+-        entrylk_trace_block(this, frame, volume, fd, loc, basename, cmd, type);
+     }
+ 
+     if (pcontend != NULL) {
+diff --git a/xlators/features/locks/src/inodelk.c b/xlators/features/locks/src/inodelk.c
+index a9c42f1..24dee49 100644
+--- a/xlators/features/locks/src/inodelk.c
++++ b/xlators/features/locks/src/inodelk.c
+@@ -420,6 +420,8 @@ __lock_blocked_add(xlator_t *this, pl_dom_list_t *dom, pl_inode_lock_t *lock,
+                  lkowner_utoa(&lock->owner), lock->user_flock.l_start,
+                  lock->user_flock.l_len);
+ 
++    pl_trace_block(this, lock->frame, NULL, NULL, F_SETLKW, &lock->user_flock,
++                   lock->volume);
+ out:
+     return -EAGAIN;
+ }
+@@ -959,6 +961,7 @@ pl_common_inodelk(call_frame_t *frame, xlator_t *this, const char *volume,
+     int ret = -1;
+     GF_UNUSED int dict_ret = -1;
+     int can_block = 0;
++    short lock_type = 0;
+     pl_inode_t *pinode = NULL;
+     pl_inode_lock_t *reqlock = NULL;
+     pl_dom_list_t *dom = NULL;
+@@ -1024,13 +1027,13 @@ pl_common_inodelk(call_frame_t *frame, xlator_t *this, const char *volume,
+             /* fall through */
+ 
+         case F_SETLK:
++            lock_type = flock->l_type;
+             memcpy(&reqlock->user_flock, flock, sizeof(struct gf_flock));
+             ret = pl_inode_setlk(this, ctx, pinode, reqlock, can_block, dom,
+                                  inode);
+ 
+             if (ret < 0) {
+-                if ((can_block) && (F_UNLCK != flock->l_type)) {
+-                    pl_trace_block(this, frame, fd, loc, cmd, flock, volume);
++                if ((can_block) && (F_UNLCK != lock_type)) {
+                     goto out;
+                 }
+                 gf_log(this->name, GF_LOG_TRACE, "returning EAGAIN");
+diff --git a/xlators/features/locks/src/posix.c b/xlators/features/locks/src/posix.c
+index 50f1265..7887b82 100644
+--- a/xlators/features/locks/src/posix.c
++++ b/xlators/features/locks/src/posix.c
+@@ -2557,6 +2557,7 @@ pl_lk(call_frame_t *frame, xlator_t *this, fd_t *fd, int32_t cmd,
+     uint32_t lk_flags = 0;
+     posix_locks_private_t *priv = this->private;
+     pl_local_t *local = NULL;
++    short lock_type = 0;
+ 
+     int ret = dict_get_uint32(xdata, GF_LOCK_MODE, &lk_flags);
+     if (ret == 0) {
+@@ -2701,6 +2702,7 @@ pl_lk(call_frame_t *frame, xlator_t *this, fd_t *fd, int32_t cmd,
+         case F_SETLK:
+             reqlock->frame = frame;
+             reqlock->this = this;
++            lock_type = flock->l_type;
+ 
+             pthread_mutex_lock(&pl_inode->mutex);
+             {
+@@ -2738,8 +2740,7 @@ pl_lk(call_frame_t *frame, xlator_t *this, fd_t *fd, int32_t cmd,
+ 
+             ret = pl_setlk(this, pl_inode, reqlock, can_block);
+             if (ret == -1) {
+-                if ((can_block) && (F_UNLCK != flock->l_type)) {
+-                    pl_trace_block(this, frame, fd, NULL, cmd, flock, NULL);
++                if ((can_block) && (F_UNLCK != lock_type)) {
+                     goto out;
+                 }
+                 gf_log(this->name, GF_LOG_DEBUG, "returning EAGAIN");
+diff --git a/xlators/features/locks/src/reservelk.c b/xlators/features/locks/src/reservelk.c
+index 51076d7..604691f 100644
+--- a/xlators/features/locks/src/reservelk.c
++++ b/xlators/features/locks/src/reservelk.c
+@@ -312,8 +312,6 @@ grant_blocked_lock_calls(xlator_t *this, pl_inode_t *pl_inode)
+         ret = pl_setlk(this, pl_inode, lock, can_block);
+         if (ret == -1) {
+             if (can_block) {
+-                pl_trace_block(this, lock->frame, fd, NULL, cmd,
+-                               &lock->user_flock, NULL);
+                 continue;
+             } else {
+                 gf_log(this->name, GF_LOG_DEBUG, "returning EAGAIN");
+-- 
+1.8.3.1
+

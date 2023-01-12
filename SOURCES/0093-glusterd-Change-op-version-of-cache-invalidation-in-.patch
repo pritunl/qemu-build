@@ -1,0 +1,106 @@
+From 713f55b4a5cc582d06a10a1c9a0cdf71a4636a10 Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Mon, 15 Apr 2019 07:57:40 +0530
+Subject: [PATCH 093/124] glusterd: Change op-version of cache-invalidation in
+ quick-read
+
+In upstream cache-invalidation option in quick read was introduced with
+4.0. There are two problems with it:
+
+1. The key being made duplicate to md-cache xlator, so setting the same
+option actually enables this feature on both md-cache and quick-read.
+2. As the op-version tagged to this key was GD_OP_VERSION_4_0_0, with a RHGS
+3.5 cluster when a md-cache profile is set to a particular volume old
+client fails to mount which is wrong.
+
+Solving 1 with out breaking backward compatibility in upstream is quite hard.
+This patch addresses both the problems in downstream by (a) changing the
+op-version to GD_OP_VERSION_6_0_0 and (b) renaming this key to
+quick-read-cache-invalidation. The fix is currently made downstream only till a
+proper solution is identified in upstream.
+
+Label: DOWNSTREAM ONLY
+BUG: 1697820
+Change-Id: I1251424576d6ebbdb2a761400fd20f0aff0c80a2
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167823
+Reviewed-by: Amar Tumballi Suryanarayan <amarts@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/basic/quick-read-with-upcall.t            |  1 +
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c |  6 +++---
+ xlators/performance/quick-read/src/quick-read.c | 11 ++++++-----
+ 3 files changed, 10 insertions(+), 8 deletions(-)
+
+diff --git a/tests/basic/quick-read-with-upcall.t b/tests/basic/quick-read-with-upcall.t
+index 318e93a..647dacf 100644
+--- a/tests/basic/quick-read-with-upcall.t
++++ b/tests/basic/quick-read-with-upcall.t
+@@ -58,6 +58,7 @@ EXPECT "$D0" cat $M1/test1.txt
+ sleep 60
+ EXPECT "$D1" cat $M1/test1.txt
+ 
++TEST $CLI volume set $V0 performance.quick-read-cache-invalidation on
+ TEST $CLI volume set $V0 performance.cache-invalidation on
+ 
+ TEST write_to "$M0/test2.txt" "$D0"
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index a877805..42ca9bb 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -1690,10 +1690,10 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+      .option = "cache-timeout",
+      .op_version = 1,
+      .flags = VOLOPT_FLAG_CLIENT_OPT},
+-    {.key = "performance.cache-invalidation",
++    {.key = "performance.quick-read-cache-invalidation",
+      .voltype = "performance/quick-read",
+-     .option = "cache-invalidation",
+-     .op_version = GD_OP_VERSION_4_0_0,
++     .option = "quick-read-cache-invalidation",
++     .op_version = GD_OP_VERSION_6_0,
+      .flags = VOLOPT_FLAG_CLIENT_OPT},
+     {.key = "performance.ctime-invalidation",
+      .voltype = "performance/quick-read",
+diff --git a/xlators/performance/quick-read/src/quick-read.c b/xlators/performance/quick-read/src/quick-read.c
+index 244e8c8..59553c0 100644
+--- a/xlators/performance/quick-read/src/quick-read.c
++++ b/xlators/performance/quick-read/src/quick-read.c
+@@ -1218,8 +1218,8 @@ qr_reconfigure(xlator_t *this, dict_t *options)
+ 
+     GF_OPTION_RECONF("cache-timeout", conf->cache_timeout, options, int32, out);
+ 
+-    GF_OPTION_RECONF("cache-invalidation", conf->qr_invalidation, options, bool,
+-                     out);
++    GF_OPTION_RECONF("quick-read-cache-invalidation", conf->qr_invalidation,
++                     options, bool, out);
+ 
+     GF_OPTION_RECONF("ctime-invalidation", conf->ctime_invalidation, options,
+                      bool, out);
+@@ -1369,7 +1369,8 @@ qr_init(xlator_t *this)
+ 
+     GF_OPTION_INIT("cache-timeout", conf->cache_timeout, int32, out);
+ 
+-    GF_OPTION_INIT("cache-invalidation", conf->qr_invalidation, bool, out);
++    GF_OPTION_INIT("quick-read-cache-invalidation", conf->qr_invalidation, bool,
++                   out);
+ 
+     GF_OPTION_INIT("cache-size", conf->cache_size, size_uint64, out);
+     if (!check_cache_size_ok(this, conf->cache_size)) {
+@@ -1615,10 +1616,10 @@ struct volume_options qr_options[] = {
+         .flags = OPT_FLAG_CLIENT_OPT | OPT_FLAG_SETTABLE | OPT_FLAG_DOC,
+     },
+     {
+-        .key = {"cache-invalidation"},
++        .key = {"quick-read-cache-invalidation"},
+         .type = GF_OPTION_TYPE_BOOL,
+         .default_value = "false",
+-        .op_version = {GD_OP_VERSION_4_0_0},
++        .op_version = {GD_OP_VERSION_6_0},
+         .flags = OPT_FLAG_CLIENT_OPT | OPT_FLAG_SETTABLE | OPT_FLAG_DOC,
+         .description = "When \"on\", invalidates/updates the metadata cache,"
+                        " on receiving the cache-invalidation notifications",
+-- 
+1.8.3.1
+

@@ -1,0 +1,65 @@
+From 55d47524c0c8a88204129c3a94d71779aae00beb Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawa@redhat.com>
+Date: Tue, 28 May 2019 08:18:12 +0530
+Subject: [PATCH 145/169] core: Capture process memory usage at the time of
+ call gf_msg_nomem
+
+Problem: All gluster processes call gf_mgm_nomem while calloc/malloc/realloc
+         throw an error but the message does not capture current memory usage of
+         gluster process
+
+Solution: Call getrusage to capture current memory usage of gluster
+          process
+
+> Change-Id: I2e0319da1f33b177fa042fdc9e7268068576c9c3
+> fixes: bz#1708051
+> Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/22688/
+> Cherry pick from commit 8e1d53f14730ac1b1ca0ce9d9a0ccb32578fd4fb
+
+BUG: 1709087
+Change-Id: I2e0319da1f33b177fa042fdc9e7268068576c9c3
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/171587
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/logging.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/libglusterfs/src/logging.c b/libglusterfs/src/logging.c
+index 5d46916..7f0eff6 100644
+--- a/libglusterfs/src/logging.c
++++ b/libglusterfs/src/logging.c
+@@ -17,6 +17,7 @@
+ #include <string.h>
+ #include <stdlib.h>
+ #include <syslog.h>
++#include <sys/resource.h>
+ 
+ #ifdef HAVE_BACKTRACE
+ #include <execinfo.h>
+@@ -1196,6 +1197,7 @@ _gf_msg_nomem(const char *domain, const char *file, const char *function,
+     glusterfs_ctx_t *ctx = NULL;
+     int wlen = 0;
+     int priority;
++    struct rusage r_usage;
+ 
+     this = THIS;
+     ctx = this->ctx;
+@@ -1231,10 +1233,11 @@ _gf_msg_nomem(const char *domain, const char *file, const char *function,
+                    "]"
+                    " [%s:%d:%s] %s: no memory "
+                    "available for size (%" GF_PRI_SIZET
+-                   ")"
++                   ") current memory usage in kilobytes %ld"
+                    " [call stack follows]\n",
+                    timestr, gf_level_strings[level], (uint64_t)0, basename,
+-                   line, function, domain, size);
++                   line, function, domain, size,
++                   (!getrusage(RUSAGE_SELF, &r_usage) ? r_usage.ru_maxrss : 0));
+     if (-1 == ret) {
+         goto out;
+     }
+-- 
+1.8.3.1
+

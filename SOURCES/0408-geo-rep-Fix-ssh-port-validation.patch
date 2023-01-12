@@ -1,0 +1,107 @@
+From 07ab5a460da007fc3809b1a943614d1c7f5fcfef Mon Sep 17 00:00:00 2001
+From: Sunny Kumar <sunkumar@redhat.com>
+Date: Fri, 17 Jan 2020 11:03:46 +0000
+Subject: [PATCH 408/449] geo-rep: Fix ssh-port validation
+
+If non-standard ssh-port is used, Geo-rep can be configured to use ssh port
+by using config option, the value should be in allowed port range and non negative.
+
+At present it can accept negative value and outside allowed port range which is incorrect.
+
+Many Linux kernels use the port range 32768 to 61000.
+IANA suggests it should be in the range 1 to 2^16 - 1, so keeping the same.
+
+$ gluster volume geo-replication master 127.0.0.1::slave config ssh-port -22
+geo-replication config updated successfully
+$ gluster volume geo-replication master 127.0.0.1::slave config ssh-port 22222222
+geo-replication config updated successfully
+
+This patch fixes the above issue and have added few validations around this
+in test cases.
+Backport of:
+    >Upstream Patch: https://review.gluster.org/#/c/glusterfs/+/24035/
+    >Change-Id: I9875ab3f00d7257370fbac6f5ed4356d2fed3f3c
+    >Fixes: bz#1792276
+    >Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+
+BUG: 1796814
+Change-Id: I9875ab3f00d7257370fbac6f5ed4356d2fed3f3c
+Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202453
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ geo-replication/gsyncd.conf.in                     |  4 +++-
+ tests/00-geo-rep/00-georep-verify-non-root-setup.t | 16 ++++++++++++++++
+ tests/00-geo-rep/georep-basic-dr-rsync.t           | 13 +++++++++++++
+ 3 files changed, 32 insertions(+), 1 deletion(-)
+
+diff --git a/geo-replication/gsyncd.conf.in b/geo-replication/gsyncd.conf.in
+index 9155cd8..11e57fd 100644
+--- a/geo-replication/gsyncd.conf.in
++++ b/geo-replication/gsyncd.conf.in
+@@ -266,7 +266,9 @@ allowed_values=ERROR,INFO,WARNING,DEBUG
+ 
+ [ssh-port]
+ value=22
+-validation=int
++validation=minmax
++min=1
++max=65535
+ help=Set SSH port
+ type=int
+ 
+diff --git a/tests/00-geo-rep/00-georep-verify-non-root-setup.t b/tests/00-geo-rep/00-georep-verify-non-root-setup.t
+index c9fd8b2..12f0c01 100644
+--- a/tests/00-geo-rep/00-georep-verify-non-root-setup.t
++++ b/tests/00-geo-rep/00-georep-verify-non-root-setup.t
+@@ -223,6 +223,22 @@ TEST $GEOREP_CLI  $master $slave_url resume
+ #Validate failure of volume stop when geo-rep is running
+ TEST ! $CLI volume stop $GMV0
+ 
++#Negative test for ssh-port
++#Port should be integer and between 1-65535 range
++
++TEST ! $GEOREP_CLI $master $slave_url config ssh-port -22
++
++TEST ! $GEOREP_CLI $master $slave_url config ssh-port abc
++
++TEST ! $GEOREP_CLI $master $slave_url config ssh-port 6875943
++
++TEST ! $GEOREP_CLI $master $slave_url config ssh-port 4.5
++
++TEST ! $GEOREP_CLI $master $slave_url config ssh-port 22a
++
++#Config Set ssh-port to validate int validation
++TEST $GEOREP_CLI $master $slave config ssh-port 22
++
+ #Hybrid directory rename test BZ#1763439
+ TEST $GEOREP_CLI $master $slave_url config change_detector xsync
+ mkdir ${master_mnt}/dir1
+diff --git a/tests/00-geo-rep/georep-basic-dr-rsync.t b/tests/00-geo-rep/georep-basic-dr-rsync.t
+index b6fbf18..d785aa5 100644
+--- a/tests/00-geo-rep/georep-basic-dr-rsync.t
++++ b/tests/00-geo-rep/georep-basic-dr-rsync.t
+@@ -71,6 +71,19 @@ EXPECT_WITHIN $GEO_REP_TIMEOUT 4 check_status_num_rows "Created"
+ #Config gluster-command-dir
+ TEST $GEOREP_CLI $master $slave config gluster-command-dir ${GLUSTER_CMD_DIR}
+ 
++#Negative test for ssh-port
++#Port should be integer and between 1-65535 range
++
++TEST ! $GEOREP_CLI $master $slave config ssh-port -22
++
++TEST ! $GEOREP_CLI $master $slave config ssh-port abc
++
++TEST ! $GEOREP_CLI $master $slave config ssh-port 6875943
++
++TEST ! $GEOREP_CLI $master $slave config ssh-port 4.5
++
++TEST ! $GEOREP_CLI $master $slave config ssh-port 22a
++
+ #Config Set ssh-port to validate int validation
+ TEST $GEOREP_CLI $master $slave config ssh-port 22
+ 
+-- 
+1.8.3.1
+

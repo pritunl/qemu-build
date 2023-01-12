@@ -1,0 +1,62 @@
+From f1f27e5839dd99389bef65f79ea491e98e6935d2 Mon Sep 17 00:00:00 2001
+From: Ravishankar N <ravishankar@redhat.com>
+Date: Tue, 23 Apr 2019 18:05:36 +0530
+Subject: [PATCH 133/141] glusterd: enable fips-mode-rchecksum for new volumes
+
+...during volume create if the cluster op-version is >=GD_OP_VERSION_7_0.
+
+This option itself was introduced in GD_OP_VERSION_4_0_0 via commit 6daa65356.
+We missed enabling it by default for new volume creates in that commit.
+If we are to do it now safely, we need to use op version
+GD_OP_VERSION_7_0 and target it for release-7.
+
+Patch in upstream master: https://review.gluster.org/#/c/glusterfs/+/22609/
+BUG: 1706683
+Change-Id: I7c6d4a8abe0816367e7069cb5cad01744f04858f
+fixes: bz#1706683
+Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/169443
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-volgen.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volgen.c b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+index da877aa..77aa705 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volgen.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+@@ -1614,10 +1614,17 @@ brick_graph_add_posix(volgen_graph_t *graph, glusterd_volinfo_t *volinfo,
+     gf_boolean_t pgfid_feat = _gf_false;
+     char *value = NULL;
+     xlator_t *xl = NULL;
++    xlator_t *this = NULL;
++    glusterd_conf_t *priv = NULL;
+ 
+     if (!graph || !volinfo || !set_dict || !brickinfo)
+         goto out;
+ 
++    this = THIS;
++    GF_VALIDATE_OR_GOTO("glusterd", this, out);
++    priv = this->private;
++    GF_VALIDATE_OR_GOTO("glusterd", priv, out);
++
+     ret = glusterd_volinfo_get(volinfo, VKEY_FEATURES_QUOTA, &value);
+     if (value) {
+         ret = gf_string2boolean(value, &quota_enabled);
+@@ -1661,6 +1668,12 @@ brick_graph_add_posix(volgen_graph_t *graph, glusterd_volinfo_t *volinfo,
+         }
+     }
+ 
++    if (priv->op_version >= GD_OP_VERSION_7_0) {
++        ret = xlator_set_fixed_option(xl, "fips-mode-rchecksum", "on");
++        if (ret) {
++            goto out;
++        }
++    }
+     snprintf(tmpstr, sizeof(tmpstr), "%d", brickinfo->fs_share_count);
+     ret = xlator_set_fixed_option(xl, "shared-brick-count", tmpstr);
+ out:
+-- 
+1.8.3.1
+

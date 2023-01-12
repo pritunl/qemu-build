@@ -1,0 +1,42 @@
+From 58bc818f19cbc8e4dd97097dc3e4ec7af8fa8d4a Mon Sep 17 00:00:00 2001
+From: Rinku Kothiya <rkothiya@redhat.com>
+Date: Tue, 7 May 2019 05:35:11 +0000
+Subject: [PATCH 193/221] spec: fixed python dependency for rhel6
+
+Installing redhat-storage-server was failing with python dependency
+for glusterfs-geo-replication package. This patch conditionally sets
+the python version for rhel7 and fixes the problem.
+
+Label: DOWNSTREAM ONLY
+
+BUG: 1704207
+
+Change-Id: Ie3b079fd1ccfa6fd2cbf5b08b7a70bd03f090e01
+fixes: bz#1704207
+Signed-off-by: Rinku Kothiya <rkothiya@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/169555
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ glusterfs.spec.in | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index c505cd9..1150101 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -500,7 +500,11 @@ Summary:          GlusterFS Geo-replication
+ Requires:         %{name}%{?_isa} = %{version}-%{release}
+ Requires:         %{name}-server%{?_isa} = %{version}-%{release}
+ Requires:         python%{_pythonver}
++%if ( 0%{?rhel} && 0%{?rhel} < 7 )
++Requires:         python-prettytable
++%else
+ Requires:         python%{_pythonver}-prettytable
++%endif
+ Requires:         python%{_pythonver}-gluster = %{version}-%{release}
+ 
+ Requires:         rsync
+-- 
+1.8.3.1
+

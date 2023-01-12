@@ -1,0 +1,116 @@
+From 98c9fc8d774ae153ca6b44d3337cf5d9f7a030e2 Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Fri, 16 Aug 2019 16:07:03 +0530
+Subject: [PATCH 282/284] geo-rep: Fix the name of changelog archive file
+
+Background:
+The processed changelogs are archived each month in a single tar file.
+The default format is "archive_YYYYMM.tar" which is specified as "%%Y%%m"
+in configuration file.
+
+Problem:
+The created changelog archive file didn't have corresponding year
+and month. It created as "archive_%Y%m.tar" on python2 only systems.
+
+Cause and Fix:
+Geo-rep expects "%Y%m" after the ConfigParser reads it from config file.
+Since it was "%%Y%%m" in config file, geo-rep used to get correct value
+"%Y%m" in python3 and "%%Y%%m" in python2 which is incorrect.
+The fix can be to use "%Y%m" in config file but that fails in python3.
+So the fix is to use "RawConfigParser" in geo-rep and use "%Y%m". This
+works both in python2 and python3.
+
+Backport of:
+ > Patch: https://review.gluster.org/23248
+ > Change-Id: Ie5b7d2bc04d0d53cd1769e064c2d67aaf95d557c
+ > fixes: bz#1741890
+ > Signed-off-by: Kotresh HR <khiremat@redhat.com>
+
+Change-Id: Ie5b7d2bc04d0d53cd1769e064c2d67aaf95d557c
+BUG: 1743634
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/179188
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ geo-replication/gsyncd.conf.in             |  2 +-
+ geo-replication/syncdaemon/gsyncdconfig.py | 14 +++++++-------
+ 2 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/geo-replication/gsyncd.conf.in b/geo-replication/gsyncd.conf.in
+index c2e4f0d..5ebd57a 100644
+--- a/geo-replication/gsyncd.conf.in
++++ b/geo-replication/gsyncd.conf.in
+@@ -109,7 +109,7 @@ type=int
+ help=Minimum time interval in seconds for passive worker to become Active
+ 
+ [changelog-archive-format]
+-value=%%Y%%m
++value=%Y%m
+ help=Processed changelogs will be archived in working directory. Pattern for archive file
+ 
+ [use-meta-volume]
+diff --git a/geo-replication/syncdaemon/gsyncdconfig.py b/geo-replication/syncdaemon/gsyncdconfig.py
+index 38f3594..f823311 100644
+--- a/geo-replication/syncdaemon/gsyncdconfig.py
++++ b/geo-replication/syncdaemon/gsyncdconfig.py
+@@ -10,9 +10,9 @@
+ #
+ 
+ try:
+-    from ConfigParser import ConfigParser, NoSectionError
++    from ConfigParser import RawConfigParser, NoSectionError
+ except ImportError:
+-    from configparser import ConfigParser, NoSectionError
++    from configparser import RawConfigParser, NoSectionError
+ import os
+ import shutil
+ from string import Template
+@@ -94,7 +94,7 @@ class Gconf(object):
+         if name != "all" and not self._is_configurable(name):
+             raise GconfNotConfigurable()
+ 
+-        cnf = ConfigParser()
++        cnf = RawConfigParser()
+         with open(self.custom_conf_file) as f:
+             cnf.readfp(f)
+ 
+@@ -138,7 +138,7 @@ class Gconf(object):
+         if curr_val == value:
+             return True
+ 
+-        cnf = ConfigParser()
++        cnf = RawConfigParser()
+         with open(self.custom_conf_file) as f:
+             cnf.readfp(f)
+ 
+@@ -178,7 +178,7 @@ class Gconf(object):
+         self.session_conf_items = []
+         self.default_values = {}
+ 
+-        conf = ConfigParser()
++        conf = RawConfigParser()
+         # Default Template config file
+         with open(self.default_conf_file) as f:
+             conf.readfp(f)
+@@ -342,7 +342,7 @@ class Gconf(object):
+         return False
+ 
+ def is_config_file_old(config_file, mastervol, slavevol):
+-    cnf = ConfigParser()
++    cnf = RawConfigParser()
+     cnf.read(config_file)
+     session_section = "peers %s %s" % (mastervol, slavevol)
+     try:
+@@ -357,7 +357,7 @@ def config_upgrade(config_file, ret):
+     shutil.copyfile(config_file, config_file_backup)
+ 
+     #write a new config file
+-    config = ConfigParser()
++    config = RawConfigParser()
+     config.add_section('vars')
+ 
+     for key, value in ret.items():
+-- 
+1.8.3.1
+

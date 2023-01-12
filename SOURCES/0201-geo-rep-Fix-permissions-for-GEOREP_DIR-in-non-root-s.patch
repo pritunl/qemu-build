@@ -1,0 +1,44 @@
+From a61c2a81e5731e4e0b5136147f404e60d3c72ad0 Mon Sep 17 00:00:00 2001
+From: Sunny Kumar <sunkumar@redhat.com>
+Date: Tue, 18 Jun 2019 16:25:35 +0530
+Subject: [PATCH 201/221] geo-rep: Fix permissions for GEOREP_DIR in non-root
+ setup
+
+During mountbroker setup: 'gluster-mountbroker <mountbroker-root> <group>'
+commad to set the permission and group for GEOREP_DIR directory
+(/var/lib/glusterd/geo-replication) fails due to extra argument, which is
+enssential for non-root geo-rep setup.
+
+Backport of:
+
+>Updtream patch: https://review.gluster.org/#/c/glusterfs/+/22890/
+>fixes: bz#1721441
+>Change-Id: Ia83442733bf0b29f630e8c9e398097316efca092
+>Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+
+BUG: bz#1722331
+Change-Id: Ia83442733bf0b29f630e8c9e398097316efca092
+Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/174169
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ geo-replication/src/peer_mountbroker.py.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/geo-replication/src/peer_mountbroker.py.in b/geo-replication/src/peer_mountbroker.py.in
+index ce33f97..96a7264 100644
+--- a/geo-replication/src/peer_mountbroker.py.in
++++ b/geo-replication/src/peer_mountbroker.py.in
+@@ -197,7 +197,7 @@ class NodeSetup(Cmd):
+         execute(["chgrp", "-R", args.group, GEOREP_DIR])
+         execute(["chgrp", "-R", args.group, LOG_DIR])
+         execute(["chgrp", args.group, CLI_LOG])
+-        execute(["chmod", "770", args.group, GEOREP_DIR])
++        execute(["chmod", "770", GEOREP_DIR])
+         execute(["find", LOG_DIR, "-type", "d", "-exec", "chmod", "770", "{}",
+                  "+"])
+         execute(["find", LOG_DIR, "-type", "f", "-exec", "chmod", "660", "{}",
+-- 
+1.8.3.1
+

@@ -1,0 +1,93 @@
+From 86df0ced1cac0e3c48f6149bb2f5442f8548f89e Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Wed, 25 Dec 2019 21:56:32 +0530
+Subject: [PATCH 390/449] glusterd: deafult options after volume reset
+
+Problem: default option itransport.address-family is disappered
+in volume info output after a volume reset.
+
+Cause: with 3.8.0 onwards volume option transport.address-family
+has default value, any volume which is created will have this
+option set. So, volume info will show this in its output. But,
+with reset volume, this option is not handled.
+
+Solution: In glusterd_enable_default_options(), we should add this
+option along with other default options. This function is called
+by glusterd_options_reset() with volume reset command.
+
+> upstream patch link: https://review.gluster.org/#/c/glusterfs/+/23921/
+> fixes: bz#1786478
+> Change-Id: I58f7aa24cf01f308c4efe6cae748cc3bc8b99b1d
+> Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+
+BUG: 1781710
+Change-Id: I58f7aa24cf01f308c4efe6cae748cc3bc8b99b1d
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202258
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/glusterd/optimized-basic-testcases.t |  5 +++++
+ xlators/mgmt/glusterd/src/glusterd-utils.c      | 23 +++++++++++++++++++++++
+ 2 files changed, 28 insertions(+)
+
+diff --git a/tests/bugs/glusterd/optimized-basic-testcases.t b/tests/bugs/glusterd/optimized-basic-testcases.t
+index d700b5e..c7e8c32 100644
+--- a/tests/bugs/glusterd/optimized-basic-testcases.t
++++ b/tests/bugs/glusterd/optimized-basic-testcases.t
+@@ -69,6 +69,11 @@ TEST pidof glusterd;
+ TEST $CLI volume create $V0 $H0:$B0/${V0}{1,2};
+ EXPECT 'Created' volinfo_field $V0 'Status';
+ 
++#bug-1786478 - default volume option after volume reset
++addr_family=`volinfo_field $V0 'transport.address-family'`
++TEST $CLI volume reset $V0
++EXPECT $addr_family  volinfo_field $V0 'transport.address-family'
++
+ #bug-955588 - uuid validation
+ 
+ uuid=`grep UUID $GLUSTERD_WORKDIR/glusterd.info | cut -f2 -d=`
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index c92cdf3..6654741 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -13032,6 +13032,11 @@ glusterd_enable_default_options(glusterd_volinfo_t *volinfo, char *option)
+     int ret = 0;
+     xlator_t *this = NULL;
+     glusterd_conf_t *conf = NULL;
++#ifdef IPV6_DEFAULT
++    char *addr_family = "inet6";
++#else
++    char *addr_family = "inet";
++#endif
+ 
+     this = THIS;
+     GF_ASSERT(this);
+@@ -13109,6 +13114,24 @@ glusterd_enable_default_options(glusterd_volinfo_t *volinfo, char *option)
+             }
+         }
+     }
++
++    if (conf->op_version >= GD_OP_VERSION_3_9_0) {
++        if (!option || !strcmp("transport.address-family", option)) {
++            if (volinfo->transport_type == GF_TRANSPORT_TCP) {
++                ret = dict_set_dynstr_with_alloc(
++                    volinfo->dict, "transport.address-family", addr_family);
++                if (ret) {
++                    gf_msg(this->name, GF_LOG_ERROR, errno,
++                           GD_MSG_DICT_SET_FAILED,
++                           "failed to set transport."
++                           "address-family on %s",
++                           volinfo->volname);
++                    goto out;
++                }
++            }
++        }
++    }
++
+     if (conf->op_version >= GD_OP_VERSION_7_0) {
+         ret = dict_set_dynstr_with_alloc(volinfo->dict,
+                                          "storage.fips-mode-rchecksum", "on");
+-- 
+1.8.3.1
+

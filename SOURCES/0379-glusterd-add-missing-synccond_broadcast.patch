@@ -1,0 +1,45 @@
+From e06882a7fea9720a2899f7d52d5d3866ff098866 Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez <xhernandez@redhat.com>
+Date: Thu, 21 May 2020 08:26:11 +0200
+Subject: [PATCH 379/379] glusterd: add missing synccond_broadcast()
+
+After the changes in commit 3da22f8cb08b05562a4c6bd2694f2f19199cff7f,
+there was a place where synccond_broadcast() was missing. It could
+cause a hang if another synctask was waiting on the condition variable.
+
+Upstream patch:
+> Upstream patch link: https://review.gluster.org/c/glusterfs/+/24476
+> Change-Id: I92bfe4e15c5c3591e4854a64aa9e1566d50dd204
+> Fixes: #1116
+> Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+
+Change-Id: I92bfe4e15c5c3591e4854a64aa9e1566d50dd204
+BUG: 1810516
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/201057
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-utils.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index ce9931c..c92cdf3 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -6797,9 +6797,11 @@ glusterd_restart_bricks(void *opaque)
+     ret = 0;
+ 
+ out:
+-    GF_ATOMIC_DEC(conf->blockers);
+     conf->restart_done = _gf_true;
+     conf->restart_bricks = _gf_false;
++    if (GF_ATOMIC_DEC(conf->blockers) == 0) {
++        synccond_broadcast(&conf->cond_blockers);
++    }
+     synccond_broadcast(&conf->cond_restart_bricks);
+ 
+ return_block:
+-- 
+1.8.3.1
+

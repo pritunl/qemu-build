@@ -1,0 +1,59 @@
+From 463a920541a7579f2407f22597e4014494422804 Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Mon, 17 Dec 2018 14:07:01 +0530
+Subject: [PATCH 34/52] glusterd: introduce a new op-version for rhgs-3.4.3
+
+This patch introduces a new op-version 31305 for rhgs-3.4.3 and
+sets the max op-version to 31305.
+
+For migrating profile commands (commit e68845ff7018e5d81d7979684b18e6eda449b088)
+we used GD_OP_VERSION_6_0 in upstream. we are changing
+it to GD_OP_VERSION_3_13_5 here.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Ie3a05c70eb4e406889c468343f54e999b1218f19
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/158795
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ libglusterfs/src/glusterfs/globals.h         | 2 ++
+ xlators/mgmt/glusterd/src/glusterd-handler.c | 4 ++--
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/libglusterfs/src/glusterfs/globals.h b/libglusterfs/src/glusterfs/globals.h
+index 4d95f75..6642ba0 100644
+--- a/libglusterfs/src/glusterfs/globals.h
++++ b/libglusterfs/src/glusterfs/globals.h
+@@ -122,6 +122,8 @@
+ 
+ #define GD_OP_VERSION_3_13_4 31304 /* Op-version for GlusterFS 3.13.4 */
+ 
++#define GD_OP_VERSION_3_13_5 31305 /* Op-version for GlusterFS 3.13.5 */
++
+ #define GD_OP_VERSION_4_0_0 40000 /* Op-version for GlusterFS 4.0.0 */
+ 
+ #define GD_OP_VERSION_4_1_0 40100 /* Op-version for GlusterFS 4.1.0 */
+diff --git a/xlators/mgmt/glusterd/src/glusterd-handler.c b/xlators/mgmt/glusterd/src/glusterd-handler.c
+index 387643d..de44af7 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-handler.c
++++ b/xlators/mgmt/glusterd/src/glusterd-handler.c
+@@ -3085,12 +3085,12 @@ __glusterd_handle_cli_profile_volume(rpcsvc_request_t *req)
+         goto out;
+     }
+ 
+-    if (conf->op_version < GD_OP_VERSION_6_0) {
++    if (conf->op_version < GD_OP_VERSION_3_13_5) {
+         gf_msg_debug(this->name, 0,
+                      "The cluster is operating at "
+                      "version less than %d. Falling back "
+                      "to op-sm framework.",
+-                     GD_OP_VERSION_6_0);
++                     GD_OP_VERSION_3_13_5);
+         ret = glusterd_op_begin(req, cli_op, dict, err_str, sizeof(err_str));
+         glusterd_friend_sm();
+         glusterd_op_sm();
+-- 
+1.8.3.1
+

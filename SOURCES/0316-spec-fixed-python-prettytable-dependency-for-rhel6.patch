@@ -1,0 +1,51 @@
+From b9a19aef5de94eb91162448ad687f2d2d194f82c Mon Sep 17 00:00:00 2001
+From: Rinku Kothiya <rkothiya@redhat.com>
+Date: Thu, 14 Nov 2019 09:55:15 +0000
+Subject: [PATCH 316/316] spec: fixed python-prettytable dependency for rhel6
+
+Installing glusterfs on rhel6 was failing with python-prettytable
+dependency as it required python2-prettytable for glusterfs-events.
+This patch conditionally sets the python version for rhel7 and
+fixes the problem.
+
+Label: DOWNSTREAM ONLY
+
+BUG: 1771614
+
+Change-Id: I6288daa5d8c2d82a6d73a0d9722786a2a99b9db5
+fixes: bz#1771614
+Signed-off-by: Rinku Kothiya <rkothiya@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/185385
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfs.spec.in | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 3c2e2dc..eeadb65 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -706,7 +706,7 @@ This package provides the translators needed on any GlusterFS client.
+ %package events
+ Summary:          GlusterFS Events
+ Requires:         %{name}-server%{?_isa} = %{version}-%{release}
+-Requires:         python%{_pythonver} python%{_pythonver}-prettytable
++Requires:         python%{_pythonver}
+ Requires:         python%{_pythonver}-gluster = %{version}-%{release}
+ %if ( 0%{?rhel} && 0%{?rhel} < 8 )
+ Requires:         python-requests
+@@ -714,7 +714,10 @@ Requires:         python-requests
+ Requires:         python%{_pythonver}-requests
+ %endif
+ %if ( 0%{?rhel} && 0%{?rhel} < 7 )
++Requires:         python-prettytable
+ Requires:         python-argparse
++%else
++Requires:         python%{_pythonver}-prettytable
+ %endif
+ %if ( 0%{?_with_systemd:1} )
+ %{?systemd_requires}
+-- 
+1.8.3.1
+

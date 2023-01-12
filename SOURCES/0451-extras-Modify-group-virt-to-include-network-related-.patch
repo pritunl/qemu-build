@@ -1,0 +1,44 @@
+From 96d9b659fd0367abe1666a5ac6203208e0dc056d Mon Sep 17 00:00:00 2001
+From: Krutika Dhananjay <kdhananj@redhat.com>
+Date: Mon, 4 May 2020 14:30:57 +0530
+Subject: [PATCH 451/451] extras: Modify group 'virt' to include
+ network-related options
+
+This is needed to work around an issue seen where vms running on
+online hosts are getting killed when a different host is rebooted
+in ovirt-gluster hyperconverged environments. Actual RCA is quite
+lengthy and documented in the github issue. Please refer to it
+for more details.
+
+Upstream patch:
+> Upstream patch link: https://review.gluster.org/c/glusterfs/+/24400
+> Change-Id: Ic25b5f50144ad42458e5c847e1e7e191032396c1
+> Fixes: #1217
+> Signed-off-by: Krutika Dhananjay <kdhananj@redhat.com>
+
+Change-Id: Ic25b5f50144ad42458e5c847e1e7e191032396c1
+BUG: 1845064
+Signed-off-by: Krutika Dhananjay <kdhananj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/203291
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/group-virt.example | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/extras/group-virt.example b/extras/group-virt.example
+index c2ce89d..3a441eb 100644
+--- a/extras/group-virt.example
++++ b/extras/group-virt.example
+@@ -16,3 +16,8 @@ cluster.choose-local=off
+ client.event-threads=4
+ server.event-threads=4
+ performance.client-io-threads=on
++network.ping-timeout=20
++server.tcp-user-timeout=20
++server.keepalive-time=10
++server.keepalive-interval=2
++server.keepalive-count=5
+-- 
+1.8.3.1
+

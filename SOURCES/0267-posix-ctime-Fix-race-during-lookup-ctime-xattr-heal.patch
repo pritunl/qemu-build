@@ -1,0 +1,143 @@
+From cf13847a6341b7519ed0dc51e3b9ecf12444a3e4 Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Mon, 29 Jul 2019 16:22:10 +0530
+Subject: [PATCH 267/276] posix/ctime: Fix race during lookup ctime xattr heal
+
+Problem:
+Ctime heals the ctime xattr ("trusted.glusterfs.mdata") in lookup
+if it's not present. In a multi client scenario, there is a race
+which results in updating the ctime xattr to older value.
+
+e.g. Let c1 and c2 be two clients and file1 be the file which
+doesn't have the ctime xattr. Let the ctime of file1 be t1.
+(from backend, ctime heals time attributes from backend when not present).
+
+Now following operations are done on mount
+c1 -> ls -l /mnt/file1  |   c2 -> ls -l /mnt/file1;echo "append" >> /mnt/file1;
+
+The race is that the both c1 and c2 didn't fetch the ctime xattr in lookup,
+so both of them tries to heal ctime to time 't1'. If c2 wins the race and
+appends the file before c1 heals it, it sets the time to 't1' and updates
+it to 't2' (because of append). Now c1 proceeds to heal and sets it to 't1'
+which is incorrect.
+
+Solution:
+Compare the times during heal and only update the larger time. This is the
+general approach used in ctime feature but got missed with healing legacy
+files.
+
+> upstream patch : https://review.gluster.org/#/c/glusterfs/+/23131/
+
+>fixes: bz#1734299
+>Change-Id: I930bda192c64c3d49d0aed431ce23d3bc57e51b7
+>Signed-off-by: Kotresh HR <khiremat@redhat.com>
+
+BUG: 1734305
+Change-Id: I930bda192c64c3d49d0aed431ce23d3bc57e51b7
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/177866
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/storage/posix/src/posix-metadata.c | 76 +++++++++++++++++++++++-------
+ 1 file changed, 58 insertions(+), 18 deletions(-)
+
+diff --git a/xlators/storage/posix/src/posix-metadata.c b/xlators/storage/posix/src/posix-metadata.c
+index 647c0bb..57791fa 100644
+--- a/xlators/storage/posix/src/posix-metadata.c
++++ b/xlators/storage/posix/src/posix-metadata.c
+@@ -344,33 +344,73 @@ posix_set_mdata_xattr_legacy_files(xlator_t *this, inode_t *inode,
+                                    struct mdata_iatt *mdata_iatt, int *op_errno)
+ {
+     posix_mdata_t *mdata = NULL;
++    posix_mdata_t imdata = {
++        0,
++    };
+     int ret = 0;
++    gf_boolean_t mdata_already_set = _gf_false;
+ 
+     GF_VALIDATE_OR_GOTO("posix", this, out);
+     GF_VALIDATE_OR_GOTO(this->name, inode, out);
+ 
+     LOCK(&inode->lock);
+     {
+-        mdata = GF_CALLOC(1, sizeof(posix_mdata_t), gf_posix_mt_mdata_attr);
+-        if (!mdata) {
+-            gf_msg(this->name, GF_LOG_ERROR, ENOMEM, P_MSG_NOMEM,
+-                   "Could not allocate mdata. gfid: %s",
+-                   uuid_utoa(inode->gfid));
+-            ret = -1;
+-            *op_errno = ENOMEM;
+-            goto unlock;
+-        }
++        ret = __inode_ctx_get1(inode, this, (uint64_t *)&mdata);
++        if (ret == 0 && mdata) {
++            mdata_already_set = _gf_true;
++        } else if (ret == -1 || !mdata) {
++            mdata = GF_CALLOC(1, sizeof(posix_mdata_t), gf_posix_mt_mdata_attr);
++            if (!mdata) {
++                gf_msg(this->name, GF_LOG_ERROR, ENOMEM, P_MSG_NOMEM,
++                       "Could not allocate mdata. gfid: %s",
++                       uuid_utoa(inode->gfid));
++                ret = -1;
++                *op_errno = ENOMEM;
++                goto unlock;
++            }
++
++            ret = posix_fetch_mdata_xattr(this, NULL, -1, inode, (void *)mdata,
++                                          op_errno);
++            if (ret == 0) {
++                /* Got mdata from disk. This is a race, another client
++                 * has healed the xattr during lookup. So set it in inode
++                 * ctx */
++                __inode_ctx_set1(inode, this, (uint64_t *)&mdata);
++                mdata_already_set = _gf_true;
++            } else {
++                *op_errno = 0;
++                mdata->version = 1;
++                mdata->flags = 0;
++                mdata->ctime.tv_sec = mdata_iatt->ia_ctime;
++                mdata->ctime.tv_nsec = mdata_iatt->ia_ctime_nsec;
++                mdata->atime.tv_sec = mdata_iatt->ia_atime;
++                mdata->atime.tv_nsec = mdata_iatt->ia_atime_nsec;
++                mdata->mtime.tv_sec = mdata_iatt->ia_mtime;
++                mdata->mtime.tv_nsec = mdata_iatt->ia_mtime_nsec;
+ 
+-        mdata->version = 1;
+-        mdata->flags = 0;
+-        mdata->ctime.tv_sec = mdata_iatt->ia_ctime;
+-        mdata->ctime.tv_nsec = mdata_iatt->ia_ctime_nsec;
+-        mdata->atime.tv_sec = mdata_iatt->ia_atime;
+-        mdata->atime.tv_nsec = mdata_iatt->ia_atime_nsec;
+-        mdata->mtime.tv_sec = mdata_iatt->ia_mtime;
+-        mdata->mtime.tv_nsec = mdata_iatt->ia_mtime_nsec;
++                __inode_ctx_set1(inode, this, (uint64_t *)&mdata);
++            }
++        }
+ 
+-        __inode_ctx_set1(inode, this, (uint64_t *)&mdata);
++        if (mdata_already_set) {
++            /* Compare and update the larger time */
++            imdata.ctime.tv_sec = mdata_iatt->ia_ctime;
++            imdata.ctime.tv_nsec = mdata_iatt->ia_ctime_nsec;
++            imdata.atime.tv_sec = mdata_iatt->ia_atime;
++            imdata.atime.tv_nsec = mdata_iatt->ia_atime_nsec;
++            imdata.mtime.tv_sec = mdata_iatt->ia_mtime;
++            imdata.mtime.tv_nsec = mdata_iatt->ia_mtime_nsec;
++
++            if (posix_compare_timespec(&imdata.ctime, &mdata->ctime) > 0) {
++                mdata->ctime = imdata.ctime;
++            }
++            if (posix_compare_timespec(&imdata.mtime, &mdata->mtime) > 0) {
++                mdata->mtime = imdata.mtime;
++            }
++            if (posix_compare_timespec(&imdata.atime, &mdata->atime) > 0) {
++                mdata->atime = imdata.atime;
++            }
++        }
+ 
+         ret = posix_store_mdata_xattr(this, NULL, -1, inode, mdata);
+         if (ret) {
+-- 
+1.8.3.1
+

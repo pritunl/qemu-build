@@ -1,0 +1,62 @@
+From c429d3c63601e6ea15af76aa684c30bbeb746467 Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Tue, 23 Apr 2019 13:03:28 +0530
+Subject: [PATCH 120/124] glusterd/shd: Keep a ref on volinfo until attach rpc
+ execute cbk
+
+When svc attach execute for multiplexing a daemon, we have to keep
+a ref on volinfo until it finish the execution. Because, if the attach
+is an aysnc call, then a parallel volume delete can lead to free the
+volinfo
+
+> upstream patch : https://review.gluster.org/#/c/glusterfs/+/22606/
+
+>Change-Id: Ibc02b89557baaed2f63db63d7fb1a7480444ae0d
+>fixes: bz#1702185
+>Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+
+Change-Id: Ibc02b89557baaed2f63db63d7fb1a7480444ae0d
+BUG: 1702240
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/168616
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-shd-svc.c    | 3 +++
+ xlators/mgmt/glusterd/src/glusterd-svc-helper.c | 4 ++++
+ 2 files changed, 7 insertions(+)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+index 19eca9f..a9eab42 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+@@ -452,8 +452,11 @@ glusterd_shdsvc_start(glusterd_svc_t *svc, int flags)
+     }
+ 
+     if (shd->attached) {
++        glusterd_volinfo_ref(volinfo);
++        /* Unref will happen from glusterd_svc_attach_cbk */
+         ret = glusterd_attach_svc(svc, volinfo, flags);
+         if (ret) {
++            glusterd_volinfo_unref(volinfo);
+             gf_msg("glusterd", GF_LOG_ERROR, 0, GD_MSG_VOLINFO_GET_FAIL,
+                    "Failed to attach shd svc(volume=%s) to pid=%d. Starting"
+                    "a new process",
+diff --git a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+index 02945b1..f7be394 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
++++ b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+@@ -695,6 +695,10 @@ out:
+     if (flag) {
+         GF_FREE(flag);
+     }
++
++    if (volinfo)
++        glusterd_volinfo_unref(volinfo);
++
+     GF_ATOMIC_DEC(conf->blockers);
+     STACK_DESTROY(frame->root);
+     return 0;
+-- 
+1.8.3.1
+

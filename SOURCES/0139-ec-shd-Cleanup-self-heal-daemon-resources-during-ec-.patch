@@ -1,0 +1,300 @@
+From edc238e40060773f5f5fd59fcdad8ae27d65749f Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Mon, 29 Apr 2019 13:22:32 +0530
+Subject: [PATCH 139/141] ec/shd: Cleanup self heal daemon resources during ec
+ fini
+
+We were not properly cleaning self-heal daemon resources
+during ec fini. With shd multiplexing, it is absolutely
+necessary to cleanup all the resources during ec fini.
+
+Back port of
+ upstream patch: https://review.gluster.org/#/c/glusterfs/+/22644/
+ >Change-Id: Iae4f1bce7d8c2e1da51ac568700a51088f3cc7f2
+ >fixes: bz#1703948
+ >Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+
+BUG: 1703434
+Change-Id: I98ae03178d3176772c62e34baa08a5c35b8f7217
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/169994
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/syncop-utils.c          |  2 +
+ xlators/cluster/afr/src/afr-self-heald.c |  5 +++
+ xlators/cluster/ec/src/ec-heald.c        | 77 +++++++++++++++++++++++++++-----
+ xlators/cluster/ec/src/ec-heald.h        |  3 ++
+ xlators/cluster/ec/src/ec-messages.h     |  3 +-
+ xlators/cluster/ec/src/ec.c              | 47 +++++++++++++++++++
+ 6 files changed, 124 insertions(+), 13 deletions(-)
+
+diff --git a/libglusterfs/src/syncop-utils.c b/libglusterfs/src/syncop-utils.c
+index b842142..4167db4 100644
+--- a/libglusterfs/src/syncop-utils.c
++++ b/libglusterfs/src/syncop-utils.c
+@@ -354,6 +354,8 @@ syncop_mt_dir_scan(call_frame_t *frame, xlator_t *subvol, loc_t *loc, int pid,
+ 
+     if (frame) {
+         this = frame->this;
++    } else {
++        this = THIS;
+     }
+ 
+     /*For this functionality to be implemented in general, we need
+diff --git a/xlators/cluster/afr/src/afr-self-heald.c b/xlators/cluster/afr/src/afr-self-heald.c
+index 8bc4720..522fe5d 100644
+--- a/xlators/cluster/afr/src/afr-self-heald.c
++++ b/xlators/cluster/afr/src/afr-self-heald.c
+@@ -524,6 +524,11 @@ afr_shd_full_heal(xlator_t *subvol, gf_dirent_t *entry, loc_t *parent,
+     afr_private_t *priv = NULL;
+ 
+     priv = this->private;
++
++    if (this->cleanup_starting) {
++        return -ENOTCONN;
++    }
++
+     if (!priv->shd.enabled)
+         return -EBUSY;
+ 
+diff --git a/xlators/cluster/ec/src/ec-heald.c b/xlators/cluster/ec/src/ec-heald.c
+index cba111a..edf5e11 100644
+--- a/xlators/cluster/ec/src/ec-heald.c
++++ b/xlators/cluster/ec/src/ec-heald.c
+@@ -71,6 +71,11 @@ disabled_loop:
+             break;
+     }
+ 
++    if (ec->shutdown) {
++        healer->running = _gf_false;
++        return -1;
++    }
++
+     ret = healer->rerun;
+     healer->rerun = 0;
+ 
+@@ -241,9 +246,11 @@ ec_shd_index_sweep(struct subvol_healer *healer)
+         goto out;
+     }
+ 
++    _mask_cancellation();
+     ret = syncop_mt_dir_scan(NULL, subvol, &loc, GF_CLIENT_PID_SELF_HEALD,
+                              healer, ec_shd_index_heal, xdata,
+                              ec->shd.max_threads, ec->shd.wait_qlength);
++    _unmask_cancellation();
+ out:
+     if (xdata)
+         dict_unref(xdata);
+@@ -263,6 +270,11 @@ ec_shd_full_heal(xlator_t *subvol, gf_dirent_t *entry, loc_t *parent,
+     int ret = 0;
+ 
+     ec = this->private;
++
++    if (this->cleanup_starting) {
++        return -ENOTCONN;
++    }
++
+     if (ec->xl_up_count <= ec->fragments) {
+         return -ENOTCONN;
+     }
+@@ -305,11 +317,15 @@ ec_shd_full_sweep(struct subvol_healer *healer, inode_t *inode)
+ {
+     ec_t *ec = NULL;
+     loc_t loc = {0};
++    int ret = -1;
+ 
+     ec = healer->this->private;
+     loc.inode = inode;
+-    return syncop_ftw(ec->xl_list[healer->subvol], &loc,
+-                      GF_CLIENT_PID_SELF_HEALD, healer, ec_shd_full_heal);
++    _mask_cancellation();
++    ret = syncop_ftw(ec->xl_list[healer->subvol], &loc,
++                     GF_CLIENT_PID_SELF_HEALD, healer, ec_shd_full_heal);
++    _unmask_cancellation();
++    return ret;
+ }
+ 
+ void *
+@@ -317,13 +333,16 @@ ec_shd_index_healer(void *data)
+ {
+     struct subvol_healer *healer = NULL;
+     xlator_t *this = NULL;
++    int run = 0;
+ 
+     healer = data;
+     THIS = this = healer->this;
+     ec_t *ec = this->private;
+ 
+     for (;;) {
+-        ec_shd_healer_wait(healer);
++        run = ec_shd_healer_wait(healer);
++        if (run == -1)
++            break;
+ 
+         if (ec->xl_up_count > ec->fragments) {
+             gf_msg_debug(this->name, 0, "starting index sweep on subvol %s",
+@@ -352,16 +371,12 @@ ec_shd_full_healer(void *data)
+ 
+     rootloc.inode = this->itable->root;
+     for (;;) {
+-        pthread_mutex_lock(&healer->mutex);
+-        {
+-            run = __ec_shd_healer_wait(healer);
+-            if (!run)
+-                healer->running = _gf_false;
+-        }
+-        pthread_mutex_unlock(&healer->mutex);
+-
+-        if (!run)
++        run = ec_shd_healer_wait(healer);
++        if (run < 0) {
+             break;
++        } else if (run == 0) {
++            continue;
++        }
+ 
+         if (ec->xl_up_count > ec->fragments) {
+             gf_msg(this->name, GF_LOG_INFO, 0, EC_MSG_FULL_SWEEP_START,
+@@ -562,3 +577,41 @@ out:
+     dict_del(output, this->name);
+     return ret;
+ }
++
++void
++ec_destroy_healer_object(xlator_t *this, struct subvol_healer *healer)
++{
++    if (!healer)
++        return;
++
++    pthread_cond_destroy(&healer->cond);
++    pthread_mutex_destroy(&healer->mutex);
++}
++
++void
++ec_selfheal_daemon_fini(xlator_t *this)
++{
++    struct subvol_healer *healer = NULL;
++    ec_self_heald_t *shd = NULL;
++    ec_t *priv = NULL;
++    int i = 0;
++
++    priv = this->private;
++    if (!priv)
++        return;
++
++    shd = &priv->shd;
++    if (!shd->iamshd)
++        return;
++
++    for (i = 0; i < priv->nodes; i++) {
++        healer = &shd->index_healers[i];
++        ec_destroy_healer_object(this, healer);
++
++        healer = &shd->full_healers[i];
++        ec_destroy_healer_object(this, healer);
++    }
++
++    GF_FREE(shd->index_healers);
++    GF_FREE(shd->full_healers);
++}
+diff --git a/xlators/cluster/ec/src/ec-heald.h b/xlators/cluster/ec/src/ec-heald.h
+index 2eda2a7..8184cf4 100644
+--- a/xlators/cluster/ec/src/ec-heald.h
++++ b/xlators/cluster/ec/src/ec-heald.h
+@@ -24,4 +24,7 @@ ec_selfheal_daemon_init(xlator_t *this);
+ void
+ ec_shd_index_healer_wake(ec_t *ec);
+ 
++void
++ec_selfheal_daemon_fini(xlator_t *this);
++
+ #endif /* __EC_HEALD_H__ */
+diff --git a/xlators/cluster/ec/src/ec-messages.h b/xlators/cluster/ec/src/ec-messages.h
+index 7c28808..ce299bb 100644
+--- a/xlators/cluster/ec/src/ec-messages.h
++++ b/xlators/cluster/ec/src/ec-messages.h
+@@ -55,6 +55,7 @@ GLFS_MSGID(EC, EC_MSG_INVALID_CONFIG, EC_MSG_HEAL_FAIL,
+            EC_MSG_CONFIG_XATTR_INVALID, EC_MSG_EXTENSION, EC_MSG_EXTENSION_NONE,
+            EC_MSG_EXTENSION_UNKNOWN, EC_MSG_EXTENSION_UNSUPPORTED,
+            EC_MSG_EXTENSION_FAILED, EC_MSG_NO_GF, EC_MSG_MATRIX_FAILED,
+-           EC_MSG_DYN_CREATE_FAILED, EC_MSG_DYN_CODEGEN_FAILED);
++           EC_MSG_DYN_CREATE_FAILED, EC_MSG_DYN_CODEGEN_FAILED,
++           EC_MSG_THREAD_CLEANUP_FAILED);
+ 
+ #endif /* !_EC_MESSAGES_H_ */
+diff --git a/xlators/cluster/ec/src/ec.c b/xlators/cluster/ec/src/ec.c
+index 3c8013e..264582a 100644
+--- a/xlators/cluster/ec/src/ec.c
++++ b/xlators/cluster/ec/src/ec.c
+@@ -429,6 +429,51 @@ ec_disable_delays(ec_t *ec)
+ }
+ 
+ void
++ec_cleanup_healer_object(ec_t *ec)
++{
++    struct subvol_healer *healer = NULL;
++    ec_self_heald_t *shd = NULL;
++    void *res = NULL;
++    int i = 0;
++    gf_boolean_t is_join = _gf_false;
++
++    shd = &ec->shd;
++    if (!shd->iamshd)
++        return;
++
++    for (i = 0; i < ec->nodes; i++) {
++        healer = &shd->index_healers[i];
++        pthread_mutex_lock(&healer->mutex);
++        {
++            healer->rerun = 1;
++            if (healer->running) {
++                pthread_cond_signal(&healer->cond);
++                is_join = _gf_true;
++            }
++        }
++        pthread_mutex_unlock(&healer->mutex);
++        if (is_join) {
++            pthread_join(healer->thread, &res);
++            is_join = _gf_false;
++        }
++
++        healer = &shd->full_healers[i];
++        pthread_mutex_lock(&healer->mutex);
++        {
++            healer->rerun = 1;
++            if (healer->running) {
++                pthread_cond_signal(&healer->cond);
++                is_join = _gf_true;
++            }
++        }
++        pthread_mutex_unlock(&healer->mutex);
++        if (is_join) {
++            pthread_join(healer->thread, &res);
++            is_join = _gf_false;
++        }
++    }
++}
++void
+ ec_pending_fops_completed(ec_t *ec)
+ {
+     if (ec->shutdown) {
+@@ -544,6 +589,7 @@ ec_notify(xlator_t *this, int32_t event, void *data, void *data2)
+         /* If there aren't pending fops running after we have waken up
+          * them, we immediately propagate the notification. */
+         propagate = ec_disable_delays(ec);
++        ec_cleanup_healer_object(ec);
+         goto unlock;
+     }
+ 
+@@ -759,6 +805,7 @@ failed:
+ void
+ fini(xlator_t *this)
+ {
++    ec_selfheal_daemon_fini(this);
+     __ec_destroy_private(this);
+ }
+ 
+-- 
+1.8.3.1
+

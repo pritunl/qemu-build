@@ -1,0 +1,38 @@
+From 768a6d9bca86c0a50128b8776c11ef2b6d36388d Mon Sep 17 00:00:00 2001
+From: Vishal Pandey <vpandey@redhat.com>
+Date: Thu, 21 Nov 2019 12:56:34 +0530
+Subject: [PATCH 394/449] man/gluster: Add volume top command to gluster man
+ page
+
+> Upstream patch link: https://review.gluster.org/#/c/glusterfs/+/23735/
+> Change-Id: Ib74607d2b2e5a1a0316221f1176a7dcccea632d4
+> Fixes: bz#1774866
+> Signed-off-by: Vishal Pandey <vpandey@redhat.com>
+
+BUG: 1754391
+Change-Id: Ib74607d2b2e5a1a0316221f1176a7dcccea632d4
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202333
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ doc/gluster.8 | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/doc/gluster.8 b/doc/gluster.8
+index da6472d..88cbf44 100644
+--- a/doc/gluster.8
++++ b/doc/gluster.8
+@@ -113,6 +113,9 @@ Rotate the log file for corresponding volume/brick.
+ \fB\ volume profile <VOLNAME> {start|info [peek|incremental [peek]|cumulative|clear]|stop} [nfs] \fR
+ Profile operations on the volume. Once started, volume profile <volname> info provides cumulative statistics of the FOPs performed.
+ .TP
++\fB\ volume top <VOLNAME> {open|read|write|opendir|readdir|clear} [nfs|brick <brick>] [list-cnt <value>] | {read-perf|write-perf} [bs <size> count <count>] [brick <brick>] [list-cnt <value>] \fR
++Generates a profile of a volume representing the performance and bottlenecks/hotspots of each brick.
++.TP
+ \fB\ volume statedump <VOLNAME> [[nfs|quotad] [all|mem|iobuf|callpool|priv|fd|inode|history]... | [client <hostname:process-id>]] \fR
+ Dumps the in memory state of the specified process or the bricks of the volume.
+ .TP
+-- 
+1.8.3.1
+

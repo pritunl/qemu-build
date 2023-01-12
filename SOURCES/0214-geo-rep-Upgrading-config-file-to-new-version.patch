@@ -1,0 +1,114 @@
+From 76921775b0a6760276060409882c0556f19d8d01 Mon Sep 17 00:00:00 2001
+From: Shwetha K Acharya <sacharya@redhat.com>
+Date: Wed, 29 May 2019 16:49:01 +0530
+Subject: [PATCH 214/221] geo-rep: Upgrading config file to new version
+
+- configuration handling is enhanced with patch
+https://review.gluster.org/#/c/glusterfs/+/18257/
+- hence, the old configurations are not applied when
+Geo-rep session is created in the old version and upgraded.
+
+This patch solves the issue. It,
+- checks if the config file is old.
+- parses required values from old config file and stores in new
+  config file, which ensures that configurations are applied on
+  upgrade.
+- stores old config file as backup.
+- handles changes in options introduced in
+  https://review.gluster.org/#/c/glusterfs/+/18257/
+
+>fixes: bz#1707731
+>Change-Id: Iad8da6c1e1ae8ecf7c84dfdf8ea3ac6966d8a2a0
+>Signed-off-by: Shwetha K Acharya <sacharya@redhat.com>
+
+backport of https://review.gluster.org/#/c/glusterfs/+/22894/
+
+Bug: 1708064
+Change-Id: Iad8da6c1e1ae8ecf7c84dfdf8ea3ac6966d8a2a0
+Signed-off-by: Shwetha K Acharya <sacharya@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/174743
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ geo-replication/syncdaemon/gsyncd.py       |  5 ++++
+ geo-replication/syncdaemon/gsyncdconfig.py | 41 ++++++++++++++++++++++++++++++
+ 2 files changed, 46 insertions(+)
+
+diff --git a/geo-replication/syncdaemon/gsyncd.py b/geo-replication/syncdaemon/gsyncd.py
+index effe0ce..a4c6f32 100644
+--- a/geo-replication/syncdaemon/gsyncd.py
++++ b/geo-replication/syncdaemon/gsyncd.py
+@@ -253,6 +253,11 @@ def main():
+     if args.subcmd == "slave":
+         override_from_args = True
+ 
++    if args.subcmd == "monitor":
++        ret = gconf.is_config_file_old(config_file, args.master, extra_tmpl_args["slavevol"])
++        if ret is not None:
++           gconf.config_upgrade(config_file, ret)
++
+     # Load Config file
+     gconf.load(GLUSTERFS_CONFDIR + "/gsyncd.conf",
+                config_file,
+diff --git a/geo-replication/syncdaemon/gsyncdconfig.py b/geo-replication/syncdaemon/gsyncdconfig.py
+index 23a1c57..7edc582 100644
+--- a/geo-replication/syncdaemon/gsyncdconfig.py
++++ b/geo-replication/syncdaemon/gsyncdconfig.py
+@@ -14,6 +14,7 @@ try:
+ except ImportError:
+     from configparser import ConfigParser, NoSectionError
+ import os
++import shutil
+ from string import Template
+ from datetime import datetime
+ 
+@@ -325,6 +326,46 @@ class Gconf(object):
+ 
+         return False
+ 
++def is_config_file_old(config_file, mastervol, slavevol):
++    cnf = ConfigParser()
++    cnf.read(config_file)
++    session_section = "peers %s %s" % (mastervol, slavevol)
++    try:
++        return dict(cnf.items(session_section))
++    except NoSectionError:
++        return None
++
++def config_upgrade(config_file, ret):
++    config_file_backup = os.path.join(os.path.dirname(config_file), "gsyncd.conf.bkp")
++
++    #copy old config file in a backup file
++    shutil.copyfile(config_file, config_file_backup)
++
++    #write a new config file
++    config = ConfigParser()
++    config.add_section('vars')
++
++    for key, value in ret.items():
++        #handle option name changes
++        if key == "use_tarssh":
++            new_key = "sync-method"
++            if value == "true":
++                new_value = "tarssh"
++            else:
++                new_value = "rsync"
++                config.set('vars', new_key, new_value)
++
++        if key == "timeout":
++            new_key = "slave-timeout"
++            config.set('vars', new_key, value)
++
++        #for changes like: ignore_deletes to ignore-deletes
++        new_key = key.replace("_", "-")
++        config.set('vars', new_key, value)
++
++    with open(config_file, 'w') as configfile:
++        config.write(configfile)
++
+ 
+ def validate_unixtime(value):
+     try:
+-- 
+1.8.3.1
+

@@ -1,0 +1,79 @@
+From 76127f4f8f3c2bf415f66a335e7b37670cb9bd84 Mon Sep 17 00:00:00 2001
+From: Raghavendra G <rgowdapp@redhat.com>
+Date: Fri, 3 May 2019 10:14:48 +0530
+Subject: [PATCH 134/141] performance/write-behind: remove request from wip
+ list in wb_writev_cbk
+
+There is a race in the way O_DIRECT writes are handled. Assume two
+overlapping write requests w1 and w2.
+
+* w1 is issued and is in wb_inode->wip queue as the response is still
+  pending from bricks. Also wb_request_unref in wb_do_winds is not yet
+  invoked.
+
+       list_for_each_entry_safe (req, tmp, tasks, winds) {
+		list_del_init (&req->winds);
+
+                if (req->op_ret == -1) {
+			call_unwind_error_keep_stub (req->stub, req->op_ret,
+		                                     req->op_errno);
+                } else {
+                        call_resume_keep_stub (req->stub);
+		}
+
+                wb_request_unref (req);
+        }
+
+* w2 is issued and wb_process_queue is invoked. w2 is not picked up
+  for winding as w1 is still in wb_inode->wip. w1 is added to todo
+  list and wb_writev for w2 returns.
+
+* response to w1 is received and invokes wb_request_unref. Assume
+  wb_request_unref in wb_do_winds (see point 1) is not invoked
+  yet. Since there is one more refcount, wb_request_unref in
+  wb_writev_cbk of w1 doesn't remove w1 from wip.
+
+* wb_process_queue is invoked as part of wb_writev_cbk of w1. But, it
+  fails to wind w2 as w1 is still in wip.
+
+* wb_requet_unref is invoked on w1 as part of wb_do_winds. w1 is
+  removed from all queues including w1.
+
+* After this point there is no invocation of wb_process_queue unless
+  new request is issued from application causing w2 to be hung till
+  the next request.
+
+This bug is similar to bz 1626780 and bz 1379655.
+
+upstream patch: https://review.gluster.org/#/c/glusterfs/+/22654/
+BUG: 1702686
+Change-Id: Iaa47437613591699d4c8ad18bc0b32de6affcc31
+fixes: bz#1702686
+Signed-off-by: Raghavendra G <rgowdapp@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/169552
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/performance/write-behind/src/write-behind.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/xlators/performance/write-behind/src/write-behind.c b/xlators/performance/write-behind/src/write-behind.c
+index cf302bd..70e281a 100644
+--- a/xlators/performance/write-behind/src/write-behind.c
++++ b/xlators/performance/write-behind/src/write-behind.c
+@@ -1813,6 +1813,12 @@ wb_writev_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int32_t op_ret,
+     frame->local = NULL;
+     wb_inode = req->wb_inode;
+ 
++    LOCK(&req->wb_inode->lock);
++    {
++        list_del_init(&req->wip);
++    }
++    UNLOCK(&req->wb_inode->lock);
++
+     wb_request_unref(req);
+ 
+     /* requests could be pending while this was in progress */
+-- 
+1.8.3.1
+

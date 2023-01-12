@@ -1,0 +1,106 @@
+From a766878e11a984680ed29f13aae713d464ec985e Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Wed, 19 Apr 2017 16:12:10 +0530
+Subject: [PATCH 061/124] ganesha : allow refresh-config and volume
+ export/unexport in failover state
+
+If ganesha is not running on one of nodes in HA cluster, then alli dbus
+commands send to that ganesha server will fail. This results in both
+refresh-config and volume export/unepxort failure. This change will
+gracefully handle those scenarios.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I3f1b7b7ca98e54c273c266e56357d8e24dd1b14b
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://review.gluster.org/17081
+Smoke: Gluster Build System <jenkins@build.gluster.org>
+NetBSD-regression: NetBSD Build System <jenkins@build.gluster.org>
+CentOS-regression: Gluster Build System <jenkins@build.gluster.org>
+Reviewed-by: soumya k <skoduri@redhat.com>
+Reviewed-by: Kaleb KEITHLEY <kkeithle@redhat.com>
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167146
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/ganesha/scripts/ganesha-ha.sh          |  6 ++----
+ xlators/mgmt/glusterd/src/glusterd-ganesha.c  | 24 +++++++++++++++---------
+ xlators/mgmt/glusterd/src/glusterd-messages.h |  2 +-
+ 3 files changed, 18 insertions(+), 14 deletions(-)
+
+diff --git a/extras/ganesha/scripts/ganesha-ha.sh b/extras/ganesha/scripts/ganesha-ha.sh
+index db3f921..f040ef6 100644
+--- a/extras/ganesha/scripts/ganesha-ha.sh
++++ b/extras/ganesha/scripts/ganesha-ha.sh
+@@ -275,8 +275,7 @@ string:\"EXPORT(Export_Id=$export_id)\" 2>&1")
+                 ret=$?
+                 logger <<< "${output}"
+                 if [ ${ret} -ne 0 ]; then
+-                        echo "Error: refresh-config failed on ${current_host}."
+-                        exit 1
++                        echo "Refresh-config failed on ${current_host}"
+                 else
+                         echo "Refresh-config completed on ${current_host}."
+                 fi
+@@ -297,8 +296,7 @@ string:"EXPORT(Export_Id=$export_id)" 2>&1)
+         ret=$?
+         logger <<< "${output}"
+         if [ ${ret} -ne 0 ] ; then
+-                echo "Error: refresh-config failed on localhost."
+-                exit 1
++                echo "Refresh-config failed on localhost."
+         else
+                 echo "Success: refresh-config completed."
+         fi
+diff --git a/xlators/mgmt/glusterd/src/glusterd-ganesha.c b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+index 1d17a33..ee8b588 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-ganesha.c
++++ b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+@@ -540,15 +540,21 @@ ganesha_manage_export(dict_t *dict, char *value, char **op_errstr)
+     }
+ 
+     if (check_host_list()) {
+-        runner_add_args(&runner, GANESHA_PREFIX "/dbus-send.sh", CONFDIR, value,
+-                        volname, NULL);
+-        ret = runner_run(&runner);
+-        if (ret) {
+-            gf_asprintf(op_errstr,
+-                        "Dynamic export"
+-                        " addition/deletion failed."
+-                        " Please see log file for details");
+-            goto out;
++        /* Check whether ganesha is running on this node */
++        if (manage_service("status")) {
++            gf_msg(this->name, GF_LOG_WARNING, 0, GD_MSG_GANESHA_NOT_RUNNING,
++                   "Export failed, NFS-Ganesha is not running");
++        } else {
++            runner_add_args(&runner, GANESHA_PREFIX "/dbus-send.sh", CONFDIR,
++                            value, volname, NULL);
++            ret = runner_run(&runner);
++            if (ret) {
++                gf_asprintf(op_errstr,
++                            "Dynamic export"
++                            " addition/deletion failed."
++                            " Please see log file for details");
++                goto out;
++            }
+         }
+     }
+ 
+diff --git a/xlators/mgmt/glusterd/src/glusterd-messages.h b/xlators/mgmt/glusterd/src/glusterd-messages.h
+index 9558480..c7b3ca8 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-messages.h
++++ b/xlators/mgmt/glusterd/src/glusterd-messages.h
+@@ -298,6 +298,6 @@ GLFS_MSGID(
+     GD_MSG_LOCALTIME_LOGGING_ENABLE, GD_MSG_LOCALTIME_LOGGING_DISABLE,
+     GD_MSG_PORTS_EXHAUSTED, GD_MSG_CHANGELOG_GET_FAIL,
+     GD_MSG_MANAGER_FUNCTION_FAILED, GD_MSG_NFS_GANESHA_DISABLED,
+-    GD_MSG_DAEMON_LOG_LEVEL_VOL_OPT_VALIDATE_FAIL);
++    GD_MSG_GANESHA_NOT_RUNNING, GD_MSG_DAEMON_LOG_LEVEL_VOL_OPT_VALIDATE_FAIL);
+ 
+ #endif /* !_GLUSTERD_MESSAGES_H_ */
+-- 
+1.8.3.1
+

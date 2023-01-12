@@ -1,0 +1,289 @@
+From 69ac1fd2da7a57f2f0854412863911959bf71fde Mon Sep 17 00:00:00 2001
+From: Sunny Kumar <sunkumar@redhat.com>
+Date: Tue, 2 Apr 2019 12:38:09 +0530
+Subject: [PATCH 161/169] geo-rep: Fix rename with existing destination with
+ same gfid
+
+Problem:
+   Geo-rep fails to sync the rename properly if destination exists.
+It results in source to be remained on slave causing more number of
+files on slave. Also heavy rename workload like logrotate caused
+lot of ESTALE errors
+
+Cause:
+   Geo-rep fails to sync rename if destination exists if creation
+of source file also falls into single batch of changelogs being
+processed. This is because, after fixing problematic gfids verifying
+from master, while re-processing original entries, CREATE also was
+re-processed causing more files on slave and rename to be failed.
+
+Solution:
+   Entries need to be removed from retrial list after fixing
+problematic gfids on slave so that it's not re-created again on slave.
+   Also treat ESTALE as EEXIST so that the error is properly handled
+verifying the op on master volume.
+
+Backport of:
+ > Patch: https://review.gluster.org/22519
+ > Change-Id: I50cf289e06b997adddff0552bf2466d9201dd1f9
+ > BUG: 1694820
+ > Signed-off-by: Kotresh HR <khiremat@redhat.com>
+ > Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+
+Change-Id: I50cf289e06b997adddff0552bf2466d9201dd1f9
+fixes: bz#1708121
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172393
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ geo-replication/syncdaemon/master.py              | 41 +++++++++++++++++++++--
+ geo-replication/syncdaemon/resource.py            | 10 ++++--
+ tests/00-geo-rep/georep-basic-dr-rsync-arbiter.t  |  5 +++
+ tests/00-geo-rep/georep-basic-dr-rsync.t          |  5 +++
+ tests/00-geo-rep/georep-basic-dr-tarssh-arbiter.t |  5 +++
+ tests/00-geo-rep/georep-basic-dr-tarssh.t         |  5 +++
+ tests/geo-rep.rc                                  | 36 ++++++++++++++++++++
+ 7 files changed, 102 insertions(+), 5 deletions(-)
+
+diff --git a/geo-replication/syncdaemon/master.py b/geo-replication/syncdaemon/master.py
+index 3da7610..42c86d7 100644
+--- a/geo-replication/syncdaemon/master.py
++++ b/geo-replication/syncdaemon/master.py
+@@ -65,6 +65,9 @@ def _volinfo_hook_relax_foreign(self):
+ def edct(op, **ed):
+     dct = {}
+     dct['op'] = op
++    # This is used in automatic gfid conflict resolution.
++    # When marked True, it's skipped during re-processing.
++    dct['skip_entry'] = False
+     for k in ed:
+         if k == 'stat':
+             st = ed[k]
+@@ -792,6 +795,7 @@ class GMasterChangelogMixin(GMasterCommon):
+         pfx = gauxpfx()
+         fix_entry_ops = []
+         failures1 = []
++        remove_gfids = set()
+         for failure in failures:
+             if failure[2]['name_mismatch']:
+                 pbname = failure[2]['slave_entry']
+@@ -822,6 +826,18 @@ class GMasterChangelogMixin(GMasterCommon):
+                             edct('UNLINK',
+                                  gfid=failure[2]['slave_gfid'],
+                                  entry=pbname))
++                    remove_gfids.add(slave_gfid)
++                    if op in ['RENAME']:
++                        # If renamed gfid doesn't exists on master, remove
++                        # rename entry and unlink src on slave
++                        st = lstat(os.path.join(pfx, failure[0]['gfid']))
++                        if isinstance(st, int) and st == ENOENT:
++                            logging.debug("Unlink source %s" % repr(failure))
++                            remove_gfids.add(failure[0]['gfid'])
++                            fix_entry_ops.append(
++                                edct('UNLINK',
++                                     gfid=failure[0]['gfid'],
++                                     entry=failure[0]['entry']))
+                 # Takes care of scenarios of hardlinks/renames on master
+                 elif not isinstance(st, int):
+                     if matching_disk_gfid(slave_gfid, pbname):
+@@ -831,7 +847,12 @@ class GMasterChangelogMixin(GMasterCommon):
+                                         ' Safe to ignore, take out entry',
+                                         retry_count=retry_count,
+                                         entry=repr(failure)))
+-                        entries.remove(failure[0])
++                        remove_gfids.add(failure[0]['gfid'])
++                        if op == 'RENAME':
++                            fix_entry_ops.append(
++                                edct('UNLINK',
++                                     gfid=failure[0]['gfid'],
++                                     entry=failure[0]['entry']))
+                     # The file exists on master but with different name.
+                     # Probably renamed and got missed during xsync crawl.
+                     elif failure[2]['slave_isdir']:
+@@ -856,7 +877,10 @@ class GMasterChangelogMixin(GMasterCommon):
+                                             'take out entry',
+                                             retry_count=retry_count,
+                                             entry=repr(failure)))
+-                            entries.remove(failure[0])
++                            try:
++                                entries.remove(failure[0])
++                            except ValueError:
++                                pass
+                         else:
+                             rename_dict = edct('RENAME', gfid=slave_gfid,
+                                                entry=src_entry,
+@@ -896,7 +920,10 @@ class GMasterChangelogMixin(GMasterCommon):
+                                     'ignore, take out entry',
+                                     retry_count=retry_count,
+                                     entry=repr(failure)))
+-                    entries.remove(failure[0])
++                    try:
++                        entries.remove(failure[0])
++                    except ValueError:
++                        pass
+                 else:
+                     logging.info(lf('Fixing ENOENT error in slave. Create '
+                                     'parent directory on slave.',
+@@ -913,6 +940,14 @@ class GMasterChangelogMixin(GMasterCommon):
+                         edct('MKDIR', gfid=pargfid, entry=dir_entry,
+                              mode=st.st_mode, uid=st.st_uid, gid=st.st_gid))
+ 
++        logging.debug("remove_gfids: %s" % repr(remove_gfids))
++        if remove_gfids:
++            for e in entries:
++                if e['op'] in ['MKDIR', 'MKNOD', 'CREATE', 'RENAME'] \
++                   and e['gfid'] in remove_gfids:
++                    logging.debug("Removed entry op from retrial list: entry: %s" % repr(e))
++                    e['skip_entry'] = True
++
+         if fix_entry_ops:
+             # Process deletions of entries whose gfids are mismatched
+             failures1 = self.slave.server.entry_ops(fix_entry_ops)
+diff --git a/geo-replication/syncdaemon/resource.py b/geo-replication/syncdaemon/resource.py
+index c290d86..f54ccd9 100644
+--- a/geo-replication/syncdaemon/resource.py
++++ b/geo-replication/syncdaemon/resource.py
+@@ -426,7 +426,7 @@ class Server(object):
+                 e['stat']['uid'] = uid
+                 e['stat']['gid'] = gid
+ 
+-            if cmd_ret == EEXIST:
++            if cmd_ret in [EEXIST, ESTALE]:
+                 if dst:
+                     en = e['entry1']
+                 else:
+@@ -510,6 +510,12 @@ class Server(object):
+             entry = e['entry']
+             uid = 0
+             gid = 0
++
++            # Skip entry processing if it's marked true during gfid
++            # conflict resolution
++            if e['skip_entry']:
++                continue
++
+             if e.get("stat", {}):
+                 # Copy UID/GID value and then reset to zero. Copied UID/GID
+                 # will be used to run chown once entry is created.
+@@ -688,7 +694,7 @@ class Server(object):
+             if blob:
+                 cmd_ret = errno_wrap(Xattr.lsetxattr,
+                                      [pg, 'glusterfs.gfid.newfile', blob],
+-                                     [EEXIST, ENOENT],
++                                     [EEXIST, ENOENT, ESTALE],
+                                      [ESTALE, EINVAL, EBUSY])
+                 collect_failure(e, cmd_ret, uid, gid)
+ 
+diff --git a/tests/00-geo-rep/georep-basic-dr-rsync-arbiter.t b/tests/00-geo-rep/georep-basic-dr-rsync-arbiter.t
+index 67ac167..1a55ed2 100644
+--- a/tests/00-geo-rep/georep-basic-dr-rsync-arbiter.t
++++ b/tests/00-geo-rep/georep-basic-dr-rsync-arbiter.t
+@@ -203,6 +203,11 @@ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 verify_rsnapshot_data ${slave_mnt}
+ TEST gluster volume geo-rep $master $slave config rsync-options "--whole-file"
+ TEST "echo sampledata > $master_mnt/rsync_option_test_file"
+ 
++#rename with existing destination case BUG:1694820
++TEST create_rename_with_existing_destination ${master_mnt}
++#verify rename with existing destination case BUG:1694820
++EXPECT_WITHIN $GEO_REP_TIMEOUT 0 verify_rename_with_existing_destination ${slave_mnt}
++
+ #Verify arequal for whole volume
+ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 arequal_checksum ${master_mnt} ${slave_mnt}
+ 
+diff --git a/tests/00-geo-rep/georep-basic-dr-rsync.t b/tests/00-geo-rep/georep-basic-dr-rsync.t
+index 8b64370..d0c0fc9 100644
+--- a/tests/00-geo-rep/georep-basic-dr-rsync.t
++++ b/tests/00-geo-rep/georep-basic-dr-rsync.t
+@@ -204,6 +204,11 @@ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 verify_rsnapshot_data ${slave_mnt}
+ TEST gluster volume geo-rep $master $slave config rsync-options "--whole-file"
+ TEST "echo sampledata > $master_mnt/rsync_option_test_file"
+ 
++#rename with existing destination case BUG:1694820
++TEST create_rename_with_existing_destination ${master_mnt}
++#verify rename with existing destination case BUG:1694820
++EXPECT_WITHIN $GEO_REP_TIMEOUT 0 verify_rename_with_existing_destination ${slave_mnt}
++
+ #Verify arequal for whole volume
+ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 arequal_checksum ${master_mnt} ${slave_mnt}
+ 
+diff --git a/tests/00-geo-rep/georep-basic-dr-tarssh-arbiter.t b/tests/00-geo-rep/georep-basic-dr-tarssh-arbiter.t
+index 1726d0b..cb530ad 100644
+--- a/tests/00-geo-rep/georep-basic-dr-tarssh-arbiter.t
++++ b/tests/00-geo-rep/georep-basic-dr-tarssh-arbiter.t
+@@ -202,6 +202,11 @@ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 verify_symlink_rename_mkdir_data ${slave_mnt}/s
+ #rsnapshot usecase
+ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 verify_rsnapshot_data ${slave_mnt}
+ 
++#rename with existing destination case BUG:1694820
++TEST create_rename_with_existing_destination ${master_mnt}
++#verify rename with existing destination case BUG:1694820
++EXPECT_WITHIN $GEO_REP_TIMEOUT 0 verify_rename_with_existing_destination ${slave_mnt}
++
+ #Verify arequal for whole volume
+ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 arequal_checksum ${master_mnt} ${slave_mnt}
+ 
+diff --git a/tests/00-geo-rep/georep-basic-dr-tarssh.t b/tests/00-geo-rep/georep-basic-dr-tarssh.t
+index c5d16ac..9e2f613 100644
+--- a/tests/00-geo-rep/georep-basic-dr-tarssh.t
++++ b/tests/00-geo-rep/georep-basic-dr-tarssh.t
+@@ -202,6 +202,11 @@ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 verify_hardlink_rename_data ${slave_mnt}
+ #rsnapshot usecase
+ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 verify_rsnapshot_data ${slave_mnt}
+ 
++#rename with existing destination case BUG:1694820
++TEST create_rename_with_existing_destination ${master_mnt}
++#verify rename with existing destination case BUG:1694820
++EXPECT_WITHIN $GEO_REP_TIMEOUT 0 verify_rename_with_existing_destination ${slave_mnt}
++
+ #Verify arequal for whole volume
+ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 arequal_checksum ${master_mnt} ${slave_mnt}
+ 
+diff --git a/tests/geo-rep.rc b/tests/geo-rep.rc
+index d723129..e357ba8 100644
+--- a/tests/geo-rep.rc
++++ b/tests/geo-rep.rc
+@@ -403,3 +403,39 @@ function check_slave_read_only()
+     gluster volume info $1 | grep 'features.read-only: on'
+     echo $?
+ }
++
++function create_rename_with_existing_destination()
++{
++    dir=$1/rename_with_existing_destination
++    mkdir $dir
++    for i in {1..5}
++    do
++        echo "Data_set$i" > $dir/data_set$i
++        mv $dir/data_set$i $dir/data_set -f
++    done
++}
++
++function verify_rename_with_existing_destination()
++{
++    dir=$1/rename_with_existing_destination
++
++    if [ ! -d $dir ]; then
++        echo 1
++    elif [ ! -f $dir/data_set ]; then
++        echo 2
++    elif [ -f $dir/data_set1 ]; then
++        echo 3
++    elif [ -f $dir/data_set2 ]; then
++        echo 4
++    elif [ -f $dir/data_set3 ]; then
++        echo 5
++    elif [ -f $dir/data_set4 ]; then
++        echo 6
++    elif [ -f $dir/data_set5 ]; then
++        echo 7
++    elif test "XData_set5" != "X$(cat $dir/data_set)"; then
++        echo 8
++    else
++        echo 0
++    fi
++}
+-- 
+1.8.3.1
+

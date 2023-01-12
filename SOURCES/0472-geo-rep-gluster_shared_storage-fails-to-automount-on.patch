@@ -1,0 +1,98 @@
+From ccd45222c46b91b4d0cd57db9ea8b1515c97ada0 Mon Sep 17 00:00:00 2001
+From: Shwetha K Acharya <sacharya@redhat.com>
+Date: Mon, 31 Aug 2020 20:08:39 +0530
+Subject: [PATCH 472/473] geo-rep: gluster_shared_storage fails to automount on
+ node reboot on rhel 8.
+
+Issue: On reboot, all the mounts get wiped out.
+       Only the mounts mentioned in /etc/fstab  automatically gets mounted
+       during boot/reboot.
+
+       But /etc/fstab complains on not getting a canonical path
+       (it gets path containing a symlink)
+       This is because the gluster_shared_storage, is mounted to
+       /var/run which is symlink to /run. This is a general practice
+       followed by most operating systems.
+
+       [root@ ~]# ls -lsah /var/run
+       0 lrwxrwxrwx. 1 root root 6 Jul 22 19:39 /var/run -> ../run
+
+Fix:   Mount gluster_shared_storage on /run.
+       (Also It is seen that /var/run is mostly
+       used by old or legacy systems, thus it is a good practice to
+       update /var/run to /run)
+
+>fixes: #1459
+>Change-Id: I8c16653be8cd746c84f01abf0eea19284fb97c77
+>Signed-off-by: Shwetha K Acharya <sacharya@redhat.com>
+
+backport of https://review.gluster.org/#/c/glusterfs/+/24934/
+BUG: 1873469
+Change-Id: I8c16653be8cd746c84f01abf0eea19284fb97c77
+Signed-off-by: Shwetha K Acharya <sacharya@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/211387
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ .../set/post/S32gluster_enable_shared_storage.sh       | 18 +++++++++---------
+ geo-replication/gsyncd.conf.in                         |  2 +-
+ 2 files changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/extras/hook-scripts/set/post/S32gluster_enable_shared_storage.sh b/extras/hook-scripts/set/post/S32gluster_enable_shared_storage.sh
+index 885ed03..3bae37c 100755
+--- a/extras/hook-scripts/set/post/S32gluster_enable_shared_storage.sh
++++ b/extras/hook-scripts/set/post/S32gluster_enable_shared_storage.sh
+@@ -79,9 +79,9 @@ done
+ 
+ if [ "$option" == "disable" ]; then
+     # Unmount the volume on all the nodes
+-    umount /var/run/gluster/shared_storage
+-    cat /etc/fstab  | grep -v "gluster_shared_storage /var/run/gluster/shared_storage/" > /var/run/gluster/fstab.tmp
+-    mv /var/run/gluster/fstab.tmp /etc/fstab
++    umount /run/gluster/shared_storage
++    cat /etc/fstab  | grep -v "gluster_shared_storage /run/gluster/shared_storage/" > /run/gluster/fstab.tmp
++    mv /run/gluster/fstab.tmp /etc/fstab
+ fi
+ 
+ if [ "$is_originator" == 1 ]; then
+@@ -105,7 +105,7 @@ function check_volume_status()
+ }
+ 
+ mount_cmd="mount -t glusterfs $local_node_hostname:/gluster_shared_storage \
+-           /var/run/gluster/shared_storage"
++           /run/gluster/shared_storage"
+ 
+ if [ "$option" == "enable" ]; then
+     retry=0;
+@@ -120,10 +120,10 @@ if [ "$option" == "enable" ]; then
+         status=$(check_volume_status)
+     done
+     # Mount the volume on all the nodes
+-    umount /var/run/gluster/shared_storage
+-    mkdir -p /var/run/gluster/shared_storage
++    umount /run/gluster/shared_storage
++    mkdir -p /run/gluster/shared_storage
+     $mount_cmd
+-    cp /etc/fstab /var/run/gluster/fstab.tmp
+-    echo "$local_node_hostname:/gluster_shared_storage /var/run/gluster/shared_storage/ glusterfs defaults        0 0" >> /var/run/gluster/fstab.tmp
+-    mv /var/run/gluster/fstab.tmp /etc/fstab
++    cp /etc/fstab /run/gluster/fstab.tmp
++    echo "$local_node_hostname:/gluster_shared_storage /run/gluster/shared_storage/ glusterfs defaults        0 0" >> /run/gluster/fstab.tmp
++    mv /run/gluster/fstab.tmp /etc/fstab
+ fi
+diff --git a/geo-replication/gsyncd.conf.in b/geo-replication/gsyncd.conf.in
+index 11e57fd..9688c79 100644
+--- a/geo-replication/gsyncd.conf.in
++++ b/geo-replication/gsyncd.conf.in
+@@ -123,7 +123,7 @@ type=bool
+ help=Use this to set Active Passive mode to meta-volume.
+ 
+ [meta-volume-mnt]
+-value=/var/run/gluster/shared_storage
++value=/run/gluster/shared_storage
+ help=Meta Volume or Shared Volume mount path
+ 
+ [allow-network]
+-- 
+1.8.3.1
+

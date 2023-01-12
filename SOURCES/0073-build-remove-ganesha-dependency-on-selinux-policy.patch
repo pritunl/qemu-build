@@ -1,0 +1,45 @@
+From 52279c877264f41b522f747a986b937e6f054e2a Mon Sep 17 00:00:00 2001
+From: "Kaleb S. KEITHLEY" <kkeithle@redhat.com>
+Date: Fri, 23 Jun 2017 20:43:16 +0530
+Subject: [PATCH 073/124] build: remove ganesha dependency on selinux-policy
+
+Problem:
+Puddle creation fails with unresolved dependencies
+  unresolved deps:
+***      selinux-policy >= 0:3.13.1-160
+
+Solution:
+We know a priori about the version at RHEL 7.4 is already the desired
+version. So removing this explicit dependency *should* not be a gluster
+test blocker.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Id53ac0e41adc14704932787ee0dd3143e6615aaf
+Signed-off-by: Milind Changire <mchangir@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/109945
+Reviewed-by: Kaleb Keithley <kkeithle@redhat.com>
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167158
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfs.spec.in | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 1d99a3d..e55e255 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -467,6 +467,7 @@ Requires:         cman, pacemaker, corosync
+ %endif
+ 
+ %if ( 0%{?fedora} && 0%{?fedora} > 25 )
++Requires: selinux-policy >= 3.13.1-160
+ Requires(post):   policycoreutils-python-utils
+ Requires(postun): policycoreutils-python-utils
+ %endif
+-- 
+1.8.3.1
+

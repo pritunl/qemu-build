@@ -1,0 +1,41 @@
+From 254033a80d85460675c921c272fb94bb7e9f67d4 Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Tue, 18 Dec 2018 17:57:25 +0530
+Subject: [PATCH 35/52] glusterd: tag rebalance mgmt_v3 command to op-version
+ 31305
+
+In upstream migrating rebalance command is tagged to op-version 60000
+but in downstream the latest new op-version is 31305.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I30bbad3efca29bf42b9a750581eb1aebc8a30ff9
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/158943
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-rebalance.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-rebalance.c b/xlators/mgmt/glusterd/src/glusterd-rebalance.c
+index e20e3c4..ed5ded5 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-rebalance.c
++++ b/xlators/mgmt/glusterd/src/glusterd-rebalance.c
+@@ -573,12 +573,12 @@ __glusterd_handle_defrag_volume(rpcsvc_request_t *req)
+     } else
+         op = GD_OP_REBALANCE;
+ 
+-    if (priv->op_version < GD_OP_VERSION_6_0) {
++    if (priv->op_version < GD_OP_VERSION_3_13_5) {
+         gf_msg_debug(this->name, 0,
+                      "The cluster is operating at "
+                      "version less than %d. Falling back "
+                      "to op-sm framework.",
+-                     GD_OP_VERSION_6_0);
++                     GD_OP_VERSION_3_13_5);
+         ret = glusterd_op_begin(req, op, dict, msg, sizeof(msg));
+         glusterd_friend_sm();
+         glusterd_op_sm();
+-- 
+1.8.3.1
+

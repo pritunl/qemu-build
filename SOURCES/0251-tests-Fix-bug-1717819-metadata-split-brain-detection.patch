@@ -1,0 +1,57 @@
+From 7a04fb9999f5d25c17f5593eed5e98d0f5a1932d Mon Sep 17 00:00:00 2001
+From: karthik-us <ksubrahm@redhat.com>
+Date: Mon, 15 Jul 2019 14:30:52 +0530
+Subject: [PATCH 251/255] tests: Fix
+ bug-1717819-metadata-split-brain-detection.t failure
+
+<Backport of: https://review.gluster.org/#/c/glusterfs/+/23043/>
+
+Problem:
+tests/bugs/replicate/bug-1717819-metadata-split-brain-detection.t fails
+intermittently in test cases #49 & #50, which compare the values of the
+user set xattr values after enabling the heal. We are not waiting for
+the heal to complete before comparing those values, which might lead
+those tests to fail.
+
+Fix:
+Wait till the HEAL-TIMEOUT before comparing the xattr values.
+Also cheking for the shd to come up and the bricks to connect to the shd
+process in another case.
+
+Change-Id: I0021c2d5d251111c695e2bf18c63e8189e456114
+fixes: bz#1704562
+Signed-off-by: karthik-us <ksubrahm@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/176071
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ tests/bugs/replicate/bug-1717819-metadata-split-brain-detection.t | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/tests/bugs/replicate/bug-1717819-metadata-split-brain-detection.t b/tests/bugs/replicate/bug-1717819-metadata-split-brain-detection.t
+index 94b8bf3..76d1f21 100644
+--- a/tests/bugs/replicate/bug-1717819-metadata-split-brain-detection.t
++++ b/tests/bugs/replicate/bug-1717819-metadata-split-brain-detection.t
+@@ -76,6 +76,10 @@ EXPECT_WITHIN $HEAL_TIMEOUT "^1$" get_pending_heal_count $V0
+ 
+ # Launch heal
+ TEST $CLI volume heal $V0 enable
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "^Y$" glustershd_up_status
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status_in_shd $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status_in_shd $V0 1
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status_in_shd $V0 2
+ TEST $CLI volume heal $V0
+ EXPECT_WITHIN $HEAL_TIMEOUT "^0$" get_pending_heal_count $V0
+ 
+@@ -117,6 +121,8 @@ EXPECT_WITHIN $PROCESS_UP_TIMEOUT "^Y$" glustershd_up_status
+ EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status_in_shd $V0 0
+ EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status_in_shd $V0 1
+ EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status_in_shd $V0 2
++TEST $CLI volume heal $V0
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" get_pending_heal_count $V0
+ 
+ B0_XATTR=$(getfattr -n 'user.metadata' --absolute-names --only-values $B0/${V0}0/dir/file)
+ B1_XATTR=$(getfattr -n 'user.metadata' --absolute-names --only-values $B0/${V0}1/dir/file)
+-- 
+1.8.3.1
+

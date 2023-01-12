@@ -1,0 +1,70 @@
+From 36180d21dc4b16619b75d65d51eaf37df4e0e2d3 Mon Sep 17 00:00:00 2001
+From: Sunny Kumar <sunkumar@redhat.com>
+Date: Mon, 20 Apr 2020 12:15:42 +0100
+Subject: [PATCH 365/367] build: geo-rep requires relevant selinux permission
+ for rsync
+
+If selinux is set in enforcing mode geo-rep goes into faulty state.
+
+To avoid this from happening some relevant selinux booleans need to be set
+in 'on' state to allow rsync operation.
+
+Backport of:
+   >Upstream Patch: https://review.gluster.org/#/c/glusterfs/+/24348.
+   >Change-Id: Ia8ce530d6548c2a545f4c99c600f5aac2bbb3363
+   >Fixes: #1182
+   >Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+
+BUG: 1813917
+Change-Id: Ia8ce530d6548c2a545f4c99c600f5aac2bbb3363
+Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/198599
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfs.spec.in | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 7c8a751..5ed07e7 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -130,6 +130,12 @@
+ ## All %%global definitions should be placed here and keep them sorted
+ ##
+ 
++# selinux booleans whose defalut value needs modification
++# these booleans will be consumed by "%%selinux_set_booleans" macro.
++%if ( 0%{?rhel} && 0%{?rhel} >= 8 )
++%global selinuxbooleans rsync_full_access=1 rsync_client=1
++%endif
++
+ %if ( 0%{?fedora} ) || ( 0%{?rhel} && 0%{?rhel} > 6 )
+ %global _with_systemd true
+ %endif
+@@ -515,6 +521,12 @@ Requires:         python%{_pythonver}-gluster = %{version}-%{release}
+ Requires:         rsync
+ Requires:         util-linux
+ Requires:         %{name}-libs%{?_isa} = %{version}-%{release}
++# required for setting selinux bools
++%if ( 0%{?rhel} && 0%{?rhel} >= 8 )
++Requires:            selinux-policy-targeted
++Requires(post):      selinux-policy-targeted
++BuildRequires:       selinux-policy-devel
++%endif
+ 
+ %description geo-replication
+ GlusterFS is a distributed file-system capable of scaling to several
+@@ -941,6 +953,9 @@ exit 0
+ 
+ %if ( 0%{!?_without_georeplication:1} )
+ %post geo-replication
++%if ( 0%{?rhel} && 0%{?rhel} >= 8 )
++%selinux_set_booleans %{selinuxbooleans}
++%endif
+ if [ $1 -ge 1 ]; then
+     %systemd_postun_with_restart glusterd
+ fi
+-- 
+1.8.3.1
+

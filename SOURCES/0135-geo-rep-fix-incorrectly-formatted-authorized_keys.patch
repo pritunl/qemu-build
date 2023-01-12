@@ -1,0 +1,56 @@
+From 677f575d2289285d2e553ddd610944856cb947db Mon Sep 17 00:00:00 2001
+From: Sunny Kumar <sunkumar@redhat.com>
+Date: Fri, 10 May 2019 11:21:03 +0530
+Subject: [PATCH 135/141] geo-rep: fix incorrectly formatted authorized_keys
+
+There are two ways for creating secret pem pub file during geo-rep
+setup.
+1. gluster-georep-sshkey generate
+2. gluster system:: execute gsec_create
+
+Below patch solves this problem for `gluster-georep-sshkey generate`
+method.
+Patch link: https://review.gluster.org/#/c/glusterfs/+/22246/
+
+This patch is added to support old way of creating secret pem pub file
+`gluster system:: execute gsec_create`.
+
+Problem:  While Geo-rep setup when creating an ssh authorized_keys
+          the geo-rep setup inserts an extra space before the "ssh-rsa" label.
+          This gets flagged by an enterprise customer's security scan as a
+          security violation.
+Solution: Remove extra space while creating secret key.
+
+Upstream Patch: https://review.gluster.org/#/c/glusterfs/+/22673/
+
+>fixes: bz#1679401
+>Change-Id: I92ba7e25aaa5123dae9ebe2f3c68d14315aa5f0e
+>Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+
+BUG: 1671862
+Change-Id: I11e90c00a14a301a5d95e14b5e8984867e6ff893
+Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/169870
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ geo-replication/src/peer_gsec_create.in | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/geo-replication/src/peer_gsec_create.in b/geo-replication/src/peer_gsec_create.in
+index 05c1638..6d4a484 100755
+--- a/geo-replication/src/peer_gsec_create.in
++++ b/geo-replication/src/peer_gsec_create.in
+@@ -18,7 +18,7 @@ if [ "Xcontainer" = "X$1" ]; then
+     output1=`cat "$GLUSTERD_WORKDIR"/geo-replication/secret.pem.pub`
+     output2=`cat "$GLUSTERD_WORKDIR"/geo-replication/tar_ssh.pem.pub`
+ else
+-    output1=`echo command=\"${libexecdir}/glusterfs/gsyncd\" " "``cat "$GLUSTERD_WORKDIR"/geo-replication/secret.pem.pub`
+-    output2=`echo command=\"tar \$\{SSH_ORIGINAL_COMMAND#* \}\" " "``cat "$GLUSTERD_WORKDIR"/geo-replication/tar_ssh.pem.pub`
++    output1=`echo command=\"${libexecdir}/glusterfs/gsyncd\" ""``cat "$GLUSTERD_WORKDIR"/geo-replication/secret.pem.pub`
++    output2=`echo command=\"tar \$\{SSH_ORIGINAL_COMMAND#* \}\" ""``cat "$GLUSTERD_WORKDIR"/geo-replication/tar_ssh.pem.pub`
+ fi
+ echo -e "$output1\n$output2"
+-- 
+1.8.3.1
+

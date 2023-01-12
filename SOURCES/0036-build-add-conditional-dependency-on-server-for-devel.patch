@@ -1,0 +1,47 @@
+From d6458c40706d8886187bd9c2016087a3a1eee882 Mon Sep 17 00:00:00 2001
+From: Milind Changire <mchangir@redhat.com>
+Date: Wed, 19 Dec 2018 13:17:42 +0530
+Subject: [PATCH 36/52] build: add conditional dependency on server for devel
+
+Add conditional depedency on server for glusterfs-devel
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Icc45df3db137dbc03d240c1ac774b5c8735c5f2f
+Signed-off-by: Milind Changire <mchangir@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/159030
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfs.spec.in | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 9cd4372..9db5a34 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -394,7 +394,9 @@ Requires:         %{name}%{?_isa} = %{version}-%{release}
+ Requires:         %{name}-extra-xlators%{?_isa} = %{version}-%{release}
+ %endif
+ Requires:         %{name}-libs%{?_isa} = %{version}-%{release}
++%if ( 0%{!?_without_server:1} )
+ Requires:         %{name}-server%{?_isa} = %{version}-%{release}
++%endif
+ 
+ %description devel
+ GlusterFS is a distributed file-system capable of scaling to several
+@@ -2067,6 +2069,11 @@ fi
+ * Thu Feb 21 2019 Jiffin Tony Thottan <jthottan@redhat.com>
+ - Obsoleting gluster-gnfs package
+ 
++* Wed Dec 19 2018 Milind Changire <mchangir@redhat.com>
++- Add explicit package dependencies (#1656357)
++- Remove absolute paths from spec file (#1350745)
++- Do not package crypt.so for FIPS compliance (#1653224)
++
+ * Wed Nov 28 2018 Krutika Dhananjay <kdhananj@redhat.com>
+ - Install /var/lib/glusterd/groups/distributed-virt by default
+ 
+-- 
+1.8.3.1
+

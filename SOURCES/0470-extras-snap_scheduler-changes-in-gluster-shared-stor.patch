@@ -1,0 +1,63 @@
+From 8e427716f4e2855093b1a1a0e3a9ec79ebac7faf Mon Sep 17 00:00:00 2001
+From: Shwetha K Acharya <sacharya@redhat.com>
+Date: Thu, 10 Sep 2020 13:49:09 +0530
+Subject: [PATCH 470/473] extras/snap_scheduler: changes in
+ gluster-shared-storage mount path
+
+The patch https://review.gluster.org/#/c/glusterfs/+/24934/, changes mount point
+of gluster_shared_storage from /var/run to /run to address the issue of symlink
+at mount path in fstab.
+NOTE: mount point /var/run is symlink to /run
+
+The required changes with respect to gluster_shared_storage mount path are
+introduced with this patch in snap_scheduler.
+
+>Fixes: #1476
+>Change-Id: I9ce88c2f624c6aa5982de04edfee2d0a9f160d62
+>Signed-off-by: Shwetha K Acharya <sacharya@redhat.com>
+
+backport of https://review.gluster.org/#/c/glusterfs/+/24971/
+BUG: 1873469
+Change-Id: I9ce88c2f624c6aa5982de04edfee2d0a9f160d62
+Signed-off-by: Shwetha K Acharya <sacharya@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/211391
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/snap_scheduler/gcron.py          | 4 ++--
+ extras/snap_scheduler/snap_scheduler.py | 2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/extras/snap_scheduler/gcron.py b/extras/snap_scheduler/gcron.py
+index cc16310..0e4df77 100755
+--- a/extras/snap_scheduler/gcron.py
++++ b/extras/snap_scheduler/gcron.py
+@@ -19,10 +19,10 @@ import logging.handlers
+ import fcntl
+ 
+ 
+-GCRON_TASKS = "/var/run/gluster/shared_storage/snaps/glusterfs_snap_cron_tasks"
++GCRON_TASKS = "/run/gluster/shared_storage/snaps/glusterfs_snap_cron_tasks"
+ GCRON_CROND_TASK = "/etc/cron.d/glusterfs_snap_cron_tasks"
+ GCRON_RELOAD_FLAG = "/var/run/gluster/crond_task_reload_flag"
+-LOCK_FILE_DIR = "/var/run/gluster/shared_storage/snaps/lock_files/"
++LOCK_FILE_DIR = "/run/gluster/shared_storage/snaps/lock_files/"
+ log = logging.getLogger("gcron-logger")
+ start_time = 0.0
+ 
+diff --git a/extras/snap_scheduler/snap_scheduler.py b/extras/snap_scheduler/snap_scheduler.py
+index 5a29d41..e8fcc44 100755
+--- a/extras/snap_scheduler/snap_scheduler.py
++++ b/extras/snap_scheduler/snap_scheduler.py
+@@ -67,7 +67,7 @@ except ImportError:
+ SCRIPT_NAME = "snap_scheduler"
+ scheduler_enabled = False
+ log = logging.getLogger(SCRIPT_NAME)
+-SHARED_STORAGE_DIR="/var/run/gluster/shared_storage"
++SHARED_STORAGE_DIR="/run/gluster/shared_storage"
+ GCRON_DISABLED = SHARED_STORAGE_DIR+"/snaps/gcron_disabled"
+ GCRON_ENABLED = SHARED_STORAGE_DIR+"/snaps/gcron_enabled"
+ GCRON_TASKS = SHARED_STORAGE_DIR+"/snaps/glusterfs_snap_cron_tasks"
+-- 
+1.8.3.1
+

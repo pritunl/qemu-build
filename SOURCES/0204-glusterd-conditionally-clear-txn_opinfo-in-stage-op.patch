@@ -1,0 +1,60 @@
+From 4d0b11088c4a3a630d71acf902064d1ed10412e8 Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Tue, 25 Jun 2019 11:11:10 +0530
+Subject: [PATCH 204/221] glusterd: conditionally clear txn_opinfo in stage op
+
+...otherwise this leads to a crash when volume status is run on a
+heterogeneous mode.
+
+> upstream patch : https://review.gluster.org/#/c/glusterfs/+/22939/
+
+>Fixes: bz#1723658
+>Change-Id: I0d39f412b2e5e9d3ef0a3462b90b38bb5364b09d
+>Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+
+BUG: 1722131
+Change-Id: I0d39f412b2e5e9d3ef0a3462b90b38bb5364b09d
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/174566
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-op-sm.c | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-op-sm.c b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+index d0c1a2c..9ea695e 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-op-sm.c
++++ b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+@@ -5714,9 +5714,14 @@ glusterd_op_ac_stage_op(glusterd_op_sm_event_t *event, void *ctx)
+     glusterd_op_info_t txn_op_info = {
+         {0},
+     };
++    glusterd_conf_t *priv = NULL;
+ 
+     this = THIS;
+     GF_ASSERT(this);
++
++    priv = this->private;
++    GF_ASSERT(priv);
++
+     GF_ASSERT(ctx);
+ 
+     req_ctx = ctx;
+@@ -5768,9 +5773,12 @@ out:
+     gf_msg_debug(this->name, 0, "Returning with %d", ret);
+ 
+     /* for no volname transactions, the txn_opinfo needs to be cleaned up
+-     * as there's no unlock event triggered
++     * as there's no unlock event triggered. However if the originator node of
++     * this transaction is still running with a version lower than 60000,
++     * txn_opinfo can't be cleared as that'll lead to a race of referring op_ctx
++     * after it's being freed.
+      */
+-    if (txn_op_info.skip_locking)
++    if (txn_op_info.skip_locking && priv->op_version >= GD_OP_VERSION_6_0)
+         ret = glusterd_clear_txn_opinfo(txn_id);
+ 
+     if (rsp_dict)
+-- 
+1.8.3.1
+

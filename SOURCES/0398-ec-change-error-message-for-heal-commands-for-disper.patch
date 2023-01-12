@@ -1,0 +1,75 @@
+From 03d2c7b52da5efd6ad660315a0548c8b91e51439 Mon Sep 17 00:00:00 2001
+From: Sheetal Pamecha <spamecha@redhat.com>
+Date: Sun, 22 Dec 2019 22:52:30 +0530
+Subject: [PATCH 398/449] ec: change error message for heal commands for
+ disperse volume
+
+Currently when we issue a heal statistics or similar commands
+for disperse volume, it fails with message "Volume is not of
+type replicate." Adding message "this command is supported for
+volumes of type replicate" to reflect supportability and better
+understanding of heal functionality for disperse volumes.
+
+> Upstream Patch Link: https://review.gluster.org/#/c/glusterfs/+/23916/
+> fixes: bz#1785998
+> Change-Id: I9688a9fdf427cb6f657cfd5b8db2f76a6c56f6e2
+> Signed-off-by: Sheetal Pamecha <spamecha@redhat.com>
+
+BUG: 1487177
+Change-Id: I9688a9fdf427cb6f657cfd5b8db2f76a6c56f6e2
+Signed-off-by: Sheetal Pamecha <spamecha@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202344
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ heal/src/glfs-heal.c                            | 15 ++++++++++-----
+ xlators/mgmt/glusterd/src/glusterd-volume-ops.c |  4 +++-
+ 2 files changed, 13 insertions(+), 6 deletions(-)
+
+diff --git a/heal/src/glfs-heal.c b/heal/src/glfs-heal.c
+index 7e37e47..125b12c 100644
+--- a/heal/src/glfs-heal.c
++++ b/heal/src/glfs-heal.c
+@@ -1726,14 +1726,19 @@ main(int argc, char **argv)
+         goto out;
+     }
+ 
++    char *var_str = (heal_op == GF_SHD_OP_INDEX_SUMMARY ||
++                     heal_op == GF_SHD_OP_HEAL_SUMMARY)
++                        ? "replicate/disperse"
++                        : "replicate";
++
+     ret = glfsh_validate_volume(top_subvol, heal_op);
+     if (ret < 0) {
+         ret = -EINVAL;
+-        gf_asprintf(&op_errstr, "Volume %s is not of type %s", volname,
+-                    (heal_op == GF_SHD_OP_INDEX_SUMMARY ||
+-                     heal_op == GF_SHD_OP_HEAL_SUMMARY)
+-                        ? "replicate/disperse"
+-                        : "replicate");
++        gf_asprintf(&op_errstr,
++                    "This command is supported "
++                    "for only volumes of %s type. Volume %s "
++                    "is not of type %s",
++                    var_str, volname, var_str);
+         goto out;
+     }
+     rootloc.inode = inode_ref(top_subvol->itable->root);
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-ops.c b/xlators/mgmt/glusterd/src/glusterd-volume-ops.c
+index 076bc80..93042ab 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-ops.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-ops.c
+@@ -2008,7 +2008,9 @@ glusterd_handle_heal_cmd(xlator_t *this, glusterd_volinfo_t *volinfo,
+             if (!glusterd_is_volume_replicate(volinfo)) {
+                 ret = -1;
+                 snprintf(msg, sizeof(msg),
+-                         "Volume %s is not of type "
++                         "This command is supported "
++                         "for only volume of replicated "
++                         "type. Volume %s is not of type "
+                          "replicate",
+                          volinfo->volname);
+                 *op_errstr = gf_strdup(msg);
+-- 
+1.8.3.1
+

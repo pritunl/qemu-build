@@ -1,0 +1,109 @@
+From 41aae052b5e3afe64d3e0668643726bab0e77265 Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez <xhernandez@redhat.com>
+Date: Fri, 4 Sep 2020 14:49:50 +0200
+Subject: [PATCH 525/526] open-behind: implement create fop
+
+Open behind didn't implement create fop. This caused that files created
+were not accounted for the number of open fd's. This could cause future
+opens to be delayed when they shouldn't.
+
+This patch implements the create fop. It also fixes a problem when
+destroying the stack: when frame->local was not NULL, STACK_DESTROY()
+tried to mem_put() it, which is not correct.
+
+Upstream patch:
+> Upstream-patch-link: https://review.gluster.org/#/c/glusterfs/+/24953
+> Fixes: #1440
+> Change-Id: Ic982bad07d4af30b915d7eb1fbcef7a847a45869
+> Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+
+BUG: 1830713
+Change-Id: Ic982bad07d4af30b915d7eb1fbcef7a847a45869
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/224489
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/performance/open-behind/src/open-behind.c | 52 +++++++++++++++++++++++
+ 1 file changed, 52 insertions(+)
+
+diff --git a/xlators/performance/open-behind/src/open-behind.c b/xlators/performance/open-behind/src/open-behind.c
+index 1ab635e..600c3b6 100644
+--- a/xlators/performance/open-behind/src/open-behind.c
++++ b/xlators/performance/open-behind/src/open-behind.c
+@@ -336,6 +336,7 @@ ob_stub_dispatch(xlator_t *xl, ob_inode_t *ob_inode, fd_t *fd,
+ static void
+ ob_open_destroy(call_stub_t *stub, fd_t *fd)
+ {
++    stub->frame->local = NULL;
+     STACK_DESTROY(stub->frame->root);
+     call_stub_destroy(stub);
+     fd_unref(fd);
+@@ -516,6 +517,56 @@ ob_open(call_frame_t *frame, xlator_t *this, loc_t *loc, int flags, fd_t *fd,
+ }
+ 
+ static int32_t
++ob_create(call_frame_t *frame, xlator_t *this, loc_t *loc, int flags,
++          mode_t mode, mode_t umask, fd_t *fd, dict_t *xdata)
++{
++    ob_inode_t *ob_inode;
++    call_stub_t *stub;
++    fd_t *first_fd;
++    ob_state_t state;
++
++    /* Create requests are never delayed. We always send them synchronously. */
++    state = ob_open_and_resume_fd(this, fd, 1, true, true, &ob_inode,
++                                  &first_fd);
++    if (state == OB_STATE_READY) {
++        /* There's no pending open, but there are other file descriptors opened
++         * so we simply forward the request synchronously. */
++        return default_create(frame, this, loc, flags, mode, umask, fd, xdata);
++    }
++
++    if (state == OB_STATE_OPEN_TRIGGERED) {
++        /* The first open is in progress (either because it was already issued
++         * or because this request triggered it). We try to create a new stub
++         * to retry the operation once the initial open completes. */
++        stub = fop_create_stub(frame, ob_create, loc, flags, mode, umask, fd,
++                               xdata);
++        if (stub != NULL) {
++            return ob_stub_dispatch(this, ob_inode, first_fd, stub);
++        }
++
++        state = -ENOMEM;
++    }
++
++    /* Since we forced a synchronous request, OB_STATE_FIRST_OPEN will never
++     * be returned by ob_open_and_resume_fd(). If we are here it can only be
++     * because there has been a problem. */
++
++    /* In case of failure we need to decrement the number of open files because
++     * ob_fdclose() won't be called. */
++
++    LOCK(&fd->inode->lock);
++    {
++        ob_inode->open_count--;
++    }
++    UNLOCK(&fd->inode->lock);
++
++    gf_smsg(this->name, GF_LOG_ERROR, -state, OPEN_BEHIND_MSG_FAILED, "fop=%s",
++            "create", "path=%s", loc->path, NULL);
++
++    return default_create_failure_cbk(frame, -state);
++}
++
++static int32_t
+ ob_readv(call_frame_t *frame, xlator_t *this, fd_t *fd, size_t size,
+          off_t offset, uint32_t flags, dict_t *xdata)
+ {
+@@ -946,6 +997,7 @@ fini(xlator_t *this)
+ 
+ struct xlator_fops fops = {
+     .open = ob_open,
++    .create = ob_create,
+     .readv = ob_readv,
+     .writev = ob_writev,
+     .flush = ob_flush,
+-- 
+1.8.3.1
+

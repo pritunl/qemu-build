@@ -1,0 +1,187 @@
+From a30a5fdef2e252eba9f44a3c671de8f3aa4f17d7 Mon Sep 17 00:00:00 2001
+From: Vishal Pandey <vpandey@redhat.com>
+Date: Tue, 19 Nov 2019 11:39:22 +0530
+Subject: [PATCH 392/449] glusterd: Brick process fails to come up with
+ brickmux on
+
+Issue:
+1- In a cluster of 3 Nodes N1, N2, N3. Create 3 volumes vol1,
+vol2, vol3 with 3 bricks (one from each node)
+2- Set cluster.brick-multiplex on
+3- Start all 3 volumes
+4- Check if all bricks on a node are running on same port
+5- Kill N1
+6- Set performance.readdir-ahead for volumes vol1, vol2, vol3
+7- Bring N1 up and check volume status
+8- All bricks processes not running on N1.
+
+Root Cause -
+Since, There is a diff in volfile versions in N1 as compared
+to N2 and N3 therefore glusterd_import_friend_volume() is called.
+glusterd_import_friend_volume() copies the new_volinfo and deletes
+old_volinfo and then calls glusterd_start_bricks().
+glusterd_start_bricks() looks for the volfiles and sends an rpc
+request to glusterfs_handle_attach(). Now, since the volinfo
+has been deleted by glusterd_delete_stale_volume()
+from priv->volumes list before glusterd_start_bricks() and
+glusterd_create_volfiles_and_notify_services() and
+glusterd_list_add_order is called after glusterd_start_bricks(),
+therefore the attach RPC req gets an empty volfile path
+and that causes the brick to crash.
+
+Fix- Call glusterd_list_add_order() and
+glusterd_create_volfiles_and_notify_services before
+glusterd_start_bricks() cal is made in glusterd_import_friend_volume
+
+> upstream patch link: https://review.gluster.org/#/c/glusterfs/+/23724/
+> Change-Id: Idfe0e8710f7eb77ca3ddfa1cabeb45b2987f41aa
+> Fixes: bz#1773856
+> Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+
+BUG: 1683602
+Change-Id: Idfe0e8710f7eb77ca3ddfa1cabeb45b2987f41aa
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202255
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ .../glusterd/brick-mux-validation-in-cluster.t     | 61 +++++++++++++++++++++-
+ xlators/mgmt/glusterd/src/glusterd-utils.c         | 28 +++++-----
+ 2 files changed, 75 insertions(+), 14 deletions(-)
+
+diff --git a/tests/bugs/glusterd/brick-mux-validation-in-cluster.t b/tests/bugs/glusterd/brick-mux-validation-in-cluster.t
+index 4e57038..f088dbb 100644
+--- a/tests/bugs/glusterd/brick-mux-validation-in-cluster.t
++++ b/tests/bugs/glusterd/brick-mux-validation-in-cluster.t
+@@ -7,6 +7,20 @@ function count_brick_processes {
+         pgrep glusterfsd | wc -l
+ }
+ 
++function count_brick_pids {
++        $CLI_1 --xml volume status all | sed -n '/.*<pid>\([^<]*\).*/s//\1/p' \
++                                     | grep -v "N/A" | sort | uniq | wc -l
++}
++
++function count_N/A_brick_pids {
++        $CLI_1 --xml volume status all | sed -n '/.*<pid>\([^<]*\).*/s//\1/p' \
++                                     | grep -- '\-1' | sort | uniq | wc -l
++}
++
++function check_peers {
++        $CLI_2 peer status | grep 'Peer in Cluster (Connected)' | wc -l
++}
++
+ cleanup;
+ 
+ TEST launch_cluster 3
+@@ -48,4 +62,49 @@ TEST $CLI_1 volume stop $V1
+ 
+ EXPECT 3 count_brick_processes
+ 
+-cleanup
++TEST $CLI_1 volume stop $META_VOL
++
++TEST $CLI_1 volume delete $META_VOL
++TEST $CLI_1 volume delete $V0
++TEST $CLI_1 volume delete $V1
++
++#bug-1773856 - Brick process fails to come up with brickmux on
++
++TEST $CLI_1 volume create $V0 $H1:$B1/${V0}1 $H2:$B2/${V0}1 $H3:$B3/${V0}1 force
++TEST $CLI_1 volume start $V0
++
++
++EXPECT 3 count_brick_processes
++
++#create and start a new volume
++TEST $CLI_1 volume create $V1 $H1:$B1/${V1}2 $H2:$B2/${V1}2 $H3:$B3/${V1}2 force
++TEST $CLI_1 volume start $V1
++
++EXPECT 3 count_brick_processes
++
++V2=patchy2
++TEST $CLI_1 volume create $V2 $H1:$B1/${V2}3 $H2:$B2/${V2}3 $H3:$B3/${V2}3 force
++TEST $CLI_1 volume start $V2
++
++EXPECT 3 count_brick_processes
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 3 count_brick_pids
++
++TEST kill_node 1
++
++sleep 10
++
++EXPECT_WITHIN $PROBE_TIMEOUT 1 check_peers;
++
++$CLI_2 volume set $V0 performance.readdir-ahead on
++$CLI_2 volume set $V1 performance.readdir-ahead on
++
++TEST $glusterd_1;
++
++sleep 10
++
++EXPECT 4 count_brick_processes
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 4 count_brick_pids
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 0  count_N/A_brick_pids
++
++cleanup;
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index 6654741..1b78812 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -4988,16 +4988,6 @@ glusterd_import_friend_volume(dict_t *peer_data, int count)
+         glusterd_volinfo_unref(old_volinfo);
+     }
+ 
+-    if (glusterd_is_volume_started(new_volinfo)) {
+-        (void)glusterd_start_bricks(new_volinfo);
+-        if (glusterd_is_snapd_enabled(new_volinfo)) {
+-            svc = &(new_volinfo->snapd.svc);
+-            if (svc->manager(svc, new_volinfo, PROC_START_NO_WAIT)) {
+-                gf_event(EVENT_SVC_MANAGER_FAILED, "svc_name=%s", svc->name);
+-            }
+-        }
+-    }
+-
+     ret = glusterd_store_volinfo(new_volinfo, GLUSTERD_VOLINFO_VER_AC_NONE);
+     if (ret) {
+         gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_VOLINFO_STORE_FAIL,
+@@ -5007,19 +4997,31 @@ glusterd_import_friend_volume(dict_t *peer_data, int count)
+         goto out;
+     }
+ 
+-    ret = glusterd_create_volfiles_and_notify_services(new_volinfo);
++    ret = glusterd_create_volfiles(new_volinfo);
+     if (ret)
+         goto out;
+ 
++    glusterd_list_add_order(&new_volinfo->vol_list, &priv->volumes,
++                            glusterd_compare_volume_name);
++
++    if (glusterd_is_volume_started(new_volinfo)) {
++        (void)glusterd_start_bricks(new_volinfo);
++        if (glusterd_is_snapd_enabled(new_volinfo)) {
++            svc = &(new_volinfo->snapd.svc);
++            if (svc->manager(svc, new_volinfo, PROC_START_NO_WAIT)) {
++                gf_event(EVENT_SVC_MANAGER_FAILED, "svc_name=%s", svc->name);
++            }
++        }
++    }
++
+     ret = glusterd_import_quota_conf(peer_data, count, new_volinfo, "volume");
+     if (ret) {
+         gf_event(EVENT_IMPORT_QUOTA_CONF_FAILED, "volume=%s",
+                  new_volinfo->volname);
+         goto out;
+     }
+-    glusterd_list_add_order(&new_volinfo->vol_list, &priv->volumes,
+-                            glusterd_compare_volume_name);
+ 
++    ret = glusterd_fetchspec_notify(this);
+ out:
+     gf_msg_debug("glusterd", 0, "Returning with ret: %d", ret);
+     return ret;
+-- 
+1.8.3.1
+

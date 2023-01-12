@@ -1,0 +1,359 @@
+From 51090a4b3cb000d601083f12d1875547819fc03f Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Wed, 4 Mar 2020 09:17:26 +0530
+Subject: [PATCH 447/449] core[brick_mux]: brick crashed when creating and
+ deleting volumes over time
+
+Problem: In brick_mux environment, while volumes are created/stopped in a loop
+         after running a long time the main brick is crashed.The brick is crashed
+         because the main brick process was not cleaned up memory for all objects
+         at the time of detaching a volume.
+         Below are the objects that are missed at the time of detaching a volume
+         1) xlator object for a brick graph
+         2) local_pool for posix_lock xlator
+         3) rpc object cleanup at quota xlator
+         4) inode leak at brick xlator
+
+Solution: To avoid the crash resolve all leak at the time of detaching a brick
+> Change-Id: Ibb6e46c5fba22b9441a88cbaf6b3278823235913
+> updates: #977
+> Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+> (Cherry pick from commit e589d8de66d3325da8fbbbe44d1a5bd6335e08ab)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/24209/)
+
+BUG: 1790336
+Change-Id: Ibb6e46c5fba22b9441a88cbaf6b3278823235913
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202782
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Xavi Hernandez Juan <xhernandez@redhat.com>
+---
+ libglusterfs/src/glusterfs/glusterfs.h             |  1 +
+ libglusterfs/src/graph.c                           |  1 +
+ libglusterfs/src/graph.y                           |  2 +-
+ libglusterfs/src/xlator.c                          | 29 ++++++++----
+ xlators/features/changelog/src/changelog.c         |  1 +
+ xlators/features/locks/src/posix.c                 |  4 ++
+ xlators/features/quota/src/quota-enforcer-client.c | 14 +++++-
+ xlators/features/quota/src/quota.c                 | 54 ++++++++++++++++++++--
+ xlators/features/quota/src/quota.h                 |  3 ++
+ xlators/protocol/server/src/server.c               | 12 +++--
+ 10 files changed, 103 insertions(+), 18 deletions(-)
+
+diff --git a/libglusterfs/src/glusterfs/glusterfs.h b/libglusterfs/src/glusterfs/glusterfs.h
+index 177a020..584846e 100644
+--- a/libglusterfs/src/glusterfs/glusterfs.h
++++ b/libglusterfs/src/glusterfs/glusterfs.h
+@@ -603,6 +603,7 @@ struct _glusterfs_graph {
+     int used; /* Should be set when fuse gets
+                         first CHILD_UP */
+     uint32_t volfile_checksum;
++    pthread_mutex_t mutex;
+ };
+ typedef struct _glusterfs_graph glusterfs_graph_t;
+ 
+diff --git a/libglusterfs/src/graph.c b/libglusterfs/src/graph.c
+index bb5e67a..1cd92db 100644
+--- a/libglusterfs/src/graph.c
++++ b/libglusterfs/src/graph.c
+@@ -1092,6 +1092,7 @@ glusterfs_graph_destroy_residual(glusterfs_graph_t *graph)
+     ret = xlator_tree_free_memacct(graph->first);
+ 
+     list_del_init(&graph->list);
++    pthread_mutex_destroy(&graph->mutex);
+     GF_FREE(graph);
+ 
+     return ret;
+diff --git a/libglusterfs/src/graph.y b/libglusterfs/src/graph.y
+index 5b92985..5733515 100644
+--- a/libglusterfs/src/graph.y
++++ b/libglusterfs/src/graph.y
+@@ -541,7 +541,7 @@ glusterfs_graph_new ()
+                 return NULL;
+ 
+         INIT_LIST_HEAD (&graph->list);
+-
++        pthread_mutex_init(&graph->mutex, NULL);
+         gettimeofday (&graph->dob, NULL);
+ 
+         return graph;
+diff --git a/libglusterfs/src/xlator.c b/libglusterfs/src/xlator.c
+index 108b96a..36cc32c 100644
+--- a/libglusterfs/src/xlator.c
++++ b/libglusterfs/src/xlator.c
+@@ -938,6 +938,8 @@ xlator_mem_cleanup(xlator_t *this)
+     xlator_list_t **trav_p = NULL;
+     xlator_t *top = NULL;
+     xlator_t *victim = NULL;
++    glusterfs_graph_t *graph = NULL;
++    gf_boolean_t graph_cleanup = _gf_false;
+ 
+     if (this->call_cleanup || !this->ctx)
+         return;
+@@ -945,6 +947,12 @@ xlator_mem_cleanup(xlator_t *this)
+     this->call_cleanup = 1;
+     ctx = this->ctx;
+ 
++    inode_table = this->itable;
++    if (inode_table) {
++        inode_table_destroy(inode_table);
++        this->itable = NULL;
++    }
++
+     xlator_call_fini(trav);
+ 
+     while (prev) {
+@@ -953,12 +961,6 @@ xlator_mem_cleanup(xlator_t *this)
+         prev = trav;
+     }
+ 
+-    inode_table = this->itable;
+-    if (inode_table) {
+-        inode_table_destroy(inode_table);
+-        this->itable = NULL;
+-    }
+-
+     if (this->fini) {
+         this->fini(this);
+     }
+@@ -968,17 +970,28 @@ xlator_mem_cleanup(xlator_t *this)
+     if (ctx->active) {
+         top = ctx->active->first;
+         LOCK(&ctx->volfile_lock);
+-        /* TODO here we have leak for xlator node in a graph */
+-        /* Need to move only top xlator from a graph */
+         for (trav_p = &top->children; *trav_p; trav_p = &(*trav_p)->next) {
+             victim = (*trav_p)->xlator;
+             if (victim->call_cleanup && !strcmp(victim->name, this->name)) {
++                graph_cleanup = _gf_true;
+                 (*trav_p) = (*trav_p)->next;
+                 break;
+             }
+         }
+         UNLOCK(&ctx->volfile_lock);
+     }
++
++    if (graph_cleanup) {
++        prev = this;
++        graph = ctx->active;
++        pthread_mutex_lock(&graph->mutex);
++        while (prev) {
++            trav = prev->next;
++            GF_FREE(prev);
++            prev = trav;
++        }
++        pthread_mutex_unlock(&graph->mutex);
++    }
+ }
+ 
+ void
+diff --git a/xlators/features/changelog/src/changelog.c b/xlators/features/changelog/src/changelog.c
+index ff06c09..b54112c 100644
+--- a/xlators/features/changelog/src/changelog.c
++++ b/xlators/features/changelog/src/changelog.c
+@@ -2872,6 +2872,7 @@ fini(xlator_t *this)
+         if (priv->active || priv->rpc_active) {
+             /* terminate RPC server/threads */
+             changelog_cleanup_rpc(this, priv);
++            GF_FREE(priv->ev_dispatcher);
+         }
+         /* call barrier_disable to cancel timer */
+         if (priv->barrier_enabled)
+diff --git a/xlators/features/locks/src/posix.c b/xlators/features/locks/src/posix.c
+index 9a14c64..50f1265 100644
+--- a/xlators/features/locks/src/posix.c
++++ b/xlators/features/locks/src/posix.c
+@@ -4102,6 +4102,10 @@ fini(xlator_t *this)
+     if (!priv)
+         return;
+     this->private = NULL;
++    if (this->local_pool) {
++        mem_pool_destroy(this->local_pool);
++        this->local_pool = NULL;
++    }
+     GF_FREE(priv->brickname);
+     GF_FREE(priv);
+ 
+diff --git a/xlators/features/quota/src/quota-enforcer-client.c b/xlators/features/quota/src/quota-enforcer-client.c
+index 1a4c2e3..097439d 100644
+--- a/xlators/features/quota/src/quota-enforcer-client.c
++++ b/xlators/features/quota/src/quota-enforcer-client.c
+@@ -362,16 +362,28 @@ quota_enforcer_notify(struct rpc_clnt *rpc, void *mydata,
+ {
+     xlator_t *this = NULL;
+     int ret = 0;
++    quota_priv_t *priv = NULL;
+ 
+     this = mydata;
+-
++    priv = this->private;
+     switch (event) {
+         case RPC_CLNT_CONNECT: {
++            pthread_mutex_lock(&priv->conn_mutex);
++            {
++                priv->conn_status = _gf_true;
++            }
++            pthread_mutex_unlock(&priv->conn_mutex);
+             gf_msg_trace(this->name, 0, "got RPC_CLNT_CONNECT");
+             break;
+         }
+ 
+         case RPC_CLNT_DISCONNECT: {
++            pthread_mutex_lock(&priv->conn_mutex);
++            {
++                priv->conn_status = _gf_false;
++                pthread_cond_signal(&priv->conn_cond);
++            }
++            pthread_mutex_unlock(&priv->conn_mutex);
+             gf_msg_trace(this->name, 0, "got RPC_CLNT_DISCONNECT");
+             break;
+         }
+diff --git a/xlators/features/quota/src/quota.c b/xlators/features/quota/src/quota.c
+index a0c236d..d1123ce 100644
+--- a/xlators/features/quota/src/quota.c
++++ b/xlators/features/quota/src/quota.c
+@@ -5014,6 +5014,43 @@ quota_forget(xlator_t *this, inode_t *inode)
+     return 0;
+ }
+ 
++int
++notify(xlator_t *this, int event, void *data, ...)
++{
++    quota_priv_t *priv = NULL;
++    int ret = 0;
++    rpc_clnt_t *rpc = NULL;
++    gf_boolean_t conn_status = _gf_true;
++    xlator_t *victim = data;
++
++    priv = this->private;
++    if (!priv || !priv->is_quota_on)
++        goto out;
++
++    if (event == GF_EVENT_PARENT_DOWN) {
++        rpc = priv->rpc_clnt;
++        if (rpc) {
++            rpc_clnt_disable(rpc);
++            pthread_mutex_lock(&priv->conn_mutex);
++            {
++                conn_status = priv->conn_status;
++                while (conn_status) {
++                    (void)pthread_cond_wait(&priv->conn_cond,
++                                            &priv->conn_mutex);
++                    conn_status = priv->conn_status;
++                }
++            }
++            pthread_mutex_unlock(&priv->conn_mutex);
++            gf_log(this->name, GF_LOG_INFO,
++                   "Notify GF_EVENT_PARENT_DOWN for brick %s", victim->name);
++        }
++    }
++
++out:
++    ret = default_notify(this, event, data);
++    return ret;
++}
++
+ int32_t
+ init(xlator_t *this)
+ {
+@@ -5056,6 +5093,10 @@ init(xlator_t *this)
+         goto err;
+     }
+ 
++    pthread_mutex_init(&priv->conn_mutex, NULL);
++    pthread_cond_init(&priv->conn_cond, NULL);
++    priv->conn_status = _gf_false;
++
+     if (priv->is_quota_on) {
+         rpc = quota_enforcer_init(this, this->options);
+         if (rpc == NULL) {
+@@ -5169,20 +5210,22 @@ fini(xlator_t *this)
+ {
+     quota_priv_t *priv = NULL;
+     rpc_clnt_t *rpc = NULL;
+-    int i = 0, cnt = 0;
+ 
+     priv = this->private;
+     if (!priv)
+         return;
+     rpc = priv->rpc_clnt;
+     priv->rpc_clnt = NULL;
+-    this->private = NULL;
+     if (rpc) {
+-        cnt = GF_ATOMIC_GET(rpc->refcount);
+-        for (i = 0; i < cnt; i++)
+-            rpc_clnt_unref(rpc);
++        rpc_clnt_connection_cleanup(&rpc->conn);
++        rpc_clnt_unref(rpc);
+     }
++
++    this->private = NULL;
+     LOCK_DESTROY(&priv->lock);
++    pthread_mutex_destroy(&priv->conn_mutex);
++    pthread_cond_destroy(&priv->conn_cond);
++
+     GF_FREE(priv);
+     if (this->local_pool) {
+         mem_pool_destroy(this->local_pool);
+@@ -5314,6 +5357,7 @@ struct volume_options options[] = {
+ xlator_api_t xlator_api = {
+     .init = init,
+     .fini = fini,
++    .notify = notify,
+     .reconfigure = reconfigure,
+     .mem_acct_init = mem_acct_init,
+     .op_version = {1}, /* Present from the initial version */
+diff --git a/xlators/features/quota/src/quota.h b/xlators/features/quota/src/quota.h
+index a5a99ca..e51ffd4 100644
+--- a/xlators/features/quota/src/quota.h
++++ b/xlators/features/quota/src/quota.h
+@@ -217,6 +217,9 @@ struct quota_priv {
+     char *volume_uuid;
+     uint64_t validation_count;
+     int32_t quotad_conn_status;
++    pthread_mutex_t conn_mutex;
++    pthread_cond_t conn_cond;
++    gf_boolean_t conn_status;
+ };
+ typedef struct quota_priv quota_priv_t;
+ 
+diff --git a/xlators/protocol/server/src/server.c b/xlators/protocol/server/src/server.c
+index a5f09fe..54d9c0f 100644
+--- a/xlators/protocol/server/src/server.c
++++ b/xlators/protocol/server/src/server.c
+@@ -409,7 +409,13 @@ server_call_xlator_mem_cleanup(xlator_t *this, char *victim_name)
+ 
+     arg = calloc(1, sizeof(*arg));
+     arg->this = this;
+-    arg->victim_name = gf_strdup(victim_name);
++    arg->victim_name = strdup(victim_name);
++    if (!arg->victim_name) {
++        gf_smsg(this->name, GF_LOG_CRITICAL, ENOMEM, LG_MSG_NO_MEMORY,
++                "Memory allocation is failed");
++        return;
++    }
++
+     th_ret = gf_thread_create_detached(&th_id, server_graph_janitor_threads,
+                                        arg, "graphjanitor");
+     if (th_ret) {
+@@ -417,7 +423,7 @@ server_call_xlator_mem_cleanup(xlator_t *this, char *victim_name)
+                "graph janitor Thread"
+                " creation is failed for brick %s",
+                victim_name);
+-        GF_FREE(arg->victim_name);
++        free(arg->victim_name);
+         free(arg);
+     }
+ }
+@@ -628,7 +634,7 @@ server_graph_janitor_threads(void *data)
+     }
+ 
+ out:
+-    GF_FREE(arg->victim_name);
++    free(arg->victim_name);
+     free(arg);
+     return NULL;
+ }
+-- 
+1.8.3.1
+

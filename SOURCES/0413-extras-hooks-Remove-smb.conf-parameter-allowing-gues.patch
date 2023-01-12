@@ -1,0 +1,46 @@
+From aec3dd00fa76547316fddd07e6ded428d945986c Mon Sep 17 00:00:00 2001
+From: Anoop C S <anoopcs@redhat.com>
+Date: Fri, 22 Nov 2019 17:36:55 +0530
+Subject: [PATCH 413/449] extras/hooks: Remove smb.conf parameter allowing
+ guest access
+
+Backport of https://review.gluster.org/23745
+
+Change-Id: I88f494f16153d27ab6e2f2faf4d557e075671b10
+BUG: 1775637
+Signed-off-by: Anoop C S <anoopcs@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202473
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/hook-scripts/set/post/S30samba-set.sh     | 1 -
+ extras/hook-scripts/start/post/S30samba-start.sh | 1 -
+ 2 files changed, 2 deletions(-)
+
+diff --git a/extras/hook-scripts/set/post/S30samba-set.sh b/extras/hook-scripts/set/post/S30samba-set.sh
+index e73f00f..854f131 100755
+--- a/extras/hook-scripts/set/post/S30samba-set.sh
++++ b/extras/hook-scripts/set/post/S30samba-set.sh
+@@ -89,7 +89,6 @@ function add_samba_share () {
+         STRING+="glusterfs:loglevel = 7\n"
+         STRING+="path = /\n"
+         STRING+="read only = no\n"
+-        STRING+="guest ok = yes\n"
+         STRING+="kernel share modes = no\n"
+         printf "$STRING"  >> ${CONFIGFILE}
+ }
+diff --git a/extras/hook-scripts/start/post/S30samba-start.sh b/extras/hook-scripts/start/post/S30samba-start.sh
+index 0d5a5ed..cac0cbf 100755
+--- a/extras/hook-scripts/start/post/S30samba-start.sh
++++ b/extras/hook-scripts/start/post/S30samba-start.sh
+@@ -88,7 +88,6 @@ function add_samba_share () {
+         STRING+="glusterfs:loglevel = 7\n"
+         STRING+="path = /\n"
+         STRING+="read only = no\n"
+-        STRING+="guest ok = yes\n"
+         STRING+="kernel share modes = no\n"
+         printf "$STRING"  >> "${CONFIGFILE}"
+ }
+-- 
+1.8.3.1
+

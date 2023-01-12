@@ -1,0 +1,255 @@
+From 29ec87484b1ee3ad6417c37726db8aa9296f3a83 Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Wed, 8 May 2019 11:26:06 +0530
+Subject: [PATCH 163/169] geo-rep: Fix sync hang with tarssh
+
+Problem:
+Geo-rep sync hangs when tarssh is used as sync
+engine at heavy workload.
+
+Analysis and Root cause:
+It's found out that the tar process was hung.
+When debugged further, it's found out that stderr
+buffer of tar process on master was full i.e., 64k.
+When the buffer was copied to a file from /proc/pid/fd/2,
+the hang is resolved.
+
+This can happen when files picked by tar process
+to sync doesn't exist on master anymore. If this count
+increases around 1k, the stderr buffer is filled up.
+
+Fix:
+The tar process is executed using Popen with stderr as PIPE.
+The final execution is something like below.
+
+tar | ssh <args> root@slave tar --overwrite -xf - -C <path>
+
+It was waiting on ssh process first using communicate() and then tar.
+Note that communicate() reads stdout and stderr. So when stderr of tar
+process is filled up, there is no one to read until untar via ssh is
+completed. This can't happen and leads to deadlock.
+Hence we should be waiting on both process parallely, so that stderr is
+read on both processes.
+
+Backport of:
+ > Patch: https://review.gluster.org/22684
+ > Change-Id: I609c7cc5c07e210c504771115b4d551a2e891adf
+ > BUG: 1707728
+ > Signed-off-by: Kotresh HR <khiremat@redhat.com>
+
+Change-Id: I609c7cc5c07e210c504771115b4d551a2e891adf
+fixes: bz#1708116
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172395
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ geo-replication/syncdaemon/resource.py |  22 ++++--
+ tests/00-geo-rep/georep-stderr-hang.t  | 128 +++++++++++++++++++++++++++++++++
+ tests/geo-rep.rc                       |  17 +++++
+ 3 files changed, 163 insertions(+), 4 deletions(-)
+ create mode 100644 tests/00-geo-rep/georep-stderr-hang.t
+
+diff --git a/geo-replication/syncdaemon/resource.py b/geo-replication/syncdaemon/resource.py
+index 522279b..b16db60 100644
+--- a/geo-replication/syncdaemon/resource.py
++++ b/geo-replication/syncdaemon/resource.py
+@@ -1540,15 +1540,29 @@ class SSH(object):
+ 
+         p0.stdin.close()
+         p0.stdout.close()  # Allow p0 to receive a SIGPIPE if p1 exits.
+-        # wait for tar to terminate, collecting any errors, further
+-        # waiting for transfer to complete
+-        _, stderr1 = p1.communicate()
+ 
+         # stdin and stdout of p0 is already closed, Reset to None and
+         # wait for child process to complete
+         p0.stdin = None
+         p0.stdout = None
+-        p0.communicate()
++
++        def wait_for_tar(p0):
++            _, stderr = p0.communicate()
++            if log_err:
++                for errline in stderr.strip().split("\n")[:-1]:
++                    if "No such file or directory" not in errline:
++                        logging.error(lf("SYNC Error",
++                                         sync_engine="Tarssh",
++                                         error=errline))
++
++        t = syncdutils.Thread(target=wait_for_tar, args=(p0, ))
++        # wait for tar to terminate, collecting any errors, further
++        # waiting for transfer to complete
++        t.start()
++
++        # wait for ssh process
++        _, stderr1 = p1.communicate()
++        t.join()
+ 
+         if log_err:
+             for errline in stderr1.strip().split("\n")[:-1]:
+diff --git a/tests/00-geo-rep/georep-stderr-hang.t b/tests/00-geo-rep/georep-stderr-hang.t
+new file mode 100644
+index 0000000..496f0e6
+--- /dev/null
++++ b/tests/00-geo-rep/georep-stderr-hang.t
+@@ -0,0 +1,128 @@
++#!/bin/bash
++
++. $(dirname $0)/../include.rc
++. $(dirname $0)/../volume.rc
++. $(dirname $0)/../geo-rep.rc
++. $(dirname $0)/../env.rc
++
++SCRIPT_TIMEOUT=500
++
++AREQUAL_PATH=$(dirname $0)/../utils
++test "`uname -s`" != "Linux" && {
++    CFLAGS="$CFLAGS -lintl";
++}
++build_tester $AREQUAL_PATH/arequal-checksum.c $CFLAGS
++
++### Basic Tests with Distribute Replicate volumes
++
++##Cleanup and start glusterd
++cleanup;
++TEST glusterd;
++TEST pidof glusterd
++
++
++##Variables
++GEOREP_CLI="$CLI volume geo-replication"
++master=$GMV0
++SH0="127.0.0.1"
++slave=${SH0}::${GSV0}
++num_active=2
++num_passive=2
++master_mnt=$M0
++slave_mnt=$M1
++
++############################################################
++#SETUP VOLUMES AND GEO-REPLICATION
++############################################################
++
++##create_and_start_master_volume
++TEST $CLI volume create $GMV0 $H0:$B0/${GMV0}1;
++TEST $CLI volume start $GMV0
++
++##create_and_start_slave_volume
++TEST $CLI volume create $GSV0 $H0:$B0/${GSV0}1;
++TEST $CLI volume start $GSV0
++TEST $CLI volume set $GSV0 performance.stat-prefetch off
++TEST $CLI volume set $GSV0 performance.quick-read off
++TEST $CLI volume set $GSV0 performance.readdir-ahead off
++TEST $CLI volume set $GSV0 performance.read-ahead off
++
++##Mount master
++TEST glusterfs -s $H0 --volfile-id $GMV0 $M0
++
++##Mount slave
++TEST glusterfs -s $H0 --volfile-id $GSV0 $M1
++
++############################################################
++#BASIC GEO-REPLICATION TESTS
++############################################################
++
++TEST create_georep_session $master $slave
++EXPECT_WITHIN $GEO_REP_TIMEOUT 1 check_status_num_rows "Created"
++
++#Config gluster-command-dir
++TEST $GEOREP_CLI $master $slave config gluster-command-dir ${GLUSTER_CMD_DIR}
++
++#Config gluster-command-dir
++TEST $GEOREP_CLI $master $slave config slave-gluster-command-dir ${GLUSTER_CMD_DIR}
++
++#Set changelog roll-over time to 45 secs
++TEST $CLI volume set $GMV0 changelog.rollover-time 45
++
++#Wait for common secret pem file to be created
++EXPECT_WITHIN $GEO_REP_TIMEOUT  0 check_common_secret_file
++
++#Verify the keys are distributed
++EXPECT_WITHIN $GEO_REP_TIMEOUT  0 check_keys_distributed
++
++#Set sync-jobs to 1
++TEST $GEOREP_CLI $master $slave config sync-jobs 1
++
++#Start_georep
++TEST $GEOREP_CLI $master $slave start
++
++touch $M0
++EXPECT_WITHIN $GEO_REP_TIMEOUT  1 check_status_num_rows "Active"
++EXPECT_WITHIN $GEO_REP_TIMEOUT  1 check_status_num_rows "Changelog Crawl"
++
++#Check History Crawl.
++TEST $GEOREP_CLI $master $slave stop
++TEST create_data_hang "rsync_hang"
++TEST create_data "history_rsync"
++TEST $GEOREP_CLI $master $slave start
++EXPECT_WITHIN $GEO_REP_TIMEOUT  1 check_status_num_rows "Active"
++
++#Verify arequal for whole volume
++EXPECT_WITHIN $GEO_REP_TIMEOUT "x0" arequal_checksum ${master_mnt} ${slave_mnt}
++
++#Stop Geo-rep
++TEST $GEOREP_CLI $master $slave stop
++
++#Config tarssh as sync-engine
++TEST $GEOREP_CLI $master $slave config sync-method tarssh
++
++#Create tarssh hang data
++TEST create_data_hang "tarssh_hang"
++TEST create_data "history_tar"
++
++TEST $GEOREP_CLI $master $slave start
++EXPECT_WITHIN $GEO_REP_TIMEOUT  1 check_status_num_rows "Active"
++
++#Verify arequal for whole volume
++EXPECT_WITHIN $GEO_REP_TIMEOUT "x0" arequal_checksum ${master_mnt} ${slave_mnt}
++
++#Stop Geo-rep
++TEST $GEOREP_CLI $master $slave stop
++
++#Delete Geo-rep
++TEST $GEOREP_CLI $master $slave delete
++
++#Cleanup are-equal binary
++TEST rm $AREQUAL_PATH/arequal-checksum
++
++#Cleanup authorized keys
++sed -i '/^command=.*SSH_ORIGINAL_COMMAND#.*/d' ~/.ssh/authorized_keys
++sed -i '/^command=.*gsyncd.*/d' ~/.ssh/authorized_keys
++
++cleanup;
++#G_TESTDEF_TEST_STATUS_NETBSD7=BAD_TEST,BUG=000000
+diff --git a/tests/geo-rep.rc b/tests/geo-rep.rc
+index 2035b9f..e4f014e 100644
+--- a/tests/geo-rep.rc
++++ b/tests/geo-rep.rc
+@@ -101,6 +101,23 @@ function create_data()
+     chown 1000:1000 ${master_mnt}/${prefix}_chown_f1_ಸಂತಸ
+ }
+ 
++function create_data_hang()
++{
++    prefix=$1
++    mkdir ${master_mnt}/${prefix}
++    cd ${master_mnt}/${prefix}
++    # ~1k files is required with 1 sync-job and hang happens if
++    # stderr buffer of tar/ssh executed with Popen is full (i.e., 64k).
++    # 64k is hit when ~800 files were  not found while syncing data
++    # from master. So around 1k files is required to hit the condition.
++    for i in {1..1000}
++    do
++        echo "test data" > file$i
++        mv -f file$i file
++    done
++    cd -
++}
++
+ function chown_file_ok()
+ {
+     local file_owner=$(stat --format "%u:%g" "$1")
+-- 
+1.8.3.1
+

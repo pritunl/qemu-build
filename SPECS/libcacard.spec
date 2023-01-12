@@ -1,16 +1,15 @@
 Name:           libcacard
-Version:        2.7.0
-Release:        2%{?dist}
+Version:        2.8.1
+Release:        3%{?dist}
 Summary:        CAC (Common Access Card) library
 License:        LGPLv2+
-URL:            http://www.spice-space.org/page/Libcacard
+URL:            https://gitlab.freedesktop.org/spice/libcacard
 Source0:        http://www.spice-space.org/download/libcacard/%{name}-%{version}.tar.xz
-Source1:        http://www.spice-space.org/download/libcacard/%{name}-%{version}.tar.xz.asc
-Source2:        gpgkey-15B5C33D.gpg
-# https://gitlab.freedesktop.org/spice/libcacard/merge_requests/5
-Patch0:         %{name}-2.7.0-caching-keys.patch
+Source1:        http://www.spice-space.org/download/libcacard/%{name}-%{version}.tar.xz.sig
+Source2:        gpgkey-A3DDE969.gpg
 Epoch:          3
 
+BuildRequires:  gcc
 BuildRequires:  glib2-devel
 BuildRequires:  nss-devel
 BuildRequires:  softhsm
@@ -19,6 +18,9 @@ BuildRequires:  gnutls-utils
 BuildRequires:  nss-tools
 BuildRequires:  openssl
 BuildRequires:  gnupg2
+BuildRequires:  meson
+BuildRequires:  gcc-c++
+BuildRequires:  pcsc-lite-devel
 Conflicts:      qemu-common < 2:2.5.0
 
 %description
@@ -39,26 +41,21 @@ developing applications that use %{name}.
 %prep
 gpgv2 --quiet --keyring %{SOURCE2} %{SOURCE1} %{SOURCE0}
 %setup -q
-%patch0 -p1 -b .caching
 
 %build
-%configure --disable-static
-sed -i -e 's! -shared ! -Wl,--as-needed\0!g' libtool
-make %{?_smp_mflags}
+%meson
+%meson_build
 
 %check
 # Do not run the tests on s390x, which fails
 %ifnarch s390x
-sed -i "s!/usr/lib64/!%{_libdir}/!" tests/setup-softhsm2.sh
-make check
+%meson_test
 %endif
 
 %install
-%make_install
-rm -f %{buildroot}%{_libdir}/*.la
+%meson_install
 
-%post -p /sbin/ldconfig
-%postun -p /sbin/ldconfig
+%ldconfig_scriptlets
 
 %files
 %license COPYING
@@ -71,18 +68,55 @@ rm -f %{buildroot}%{_libdir}/*.la
 %{_libdir}/pkgconfig/libcacard.pc
 
 %changelog
-* Mon Sep 16 2019 Jakub Jelen <jjelen@redhat.com> - 2.7.0-2
-- Remove key caching capabilities since to avoid invalid handle reuse (#1746883)
+* Thu Jul 21 2022 Fedora Release Engineering <releng@fedoraproject.org> - 3:2.8.1-3
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_37_Mass_Rebuild
 
-* Tue Jul 23 2019 Jakub Jelen <jjelen@redhat.com> - 2.7.0-1
-- Update to libcacard 2.7.0 to improve Windows compatibility (#1615840)
+* Thu Jan 20 2022 Fedora Release Engineering <releng@fedoraproject.org> - 3:2.8.1-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_36_Mass_Rebuild
 
-* Mon Dec 17 2018 Christophe Fergeau <cfergeau@redhat.com> - 2.6.1-1
-- Update to libcacard 2.6.1
-  Resolves: rhbz#1620129
+* Mon Aug 16 2021 Jakub Jelen <jjelen@redhat.com> - 2.8.1-1
+- New upstream release
 
-* Mon Aug 13 2018 Troy Dawson <tdawson@redhat.com> - 3:2.5.3-5
-- Release Bumped for el8 Mass Rebuild
+* Mon Aug  2 2021 Marc-André Lureau <marcandre.lureau@redhat.com> - 3:2.8.0-5.20210801gitcf6121deb4
+- Fix UNKNOWN pkg-config version, rhbz#1989031
+
+* Sun Aug  1 2021 Marc-André Lureau <marcandre.lureau@redhat.com> - 3:2.8.0-4.20210801gitcf6121deb4
+- Update to git snapshot v2.8.0.22
+- Fix FTBFS rhbz#1987641
+
+* Thu Jul 22 2021 Fedora Release Engineering <releng@fedoraproject.org> - 3:2.8.0-3
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_35_Mass_Rebuild
+
+* Tue Jan 26 2021 Fedora Release Engineering <releng@fedoraproject.org> - 3:2.8.0-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_34_Mass_Rebuild
+
+* Tue Oct 06 2020 Jakub Jelen <jjelen@redhat.com> - 2.8.0-1
+- New upstream release
+
+* Tue Jul 28 2020 Fedora Release Engineering <releng@fedoraproject.org> - 3:2.7.0-5
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_33_Mass_Rebuild
+
+* Wed Jan 29 2020 Fedora Release Engineering <releng@fedoraproject.org> - 3:2.7.0-4
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_32_Mass_Rebuild
+
+* Thu Aug 29 2019 Jakub Jelen <jjelen@redhat.com> - 2.7.0-3
+- Backport an upstream patch to unbreak testing
+
+* Thu Jul 25 2019 Fedora Release Engineering <releng@fedoraproject.org> - 3:2.7.0-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_31_Mass_Rebuild
+
+* Fri Feb 01 2019 Fedora Release Engineering <releng@fedoraproject.org> - 3:2.6.1-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_30_Mass_Rebuild
+
+* Fri Aug 31 2018 Christophe Fergeau <cfergeau@redhat.com> - 2.6.1-1
+- Update to new upstream release
+
+* Wed Aug  8 2018 Marc-André Lureau <marcandre.lureau@redhat.com> - 3:2.6.0-1
+- Update to release v2.6.0
+- remove vscclient, drop libcacard-tools
+
+* Fri Jul 13 2018 Fedora Release Engineering <releng@fedoraproject.org> - 3:2.5.3-5
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_29_Mass_Rebuild
 
 * Wed Feb 07 2018 Fedora Release Engineering <releng@fedoraproject.org> - 3:2.5.3-4
 - Rebuilt for https://fedoraproject.org/wiki/Fedora_28_Mass_Rebuild

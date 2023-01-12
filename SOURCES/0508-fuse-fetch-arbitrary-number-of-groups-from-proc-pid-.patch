@@ -1,0 +1,232 @@
+From 87b7689f7727a542c5afa22bdebd3781dd650a2f Mon Sep 17 00:00:00 2001
+From: Csaba Henk <csaba@redhat.com>
+Date: Fri, 17 Jul 2020 11:33:36 +0200
+Subject: [PATCH 508/511] fuse: fetch arbitrary number of groups from
+ /proc/[pid]/status
+
+Glusterfs so far constrained itself with an arbitrary limit (32)
+for the number of groups read from /proc/[pid]/status (this was
+the number of groups shown there prior to Linux commit
+v3.7-9553-g8d238027b87e (v3.8-rc1~74^2~59); since this commit, all
+groups are shown).
+
+With this change we'll read groups up to the number Glusterfs
+supports in general (64k).
+
+Note: the actual number of groups that are made use of in a
+regular Glusterfs setup shall still be capped at ~93 due to limitations
+of the RPC transport. To be able to handle more groups than that,
+brick side gid resolution (server.manage-gids option) can be used along
+with NIS, LDAP or other such networked directory service (see
+https://github.com/gluster/glusterdocs/blob/5ba15a2/docs/Administrator%20Guide/Handling-of-users-with-many-groups.md#limit-in-the-glusterfs-protocol
+).
+
+Also adding some diagnostic messages to frame_fill_groups().
+
+Upstream:
+> Reviewed-on: https://review.gluster.org/c/glusterfs/+/24721
+> Change-Id: I271f3dc3e6d3c44d6d989c7a2073ea5f16c26ee0
+> fixes: #1075
+> Signed-off-by: Csaba Henk <csaba@redhat.com>
+
+BUG: 1749304
+Change-Id: I80bf99d34087fb95768bf2259d8c4774d9f5d0c5
+Signed-off-by: Csaba Henk <csaba@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/220920
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/glusterfs/stack.h    |  7 ++++
+ tests/bugs/fuse/many-groups-for-acl.t | 13 ++++++-
+ xlators/mount/fuse/src/fuse-helpers.c | 71 +++++++++++++++++++++++------------
+ 3 files changed, 65 insertions(+), 26 deletions(-)
+
+diff --git a/libglusterfs/src/glusterfs/stack.h b/libglusterfs/src/glusterfs/stack.h
+index 1758550..bd466d8 100644
+--- a/libglusterfs/src/glusterfs/stack.h
++++ b/libglusterfs/src/glusterfs/stack.h
+@@ -429,6 +429,7 @@ call_stack_alloc_groups(call_stack_t *stack, int ngrps)
+     if (ngrps <= SMALL_GROUP_COUNT) {
+         stack->groups = stack->groups_small;
+     } else {
++        GF_FREE(stack->groups_large);
+         stack->groups_large = GF_CALLOC(ngrps, sizeof(gid_t),
+                                         gf_common_mt_groups_t);
+         if (!stack->groups_large)
+@@ -442,6 +443,12 @@ call_stack_alloc_groups(call_stack_t *stack, int ngrps)
+ }
+ 
+ static inline int
++call_stack_groups_capacity(call_stack_t *stack)
++{
++    return max(stack->ngrps, SMALL_GROUP_COUNT);
++}
++
++static inline int
+ call_frames_count(call_stack_t *call_stack)
+ {
+     call_frame_t *pos;
+diff --git a/tests/bugs/fuse/many-groups-for-acl.t b/tests/bugs/fuse/many-groups-for-acl.t
+index d959f75..a51b1bc 100755
+--- a/tests/bugs/fuse/many-groups-for-acl.t
++++ b/tests/bugs/fuse/many-groups-for-acl.t
+@@ -38,6 +38,13 @@ do
+ done
+ TEST useradd -o -M -u ${NEW_UID} -g ${NEW_GID} -G ${NEW_USER}-${NEW_GIDS} ${NEW_USER}
+ 
++# Linux < 3.8 exports only first 32 gids of pid to userspace
++kernel_exports_few_gids=0
++if [ "$OSTYPE" = Linux ] && \
++   su -m ${NEW_USER} -c "grep ^Groups: /proc/self/status | wc -w | xargs -I@ expr @ - 1 '<' $LAST_GID - $NEW_GID + 1" > /dev/null; then
++       kernel_exports_few_gids=1
++fi
++
+ # preparation done, start the tests
+ 
+ TEST glusterd
+@@ -48,6 +55,8 @@ TEST $CLI volume set $V0 nfs.disable off
+ TEST $CLI volume set ${V0} server.manage-gids off
+ TEST $CLI volume start ${V0}
+ 
++# This is just a synchronization hack to make sure the bricks are
++# up before going on.
+ EXPECT_WITHIN ${NFS_EXPORT_TIMEOUT} "1" is_nfs_export_available
+ 
+ # mount the volume with POSIX ACL support, without --resolve-gids
+@@ -69,8 +78,8 @@ TEST [ $? -eq 0 ]
+ su -m ${NEW_USER} -c "touch ${M0}/first-32-gids-2/success > /dev/null"
+ TEST [ $? -eq 0 ]
+ 
+-su -m ${NEW_USER} -c "touch ${M0}/gid-64/failure > /dev/null"
+-TEST [ $? -ne 0 ]
++su -m ${NEW_USER} -c "touch ${M0}/gid-64/success--if-all-gids-exported > /dev/null"
++TEST [ $? -eq $kernel_exports_few_gids ]
+ 
+ su -m ${NEW_USER} -c "touch ${M0}/gid-120/failure > /dev/null"
+ TEST [ $? -ne 0 ]
+diff --git a/xlators/mount/fuse/src/fuse-helpers.c b/xlators/mount/fuse/src/fuse-helpers.c
+index 5bfc40c..6e04cd4 100644
+--- a/xlators/mount/fuse/src/fuse-helpers.c
++++ b/xlators/mount/fuse/src/fuse-helpers.c
+@@ -139,8 +139,6 @@ get_fuse_state(xlator_t *this, fuse_in_header_t *finh)
+     return state;
+ }
+ 
+-#define FUSE_MAX_AUX_GROUPS                                                    \
+-    32 /* We can get only up to 32 aux groups from /proc */
+ void
+ frame_fill_groups(call_frame_t *frame)
+ {
+@@ -150,8 +148,6 @@ frame_fill_groups(call_frame_t *frame)
+     char filename[32];
+     char line[4096];
+     char *ptr = NULL;
+-    FILE *fp = NULL;
+-    int idx = 0;
+     long int id = 0;
+     char *saveptr = NULL;
+     char *endptr = NULL;
+@@ -191,45 +187,72 @@ frame_fill_groups(call_frame_t *frame)
+ 
+         call_stack_set_groups(frame->root, ngroups, &mygroups);
+     } else {
++        FILE *fp = NULL;
++
+         ret = snprintf(filename, sizeof filename, "/proc/%d/status",
+                        frame->root->pid);
+-        if (ret >= sizeof filename)
++        if (ret >= sizeof filename) {
++            gf_log(this->name, GF_LOG_ERROR, "procfs path exceeds buffer size");
+             goto out;
++        }
+ 
+         fp = fopen(filename, "r");
+-        if (!fp)
++        if (!fp) {
++            gf_log(this->name, GF_LOG_ERROR, "failed to open %s: %s", filename,
++                   strerror(errno));
+             goto out;
++        }
+ 
+-        if (call_stack_alloc_groups(frame->root, ngroups) != 0)
+-            goto out;
++        for (;;) {
++            gf_boolean_t found_groups = _gf_false;
++            int idx = 0;
+ 
+-        while ((ptr = fgets(line, sizeof line, fp))) {
+-            if (strncmp(ptr, "Groups:", 7) != 0)
+-                continue;
++            if (call_stack_alloc_groups(frame->root, ngroups) != 0) {
++                gf_log(this->name, GF_LOG_ERROR,
++                       "failed to allocate gid buffer");
++                goto out;
++            }
+ 
++            while ((ptr = fgets(line, sizeof line, fp))) {
++                if (strncmp(ptr, "Groups:", 7) == 0) {
++                    found_groups = _gf_true;
++                    break;
++                }
++            }
++            if (!found_groups) {
++                gf_log(this->name, GF_LOG_ERROR, "cannot find gid list in %s",
++                       filename);
++                break;
++            }
+             ptr = line + 8;
+ 
+             for (ptr = strtok_r(ptr, " \t\r\n", &saveptr); ptr;
+                  ptr = strtok_r(NULL, " \t\r\n", &saveptr)) {
+                 errno = 0;
+                 id = strtol(ptr, &endptr, 0);
+-                if (errno == ERANGE)
+-                    break;
+-                if (!endptr || *endptr)
++                if (errno == ERANGE || !endptr || *endptr) {
++                    gf_log(this->name, GF_LOG_ERROR, "failed to parse %s",
++                           filename);
+                     break;
+-                frame->root->groups[idx++] = id;
+-                if (idx == FUSE_MAX_AUX_GROUPS)
++                }
++                if (idx < call_stack_groups_capacity(frame->root))
++                    frame->root->groups[idx] = id;
++                idx++;
++                if (idx == GF_MAX_AUX_GROUPS)
+                     break;
+             }
+-
+-            frame->root->ngrps = idx;
+-            break;
++            if (idx > call_stack_groups_capacity(frame->root)) {
++                ngroups = idx;
++                rewind(fp);
++            } else {
++                frame->root->ngrps = idx;
++                break;
++            }
+         }
++    out:
++        if (fp)
++            fclose(fp);
+     }
+-
+-out:
+-    if (fp)
+-        fclose(fp);
+ #elif defined(GF_SOLARIS_HOST_OS)
+     char filename[32];
+     char scratch[128];
+@@ -245,7 +268,7 @@ out:
+         fp = fopen(filename, "r");
+         if (fp != NULL) {
+             if (fgets(scratch, sizeof scratch, fp) != NULL) {
+-                ngrps = MIN(prcred->pr_ngroups, FUSE_MAX_AUX_GROUPS);
++                ngrps = MIN(prcred->pr_ngroups, GF_MAX_AUX_GROUPS);
+                 if (call_stack_alloc_groups(frame->root, ngrps) != 0) {
+                     fclose(fp);
+                     return;
+-- 
+1.8.3.1
+

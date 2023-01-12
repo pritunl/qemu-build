@@ -1,0 +1,63 @@
+From f78a5d86c55149d80b6efdf60eae7221c238654e Mon Sep 17 00:00:00 2001
+From: Rinku Kothiya <rkothiya@redhat.com>
+Date: Thu, 24 Sep 2020 12:43:51 +0000
+Subject: [PATCH 499/511] gfapi: give appropriate error when size exceeds
+
+This patch help generate appropriate error message
+when the gfapi tries to write data equal to or
+greater than 1 Gb due to the limitation at the
+socket layer.
+
+Upstream:
+> Reviewed-on: https://github.com/gluster/glusterfs/pull/1557
+> fixes: #1518
+> Change-Id: I1234a0b5a6e675a0b20c6b1afe0f4390fd721f6f
+> Signed-off-by: Rinku Kothiya <rkothiya@redhat.com>
+
+BUG: 1691320
+Change-Id: I1234a0b5a6e675a0b20c6b1afe0f4390fd721f6f
+Signed-off-by: Rinku Kothiya <rkothiya@redhat.com>
+Signed-off-by: Sunil Kumar Acharya <sheggodu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/219998
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ api/src/gfapi-messages.h | 4 +++-
+ api/src/glfs-fops.c      | 8 ++++++++
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/api/src/gfapi-messages.h b/api/src/gfapi-messages.h
+index 68d1242..2ffd5ac 100644
+--- a/api/src/gfapi-messages.h
++++ b/api/src/gfapi-messages.h
+@@ -49,6 +49,8 @@ GLFS_MSGID(API, API_MSG_MEM_ACCT_INIT_FAILED, API_MSG_MASTER_XLATOR_INIT_FAILED,
+            API_MSG_INODE_LINK_FAILED, API_MSG_STATEDUMP_FAILED,
+            API_MSG_XREADDIRP_R_FAILED, API_MSG_LOCK_INSERT_MERGE_FAILED,
+            API_MSG_SETTING_LOCK_TYPE_FAILED, API_MSG_INODE_FIND_FAILED,
+-           API_MSG_FDCTX_SET_FAILED, API_MSG_UPCALL_SYNCOP_FAILED);
++           API_MSG_FDCTX_SET_FAILED, API_MSG_UPCALL_SYNCOP_FAILED,
++           API_MSG_INVALID_ARG);
+ 
++#define API_MSG_INVALID_ARG_STR "Invalid"
+ #endif /* !_GFAPI_MESSAGES_H__ */
+diff --git a/api/src/glfs-fops.c b/api/src/glfs-fops.c
+index e6adea5..051541f 100644
+--- a/api/src/glfs-fops.c
++++ b/api/src/glfs-fops.c
+@@ -1525,6 +1525,14 @@ glfs_pwritev_common(struct glfs_fd *glfd, const struct iovec *iovec, int iovcnt,
+ 
+     GF_REF_GET(glfd);
+ 
++    if (iovec->iov_len >= GF_UNIT_GB) {
++        ret = -1;
++        errno = EINVAL;
++        gf_smsg(THIS->name, GF_LOG_ERROR, errno, API_MSG_INVALID_ARG,
++                "size >= %llu is not allowed", GF_UNIT_GB, NULL);
++        goto out;
++    }
++
+     subvol = glfs_active_subvol(glfd->fs);
+     if (!subvol) {
+         ret = -1;
+-- 
+1.8.3.1
+

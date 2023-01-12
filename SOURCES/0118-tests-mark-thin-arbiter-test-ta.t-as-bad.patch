@@ -1,0 +1,31 @@
+From 24c2430e3cd629665851fdb2921d754e3ecef3b4 Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Wed, 24 Apr 2019 07:47:32 +0530
+Subject: [PATCH 118/124] tests: mark thin-arbiter test ta.t as bad
+
+As thin-arbiter isn't packaged and tested at RHGS 3.5
+
+Label: DOWNSTREAM ONLY
+
+BUG: 1698436
+Change-Id: Ideab570f58fc0b2daecb2be4ed4b6740362d0b35
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/168613
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ tests/basic/afr/ta.t | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/tests/basic/afr/ta.t b/tests/basic/afr/ta.t
+index 05d4843..cbd1b56 100644
+--- a/tests/basic/afr/ta.t
++++ b/tests/basic/afr/ta.t
+@@ -52,3 +52,5 @@ TEST ! ls $B0/brick0/c.txt
+ TEST ! ls $B0/brick1/c.txt
+ 
+ cleanup;
++#G_TESTDEF_TEST_STATUS_CENTOS6=BAD_TEST,BUG=0000000
++#G_TESTDEF_TEST_STATUS_NETBSD7=BAD_TEST,BUG=0000000
+-- 
+1.8.3.1
+

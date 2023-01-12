@@ -1,0 +1,38 @@
+From 4c410d99792808b0c8deb601d50c66df19f73ca7 Mon Sep 17 00:00:00 2001
+From: Anuradha Talur <atalur@commvault.com>
+Date: Thu, 25 Oct 2018 17:23:10 -0400
+Subject: [PATCH 150/169] libglusterfs: define macros needed for cloudsync
+
+backport of patch: https://review.gluster.org/#/c/glusterfs/+/21585/
+
+> Change-Id: Iec5ce7f17fbf899f881a58cd20c4c967e3b71668
+> fixes: bz#1642168
+> Signed-off-by: Anuradha Talur <atalur@commvault.com>
+
+Change-Id: I79e5d955559acdec7cbeb8f35c8482b3b6ff8b0f
+Signed-off-by: Susant Palai <spalai@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172189
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ libglusterfs/src/glusterfs/glusterfs.h | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/libglusterfs/src/glusterfs/glusterfs.h b/libglusterfs/src/glusterfs/glusterfs.h
+index fb727fc..516b497 100644
+--- a/libglusterfs/src/glusterfs/glusterfs.h
++++ b/libglusterfs/src/glusterfs/glusterfs.h
+@@ -364,6 +364,10 @@ enum gf_internal_fop_indicator {
+     } while (0)
+ 
+ #define GF_CS_OBJECT_SIZE "trusted.glusterfs.cs.object_size"
++#define GF_CS_BLOCK_SIZE "trusted.glusterfs.cs.block_size"
++#define GF_CS_NUM_BLOCKS "trusted.glusterfs.cs.num_blocks"
++
++#define GF_CS_XATTR_ARCHIVE_UUID "trusted.cloudsync.uuid"
+ 
+ #define GF_CS_OBJECT_UPLOAD_COMPLETE "trusted.glusterfs.csou.complete"
+ #define GF_CS_OBJECT_REMOTE "trusted.glusterfs.cs.remote"
+-- 
+1.8.3.1
+

@@ -1,0 +1,1164 @@
+From d5ce2300f77c25b38a076d4dd6a5521e82c56172 Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Mon, 29 Jul 2019 18:30:42 +0530
+Subject: [PATCH 295/297] ctime/rebalance: Heal ctime xattr on directory during
+ rebalance
+
+After add-brick and rebalance, the ctime xattr is not present
+on rebalanced directories on new brick. This patch fixes the
+same.
+
+Note that ctime still doesn't support consistent time across
+distribute sub-volume.
+
+This patch also fixes the in-memory inconsistency of time attributes
+when metadata is self healed.
+
+Backport of:
+ > Patch: https://review.gluster.org/23127/
+ > Change-Id: Ia20506f1839021bf61d4753191e7dc34b31bb2df
+ > fixes: bz#1734026
+ > Signed-off-by: Kotresh HR <khiremat@redhat.com>
+
+Change-Id: Ia20506f1839021bf61d4753191e7dc34b31bb2df
+BUG: 1728673
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/181105
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ tests/basic/afr/split-brain-healing-ctime.t        | 253 +++++++++++++++++++++
+ tests/basic/afr/split-brain-healing.t              |   1 +
+ tests/basic/ctime/ctime-ec-heal.t                  |  71 ++++++
+ tests/basic/ctime/ctime-ec-rebalance.t             |  44 ++++
+ tests/basic/ctime/ctime-rep-heal.t                 |  71 ++++++
+ tests/basic/ctime/ctime-rep-rebalance.t            |  42 ++++
+ .../bug-1734370-entry-heal-restore-time.t          |  84 +++++++
+ tests/volume.rc                                    |  15 +-
+ xlators/cluster/afr/src/afr-self-heal-common.c     |   3 +-
+ xlators/cluster/afr/src/afr-self-heal-entry.c      |   2 +
+ xlators/cluster/dht/src/dht-common.c               |   1 +
+ xlators/cluster/ec/src/ec-heal.c                   |   7 +-
+ xlators/storage/posix/src/posix-entry-ops.c        |   8 +-
+ xlators/storage/posix/src/posix-helpers.c          |  31 ++-
+ xlators/storage/posix/src/posix-inode-fd-ops.c     |  57 ++---
+ xlators/storage/posix/src/posix-metadata.c         |  65 +++++-
+ xlators/storage/posix/src/posix-metadata.h         |   7 +
+ xlators/storage/posix/src/posix.h                  |   5 +-
+ 18 files changed, 714 insertions(+), 53 deletions(-)
+ create mode 100644 tests/basic/afr/split-brain-healing-ctime.t
+ create mode 100644 tests/basic/ctime/ctime-ec-heal.t
+ create mode 100644 tests/basic/ctime/ctime-ec-rebalance.t
+ create mode 100644 tests/basic/ctime/ctime-rep-heal.t
+ create mode 100644 tests/basic/ctime/ctime-rep-rebalance.t
+ create mode 100644 tests/bugs/replicate/bug-1734370-entry-heal-restore-time.t
+
+diff --git a/tests/basic/afr/split-brain-healing-ctime.t b/tests/basic/afr/split-brain-healing-ctime.t
+new file mode 100644
+index 0000000..1ca18e3
+--- /dev/null
++++ b/tests/basic/afr/split-brain-healing-ctime.t
+@@ -0,0 +1,253 @@
++#!/bin/bash
++
++#Test the split-brain resolution CLI commands.
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++
++function get_replicate_subvol_number {
++        local filename=$1
++        #get_backend_paths
++        if [ -f $B0/${V0}1/$filename ]
++        then
++                echo 0
++        elif [ -f $B0/${V0}3/$filename ]
++        then    echo 1
++        else
++                echo -1
++        fi
++}
++
++cleanup;
++
++AREQUAL_PATH=$(dirname $0)/../../utils
++GET_MDATA_PATH=$(dirname $0)/../../utils
++CFLAGS=""
++test "`uname -s`" != "Linux" && {
++    CFLAGS="$CFLAGS -lintl";
++}
++build_tester $AREQUAL_PATH/arequal-checksum.c $CFLAGS
++build_tester $GET_MDATA_PATH/get-mdata-xattr.c
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 replica 2 $H0:$B0/${V0}{1,2,3,4}
++TEST $CLI volume set $V0 cluster.self-heal-daemon off
++TEST $CLI volume set $V0 cluster.data-self-heal off
++TEST $CLI volume set $V0 cluster.metadata-self-heal off
++TEST $CLI volume set $V0 cluster.entry-self-heal off
++TEST $CLI volume set $V0 ctime on
++TEST $CLI volume start $V0
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0
++
++cd $M0
++for i in {1..10}
++do
++        echo "Initial content">>file$i
++done
++
++replica_0_files_list=(`ls $B0/${V0}1|grep -v '^\.'`)
++replica_1_files_list=(`ls $B0/${V0}3|grep -v '^\.'`)
++
++############ Create data split-brain in the files. ###########################
++TEST kill_brick $V0 $H0 $B0/${V0}1
++for file in ${!replica_0_files_list[*]}
++do
++        echo "B1 is down">>${replica_0_files_list[$file]}
++done
++TEST kill_brick $V0 $H0 $B0/${V0}3
++for file in ${!replica_1_files_list[*]}
++do
++        echo "B3 is down">>${replica_1_files_list[$file]}
++done
++
++SMALLER_FILE_SIZE=$(stat -c %s file1)
++
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 2
++
++TEST kill_brick $V0 $H0 $B0/${V0}2
++for file in ${!replica_0_files_list[*]}
++do
++        echo "B2 is down">>${replica_0_files_list[$file]}
++        echo "appending more content to make it the bigger file">>${replica_0_files_list[$file]}
++done
++TEST kill_brick $V0 $H0 $B0/${V0}4
++for file in ${!replica_1_files_list[*]}
++do
++        echo "B4 is down">>${replica_1_files_list[$file]}
++        echo "appending more content to make it the bigger file">>${replica_1_files_list[$file]}
++done
++
++BIGGER_FILE_SIZE=$(stat -c %s file1)
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 3
++
++
++############### Acessing the files should now give EIO. ###############################
++TEST ! cat file1
++TEST ! cat file2
++TEST ! cat file3
++TEST ! cat file4
++TEST ! cat file5
++TEST ! cat file6
++TEST ! cat file7
++TEST ! cat file8
++TEST ! cat file9
++TEST ! cat file10
++###################
++TEST $CLI volume set $V0 cluster.self-heal-daemon on
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "Y" glustershd_up_status
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 1
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 2
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 3
++
++################ Heal file1 using the bigger-file option  ##############
++$CLI volume heal $V0 split-brain bigger-file /file1
++EXPECT "0" echo $?
++EXPECT $BIGGER_FILE_SIZE stat -c %s file1
++
++################ Heal file2 using the bigger-file option and its gfid ##############
++subvolume=$(get_replicate_subvol_number file2)
++if [ $subvolume == 0 ]
++then
++        GFID=$(gf_get_gfid_xattr $B0/${V0}1/file2)
++elif [ $subvolume == 1 ]
++then
++        GFID=$(gf_get_gfid_xattr $B0/${V0}3/file2)
++fi
++GFIDSTR="gfid:$(gf_gfid_xattr_to_str $GFID)"
++$CLI volume heal $V0 split-brain bigger-file $GFIDSTR
++EXPECT "0" echo $?
++
++################ Heal file3 using the source-brick option  ##############
++################ Use the brick having smaller file size as source #######
++subvolume=$(get_replicate_subvol_number file3)
++if [ $subvolume == 0 ]
++then
++        $CLI volume heal $V0 split-brain source-brick $H0:$B0/${V0}2 /file3
++elif [ $subvolume == 1 ]
++then
++        $CLI volume heal $V0 split-brain source-brick $H0:$B0/${V0}4 /file3
++fi
++EXPECT "0" echo $?
++EXPECT $SMALLER_FILE_SIZE stat -c %s file3
++
++################ Heal file4 using the source-brick option and it's gfid ##############
++################ Use the brick having smaller file size as source #######
++subvolume=$(get_replicate_subvol_number file4)
++if [ $subvolume == 0 ]
++then
++        GFID=$(gf_get_gfid_xattr $B0/${V0}1/file4)
++        GFIDSTR="gfid:$(gf_gfid_xattr_to_str $GFID)"
++        $CLI volume heal $V0 split-brain source-brick $H0:$B0/${V0}2 $GFIDSTR
++elif [ $subvolume == 1 ]
++then
++        GFID=$(gf_get_gfid_xattr $B0/${V0}3/file4)
++        GFIDSTR="gfid:$(gf_gfid_xattr_to_str $GFID)"
++        $CLI volume heal $V0 split-brain source-brick $H0:$B0/${V0}4 $GFIDSTR
++fi
++EXPECT "0" echo $?
++EXPECT $SMALLER_FILE_SIZE stat -c %s file4
++
++# With ctime enabled, the ctime xattr ("trusted.glusterfs.mdata") gets healed
++# as part of metadata heal. So mtime would be same, hence it can't be healed
++# using 'latest-mtime' policy, use 'source-brick' option instead.
++################ Heal file5 using the source-brick option  ##############
++subvolume=$(get_replicate_subvol_number file5)
++if [ $subvolume == 0 ]
++then
++        $CLI volume heal $V0 split-brain source-brick $H0:$B0/${V0}1 /file5
++elif [ $subvolume == 1 ]
++then
++        $CLI volume heal $V0 split-brain source-brick $H0:$B0/${V0}3 /file5
++fi
++EXPECT "0" echo $?
++
++if [ $subvolume == 0 ]
++then
++        mtime1_after_heal=$(get_mtime $B0/${V0}1/file5)
++        mtime2_after_heal=$(get_mtime $B0/${V0}2/file5)
++elif [ $subvolume == 1 ]
++then
++        mtime1_after_heal=$(get_mtime $B0/${V0}3/file5)
++        mtime2_after_heal=$(get_mtime $B0/${V0}4/file5)
++fi
++
++#TODO: To below comparisons on full sub-second resolution
++
++TEST [ $mtime1_after_heal -eq $mtime2_after_heal ]
++
++mtime_mount_after_heal=$(stat -c %Y file5)
++
++TEST [ $mtime1_after_heal -eq $mtime_mount_after_heal ]
++
++################ Heal file6 using the source-brick option and its gfid  ##############
++subvolume=$(get_replicate_subvol_number file6)
++if [ $subvolume == 0 ]
++then
++        GFID=$(gf_get_gfid_xattr $B0/${V0}1/file6)
++        GFIDSTR="gfid:$(gf_gfid_xattr_to_str $GFID)"
++        $CLI volume heal $V0 split-brain source-brick $H0:$B0/${V0}1 $GFIDSTR
++elif [ $subvolume == 1 ]
++then
++        GFID=$(gf_get_gfid_xattr $B0/${V0}3/file6)
++        GFIDSTR="gfid:$(gf_gfid_xattr_to_str $GFID)"
++        $CLI volume heal $V0 split-brain source-brick $H0:$B0/${V0}3 $GFIDSTR
++fi
++EXPECT "0" echo $?
++
++if [ $subvolume == 0 ]
++then
++        mtime1_after_heal=$(get_mtime $B0/${V0}1/file6)
++        mtime2_after_heal=$(get_mtime $B0/${V0}2/file6)
++elif [ $subvolume == 1 ]
++then
++        mtime1_after_heal=$(get_mtime $B0/${V0}3/file6)
++        mtime2_after_heal=$(get_mtime $B0/${V0}4/file6)
++fi
++
++#TODO: To below comparisons on full sub-second resolution
++
++TEST [ $mtime1_after_heal -eq $mtime2_after_heal ]
++
++mtime_mount_after_heal=$(stat -c %Y file6)
++
++TEST [ $mtime1_after_heal -eq $mtime_mount_after_heal ]
++
++################ Heal remaining SB'ed files of replica_0 using B1 as source ##############
++$CLI volume heal $V0 split-brain source-brick $H0:$B0/${V0}1
++EXPECT "0" echo $?
++
++################ Heal remaining SB'ed files of replica_1 using B3 as source ##############
++$CLI volume heal $V0 split-brain source-brick $H0:$B0/${V0}3
++EXPECT "0" echo $?
++
++############### Reading the files should now succeed. ###############################
++TEST  cat file1
++TEST  cat file2
++TEST  cat file3
++TEST  cat file4
++TEST  cat file5
++TEST  cat file6
++TEST  cat file7
++TEST  cat file8
++TEST  cat file9
++TEST  cat file10
++
++################ File contents on the bricks must be same. ################################
++TEST diff <(arequal-checksum -p $B0/$V01 -i .glusterfs) <(arequal-checksum -p $B0/$V02 -i .glusterfs)
++TEST diff <(arequal-checksum -p $B0/$V03 -i .glusterfs) <(arequal-checksum -p $B0/$V04 -i .glusterfs)
++
++############### Trying to heal files not in SB should fail. ###############################
++$CLI volume heal $V0 split-brain bigger-file /file1
++EXPECT "1" echo $?
++$CLI volume heal $V0 split-brain source-brick $H0:$B0/${V0}4 /file3
++EXPECT "1" echo $?
++
++cd -
++TEST rm $AREQUAL_PATH/arequal-checksum
++TEST rm $GET_MDATA_PATH/get-mdata-xattr
++cleanup
+diff --git a/tests/basic/afr/split-brain-healing.t b/tests/basic/afr/split-brain-healing.t
+index 78553e6..315e815 100644
+--- a/tests/basic/afr/split-brain-healing.t
++++ b/tests/basic/afr/split-brain-healing.t
+@@ -35,6 +35,7 @@ TEST $CLI volume set $V0 cluster.self-heal-daemon off
+ TEST $CLI volume set $V0 cluster.data-self-heal off
+ TEST $CLI volume set $V0 cluster.metadata-self-heal off
+ TEST $CLI volume set $V0 cluster.entry-self-heal off
++TEST $CLI volume set $V0 ctime off
+ TEST $CLI volume start $V0
+ TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0
+ 
+diff --git a/tests/basic/ctime/ctime-ec-heal.t b/tests/basic/ctime/ctime-ec-heal.t
+new file mode 100644
+index 0000000..1cb4516
+--- /dev/null
++++ b/tests/basic/ctime/ctime-ec-heal.t
+@@ -0,0 +1,71 @@
++#!/bin/bash
++#
++# This will test self healing of ctime xattr 'trusted.glusterfs.mdata'
++#
++###
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../afr.rc
++
++cleanup
++
++#cleate and start volume
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 disperse 3 redundancy 1 $H0:$B0/${V0}{1..3}
++TEST $CLI volume set $V0 ctime on
++TEST $CLI volume start $V0
++
++#Mount the volume
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0;
++
++# Create files
++mkdir $M0/dir1
++echo "Initial content" > $M0/file1
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '3' get_mdata_count $B0/${V0}{1..3}/dir1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/dir1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '3' get_mdata_count $B0/${V0}{1..3}/file1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/file1
++
++# Kill brick
++TEST kill_brick $V0 $H0 $B0/${V0}3
++
++echo "B3 is down" >> $M0/file1
++echo "Change dir1 time attributes" > $M0/dir1/dir1_file1
++echo "Entry heal file" > $M0/entry_heal_file1
++mkdir $M0/entry_heal_dir1
++
++# Check xattr
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '3' get_mdata_count $B0/${V0}{1..3}/dir1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '2' get_mdata_uniq_count $B0/${V0}{1..3}/dir1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '3' get_mdata_count $B0/${V0}{1..3}/file1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '2' get_mdata_uniq_count $B0/${V0}{1..3}/file1
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '2' get_mdata_count $B0/${V0}{1..3}/dir1/dir1_file1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/dir1/dir1_file1
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '2' get_mdata_count $B0/${V0}{1..3}/entry_heal_file1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/entry_heal_file1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '2' get_mdata_count $B0/${V0}{1..3}/entry_heal_dir1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/entry_heal_dir1
++
++TEST $CLI volume start $V0 force
++$CLI volume heal $V0
++
++# Check xattr
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '3' get_mdata_count $B0/${V0}{1..3}/dir1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/dir1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '3' get_mdata_count $B0/${V0}{1..3}/file1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/file1
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '3' get_mdata_count $B0/${V0}{1..3}/dir1/dir1_file1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/dir1/dir1_file1
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '3' get_mdata_count $B0/${V0}{1..3}/entry_heal_file1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/entry_heal_file1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '3' get_mdata_count $B0/${V0}{1..3}/entry_heal_dir1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/entry_heal_dir1
++
++cleanup;
+diff --git a/tests/basic/ctime/ctime-ec-rebalance.t b/tests/basic/ctime/ctime-ec-rebalance.t
+new file mode 100644
+index 0000000..caccdc1
+--- /dev/null
++++ b/tests/basic/ctime/ctime-ec-rebalance.t
+@@ -0,0 +1,44 @@
++#!/bin/bash
++#
++# This will test healing of ctime xattr 'trusted.glusterfs.mdata' after add-brick and rebalance
++#
++###
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../fallocate.rc
++
++cleanup
++
++#cleate and start volume
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 disperse 3 redundancy 1 $H0:$B0/${V0}{0..5}
++TEST $CLI volume set $V0 ctime on
++TEST $CLI volume start $V0
++
++#Mount the volume
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0;
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "3" ec_child_up_count $V0 0
++
++# Create files
++mkdir $M0/dir1
++echo "test data" > $M0/dir1/file1
++
++# Add brick
++TEST $CLI volume add-brick $V0 $H0:$B0/${V0}{6..8}
++
++#Trigger rebalance
++TEST $CLI volume rebalance $V0 start force
++EXPECT_WITHIN $REBALANCE_TIMEOUT "completed" rebalance_status_field $V0
++
++#Verify ctime xattr heal on directory
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.glusterfs.mdata' check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V0}6/dir1"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.glusterfs.mdata' check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V0}7/dir1"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.glusterfs.mdata' check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V0}8/dir1"
++
++b6_mdata=$(get_mdata "$B0/${V0}6/dir1")
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "${b6_mdata}" get_mdata $B0/${V0}7/dir1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "${b6_mdata}" get_mdata $B0/${V0}8/dir1
++
++cleanup;
+diff --git a/tests/basic/ctime/ctime-rep-heal.t b/tests/basic/ctime/ctime-rep-heal.t
+new file mode 100644
+index 0000000..ba8b08a
+--- /dev/null
++++ b/tests/basic/ctime/ctime-rep-heal.t
+@@ -0,0 +1,71 @@
++#!/bin/bash
++#
++# This will test self healing of ctime xattr 'trusted.glusterfs.mdata'
++#
++###
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../afr.rc
++
++cleanup
++
++#cleate and start volume
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 replica 3 $H0:$B0/${V0}{1..3}
++TEST $CLI volume set $V0 ctime on
++TEST $CLI volume start $V0
++
++#Mount the volume
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0;
++
++# Create files
++mkdir $M0/dir1
++echo "Initial content" > $M0/file1
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '3' get_mdata_count $B0/${V0}{1..3}/dir1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/dir1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '3' get_mdata_count $B0/${V0}{1..3}/file1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/file1
++
++# Kill brick
++TEST kill_brick $V0 $H0 $B0/${V0}3
++
++echo "B3 is down" >> $M0/file1
++echo "Change dir1 time attributes" > $M0/dir1/dir1_file1
++echo "Entry heal file" > $M0/entry_heal_file1
++mkdir $M0/entry_heal_dir1
++
++# Check xattr
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '3' get_mdata_count $B0/${V0}{1..3}/dir1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '2' get_mdata_uniq_count $B0/${V0}{1..3}/dir1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '3' get_mdata_count $B0/${V0}{1..3}/file1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '2' get_mdata_uniq_count $B0/${V0}{1..3}/file1
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '2' get_mdata_count $B0/${V0}{1..3}/dir1/dir1_file1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/dir1/dir1_file1
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '2' get_mdata_count $B0/${V0}{1..3}/entry_heal_file1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/entry_heal_file1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '2' get_mdata_count $B0/${V0}{1..3}/entry_heal_dir1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/entry_heal_dir1
++
++TEST $CLI volume start $V0 force
++$CLI volume heal $V0
++
++# Check xattr
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '3' get_mdata_count $B0/${V0}{1..3}/dir1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/dir1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '3' get_mdata_count $B0/${V0}{1..3}/file1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/file1
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '3' get_mdata_count $B0/${V0}{1..3}/dir1/dir1_file1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/dir1/dir1_file1
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '3' get_mdata_count $B0/${V0}{1..3}/entry_heal_file1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/entry_heal_file1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '3' get_mdata_count $B0/${V0}{1..3}/entry_heal_dir1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '1' get_mdata_uniq_count $B0/${V0}{1..3}/entry_heal_dir1
++
++cleanup;
+diff --git a/tests/basic/ctime/ctime-rep-rebalance.t b/tests/basic/ctime/ctime-rep-rebalance.t
+new file mode 100644
+index 0000000..dd9743e
+--- /dev/null
++++ b/tests/basic/ctime/ctime-rep-rebalance.t
+@@ -0,0 +1,42 @@
++#!/bin/bash
++#
++# This will test healing of ctime xattr 'trusted.glusterfs.mdata' after add-brick and rebalance
++#
++###
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../afr.rc
++
++cleanup
++
++#cleate and start volume
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 replica 3 $H0:$B0/${V0}{0..5}
++TEST $CLI volume set $V0 ctime on
++TEST $CLI volume start $V0
++
++#Mount the volume
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0;
++
++# Create files
++mkdir $M0/dir1
++
++# Add brick
++TEST $CLI volume add-brick $V0 $H0:$B0/${V0}{6..8}
++
++#Trigger rebalance
++TEST $CLI volume rebalance $V0 start force
++EXPECT_WITHIN $REBALANCE_TIMEOUT "completed" rebalance_status_field $V0
++
++#Verify ctime xattr heal on directory
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.glusterfs.mdata' check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V0}6/dir1"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.glusterfs.mdata' check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V0}7/dir1"
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.glusterfs.mdata' check_for_xattr 'trusted.glusterfs.mdata' "$B0/${V0}8/dir1"
++
++b6_mdata=$(get_mdata "$B0/${V0}6/dir1")
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "${b6_mdata}" get_mdata $B0/${V0}7/dir1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "${b6_mdata}" get_mdata $B0/${V0}8/dir1
++
++cleanup;
+diff --git a/tests/bugs/replicate/bug-1734370-entry-heal-restore-time.t b/tests/bugs/replicate/bug-1734370-entry-heal-restore-time.t
+new file mode 100644
+index 0000000..298d6ed
+--- /dev/null
++++ b/tests/bugs/replicate/bug-1734370-entry-heal-restore-time.t
+@@ -0,0 +1,84 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../afr.rc
++
++cleanup;
++
++function time_stamps_match {
++        path=$1
++        mtime_source_b0=$(get_mtime $B0/${V0}0/$path)
++        atime_source_b0=$(get_atime $B0/${V0}0/$path)
++        mtime_source_b2=$(get_mtime $B0/${V0}2/$path)
++        atime_source_b2=$(get_atime $B0/${V0}2/$path)
++        mtime_sink_b1=$(get_mtime $B0/${V0}1/$path)
++        atime_sink_b1=$(get_atime $B0/${V0}1/$path)
++
++        #The same brick must be the source of heal for both atime and mtime.
++        if [[ ( $mtime_source_b0 -eq $mtime_sink_b1 && $atime_source_b0 -eq $atime_sink_b1 ) || \
++              ( $mtime_source_b2 -eq $mtime_sink_b1 && $atime_source_b2 -eq $atime_sink_b1 ) ]]
++        then
++            echo "Y"
++        else
++            echo "N"
++        fi
++
++}
++
++# Test that the parent dir's timestamps are restored during entry-heal.
++GET_MDATA_PATH=$(dirname $0)/../../utils
++build_tester $GET_MDATA_PATH/get-mdata-xattr.c
++
++TEST glusterd;
++TEST pidof glusterd;
++TEST $CLI volume create $V0 replica 3 $H0:$B0/${V0}{0,1,2};
++TEST $CLI volume set $V0 ctime on
++TEST $CLI volume start $V0;
++
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 --attribute-timeout=0 --entry-timeout=0 $M0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 2
++
++###############################################################################
++TEST mkdir $M0/DIR
++TEST kill_brick $V0 $H0 $B0/${V0}1
++TEST touch $M0/DIR/FILE
++
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "Y" glustershd_up_status
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 1
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 2
++TEST $CLI volume heal $V0
++EXPECT_WITHIN $HEAL_TIMEOUT "0" get_pending_heal_count $V0
++
++EXPECT "Y" time_stamps_match DIR
++ctime_source1=$(get_ctime $B0/${V0}0/$path)
++ctime_source2=$(get_ctime $B0/${V0}2/$path)
++ctime_sink=$(get_ctime $B0/${V0}1/$path)
++TEST [ $ctime_source1 -eq $ctime_sink ]
++TEST [ $ctime_source2 -eq $ctime_sink ]
++
++###############################################################################
++# Repeat the test with ctime feature disabled.
++TEST $CLI volume set $V0 features.ctime off
++TEST mkdir $M0/DIR2
++TEST kill_brick $V0 $H0 $B0/${V0}1
++TEST touch $M0/DIR2/FILE
++
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "Y" glustershd_up_status
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 1
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 2
++TEST $CLI volume heal $V0
++EXPECT_WITHIN $HEAL_TIMEOUT "0" get_pending_heal_count $V0
++
++EXPECT "Y" time_stamps_match DIR2
++
++TEST rm $GET_MDATA_PATH/get-mdata-xattr
++cleanup;
+diff --git a/tests/volume.rc b/tests/volume.rc
+index 76a8fd4..9a002d9 100644
+--- a/tests/volume.rc
++++ b/tests/volume.rc
+@@ -371,6 +371,19 @@ function get_gfid2path {
+         getfattr -h --only-values -n glusterfs.gfidtopath $path 2>/dev/null
+ }
+ 
++function get_mdata {
++        local path=$1
++        getfattr -h -e hex -n trusted.glusterfs.mdata $path 2>/dev/null | grep "trusted.glusterfs.mdata" | cut -f2 -d'='
++}
++
++function get_mdata_count {
++    getfattr -d -m . -e hex $@ 2>/dev/null | grep mdata | wc -l
++}
++
++function get_mdata_uniq_count {
++    getfattr -d -m . -e hex $@ 2>/dev/null | grep mdata | uniq | wc -l
++}
++
+ function get_xattr_key {
+         local key=$1
+         local path=$2
+@@ -925,7 +938,7 @@ function get_ctime {
+     local time=$(get-mdata-xattr -c $1)
+     if [ $time == "-1" ];
+     then
+-        echo $(stat -c %Z $2)
++        echo $(stat -c %Z $1)
+     else
+         echo $time
+     fi
+diff --git a/xlators/cluster/afr/src/afr-self-heal-common.c b/xlators/cluster/afr/src/afr-self-heal-common.c
+index b38085a..81ef38a 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-common.c
++++ b/xlators/cluster/afr/src/afr-self-heal-common.c
+@@ -513,7 +513,8 @@ afr_selfheal_restore_time(call_frame_t *frame, xlator_t *this, inode_t *inode,
+ 
+     AFR_ONLIST(healed_sinks, frame, afr_sh_generic_fop_cbk, setattr, &loc,
+                &replies[source].poststat,
+-               (GF_SET_ATTR_ATIME | GF_SET_ATTR_MTIME), NULL);
++               (GF_SET_ATTR_ATIME | GF_SET_ATTR_MTIME | GF_SET_ATTR_CTIME),
++               NULL);
+ 
+     loc_wipe(&loc);
+ 
+diff --git a/xlators/cluster/afr/src/afr-self-heal-entry.c b/xlators/cluster/afr/src/afr-self-heal-entry.c
+index e07b521..35b600f 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-entry.c
++++ b/xlators/cluster/afr/src/afr-self-heal-entry.c
+@@ -1032,6 +1032,8 @@ unlock:
+             goto postop_unlock;
+         }
+ 
++        afr_selfheal_restore_time(frame, this, fd->inode, source, healed_sinks,
++                                  locked_replies);
+         ret = afr_selfheal_undo_pending(
+             frame, this, fd->inode, sources, sinks, healed_sinks, undid_pending,
+             AFR_ENTRY_TRANSACTION, locked_replies, postop_lock);
+diff --git a/xlators/cluster/dht/src/dht-common.c b/xlators/cluster/dht/src/dht-common.c
+index 219b072..99cccd6 100644
+--- a/xlators/cluster/dht/src/dht-common.c
++++ b/xlators/cluster/dht/src/dht-common.c
+@@ -115,6 +115,7 @@ char *xattrs_to_heal[] = {"user.",
+                           QUOTA_LIMIT_KEY,
+                           QUOTA_LIMIT_OBJECTS_KEY,
+                           GF_SELINUX_XATTR_KEY,
++                          GF_XATTR_MDATA_KEY,
+                           NULL};
+ 
+ char *dht_dbg_vxattrs[] = {DHT_DBG_HASHED_SUBVOL_PATTERN, NULL};
+diff --git a/xlators/cluster/ec/src/ec-heal.c b/xlators/cluster/ec/src/ec-heal.c
+index 0f0f398..06a7016 100644
+--- a/xlators/cluster/ec/src/ec-heal.c
++++ b/xlators/cluster/ec/src/ec-heal.c
+@@ -2301,9 +2301,10 @@ ec_restore_time_and_adjust_versions(call_frame_t *frame, ec_t *ec, fd_t *fd,
+ 
+         loc.inode = inode_ref(fd->inode);
+         gf_uuid_copy(loc.gfid, fd->inode->gfid);
+-        ret = cluster_setattr(ec->xl_list, healed_sinks, ec->nodes, replies,
+-                              output, frame, ec->xl, &loc, &source_buf,
+-                              GF_SET_ATTR_ATIME | GF_SET_ATTR_MTIME, NULL);
++        ret = cluster_setattr(
++            ec->xl_list, healed_sinks, ec->nodes, replies, output, frame,
++            ec->xl, &loc, &source_buf,
++            GF_SET_ATTR_ATIME | GF_SET_ATTR_MTIME | GF_SET_ATTR_CTIME, NULL);
+         EC_INTERSECT(healed_sinks, healed_sinks, output, ec->nodes);
+         if (EC_COUNT(healed_sinks, ec->nodes) == 0) {
+             ret = -ENOTCONN;
+diff --git a/xlators/storage/posix/src/posix-entry-ops.c b/xlators/storage/posix/src/posix-entry-ops.c
+index 34ee2b8..283b305 100644
+--- a/xlators/storage/posix/src/posix-entry-ops.c
++++ b/xlators/storage/posix/src/posix-entry-ops.c
+@@ -500,7 +500,7 @@ post_op:
+         posix_set_gfid2path_xattr(this, real_path, loc->pargfid, loc->name);
+     }
+ 
+-    op_ret = posix_entry_create_xattr_set(this, real_path, xdata);
++    op_ret = posix_entry_create_xattr_set(this, loc, real_path, xdata);
+     if (op_ret) {
+         if (errno != EEXIST)
+             gf_msg(this->name, GF_LOG_ERROR, errno, P_MSG_XATTR_FAILED,
+@@ -828,7 +828,7 @@ posix_mkdir(call_frame_t *frame, xlator_t *this, loc_t *loc, mode_t mode,
+                "setting ACLs on %s failed ", real_path);
+     }
+ 
+-    op_ret = posix_entry_create_xattr_set(this, real_path, xdata);
++    op_ret = posix_entry_create_xattr_set(this, loc, real_path, xdata);
+     if (op_ret) {
+         gf_msg(this->name, GF_LOG_ERROR, errno, P_MSG_XATTR_FAILED,
+                "setting xattrs on %s failed", real_path);
+@@ -1529,7 +1529,7 @@ posix_symlink(call_frame_t *frame, xlator_t *this, const char *linkname,
+     }
+ 
+ ignore:
+-    op_ret = posix_entry_create_xattr_set(this, real_path, xdata);
++    op_ret = posix_entry_create_xattr_set(this, loc, real_path, xdata);
+     if (op_ret) {
+         gf_msg(this->name, GF_LOG_ERROR, errno, P_MSG_XATTR_FAILED,
+                "setting xattrs on %s failed ", real_path);
+@@ -2167,7 +2167,7 @@ posix_create(call_frame_t *frame, xlator_t *this, loc_t *loc, int32_t flags,
+         posix_set_gfid2path_xattr(this, real_path, loc->pargfid, loc->name);
+     }
+ ignore:
+-    op_ret = posix_entry_create_xattr_set(this, real_path, xdata);
++    op_ret = posix_entry_create_xattr_set(this, loc, real_path, xdata);
+     if (op_ret) {
+         gf_msg(this->name, GF_LOG_ERROR, errno, P_MSG_XATTR_FAILED,
+                "setting xattrs on %s failed ", real_path);
+diff --git a/xlators/storage/posix/src/posix-helpers.c b/xlators/storage/posix/src/posix-helpers.c
+index d143d4c..6a1a35c 100644
+--- a/xlators/storage/posix/src/posix-helpers.c
++++ b/xlators/storage/posix/src/posix-helpers.c
+@@ -1188,11 +1188,15 @@ posix_dump_buffer(xlator_t *this, const char *real_path, const char *key,
+ #endif
+ 
+ int
+-posix_handle_pair(xlator_t *this, const char *real_path, char *key,
++posix_handle_pair(xlator_t *this, loc_t *loc, const char *real_path, char *key,
+                   data_t *value, int flags, struct iatt *stbuf)
+ {
+     int sys_ret = -1;
+     int ret = 0;
++    int op_errno = 0;
++    struct mdata_iatt mdata_iatt = {
++        0,
++    };
+ #ifdef GF_DARWIN_HOST_OS
+     const int error_code = EINVAL;
+ #else
+@@ -1216,6 +1220,23 @@ posix_handle_pair(xlator_t *this, const char *real_path, char *key,
+         /* ignore this key value pair */
+         ret = 0;
+         goto out;
++    } else if (!strncmp(key, GF_XATTR_MDATA_KEY, strlen(key))) {
++        /* This is either by rebalance or self heal. Create the xattr if it's
++         * not present. Compare and update the larger value if the xattr is
++         * already present.
++         */
++        if (loc == NULL) {
++            ret = -EINVAL;
++            goto out;
++        }
++        posix_mdata_iatt_from_disk(&mdata_iatt,
++                                   (posix_mdata_disk_t *)value->data);
++        ret = posix_set_mdata_xattr_legacy_files(this, loc->inode, real_path,
++                                                 &mdata_iatt, &op_errno);
++        if (ret != 0) {
++            ret = -op_errno;
++        }
++        goto out;
+     } else {
+         sys_ret = sys_lsetxattr(real_path, key, value->data, value->len, flags);
+ #ifdef GF_DARWIN_HOST_OS
+@@ -1810,8 +1831,8 @@ _handle_entry_create_keyvalue_pair(dict_t *d, char *k, data_t *v, void *tmp)
+         return 0;
+     }
+ 
+-    ret = posix_handle_pair(filler->this, filler->real_path, k, v, XATTR_CREATE,
+-                            filler->stbuf);
++    ret = posix_handle_pair(filler->this, filler->loc, filler->real_path, k, v,
++                            XATTR_CREATE, filler->stbuf);
+     if (ret < 0) {
+         errno = -ret;
+         return -1;
+@@ -1820,7 +1841,8 @@ _handle_entry_create_keyvalue_pair(dict_t *d, char *k, data_t *v, void *tmp)
+ }
+ 
+ int
+-posix_entry_create_xattr_set(xlator_t *this, const char *path, dict_t *dict)
++posix_entry_create_xattr_set(xlator_t *this, loc_t *loc, const char *path,
++                             dict_t *dict)
+ {
+     int ret = -1;
+ 
+@@ -1834,6 +1856,7 @@ posix_entry_create_xattr_set(xlator_t *this, const char *path, dict_t *dict)
+     filler.this = this;
+     filler.real_path = path;
+     filler.stbuf = NULL;
++    filler.loc = loc;
+ 
+     ret = dict_foreach(dict, _handle_entry_create_keyvalue_pair, &filler);
+ 
+diff --git a/xlators/storage/posix/src/posix-inode-fd-ops.c b/xlators/storage/posix/src/posix-inode-fd-ops.c
+index e0ea85b..a2a518f 100644
+--- a/xlators/storage/posix/src/posix-inode-fd-ops.c
++++ b/xlators/storage/posix/src/posix-inode-fd-ops.c
+@@ -429,22 +429,9 @@ posix_setattr(call_frame_t *frame, xlator_t *this, loc_t *loc,
+                                     &frame->root->ctime, stbuf, valid);
+     }
+ 
+-    if (valid & GF_SET_ATTR_CTIME && !priv->ctime) {
+-        /*
+-         * If ctime is not enabled, we have no means to associate an
+-         * arbitrary ctime with the file, so as a fallback, we ignore
+-         * the ctime payload and update the file ctime to current time
+-         * (which is possible directly with the POSIX API).
+-         */
+-        op_ret = PATH_SET_TIMESPEC_OR_TIMEVAL(real_path, NULL);
+-        if (op_ret == -1) {
+-            op_errno = errno;
+-            gf_msg(this->name, GF_LOG_ERROR, errno, P_MSG_UTIMES_FAILED,
+-                   "setattr (utimes) on %s "
+-                   "failed",
+-                   real_path);
+-            goto out;
+-        }
++    if ((valid & GF_SET_ATTR_CTIME) && priv->ctime) {
++        posix_update_ctime_in_mdata(this, real_path, -1, loc->inode,
++                                    &frame->root->ctime, stbuf, valid);
+     }
+ 
+     if (!valid) {
+@@ -469,14 +456,6 @@ posix_setattr(call_frame_t *frame, xlator_t *this, loc_t *loc,
+         goto out;
+     }
+ 
+-    if (valid & GF_SET_ATTR_CTIME && priv->ctime) {
+-        /*
+-         * If we got ctime payload, we override
+-         * the ctime of statpost with that.
+-         */
+-        statpost.ia_ctime = stbuf->ia_ctime;
+-        statpost.ia_ctime_nsec = stbuf->ia_ctime_nsec;
+-    }
+     posix_set_ctime(frame, this, real_path, -1, loc->inode, &statpost);
+ 
+     if (xdata)
+@@ -592,6 +571,7 @@ posix_fsetattr(call_frame_t *frame, xlator_t *this, fd_t *fd,
+     struct iatt statpost = {
+         0,
+     };
++    struct posix_private *priv = NULL;
+     struct posix_fd *pfd = NULL;
+     dict_t *xattr_rsp = NULL;
+     int32_t ret = -1;
+@@ -604,6 +584,9 @@ posix_fsetattr(call_frame_t *frame, xlator_t *this, fd_t *fd,
+     VALIDATE_OR_GOTO(this, out);
+     VALIDATE_OR_GOTO(fd, out);
+ 
++    priv = this->private;
++    VALIDATE_OR_GOTO(priv, out);
++
+     ret = posix_fd_ctx_get(fd, this, &pfd, &op_errno);
+     if (ret < 0) {
+         gf_msg_debug(this->name, 0, "pfd is NULL from fd=%p", fd);
+@@ -656,6 +639,11 @@ posix_fsetattr(call_frame_t *frame, xlator_t *this, fd_t *fd,
+                                     &frame->root->ctime, stbuf, valid);
+     }
+ 
++    if ((valid & GF_SET_ATTR_CTIME) && priv->ctime) {
++        posix_update_ctime_in_mdata(this, NULL, pfd->fd, fd->inode,
++                                    &frame->root->ctime, stbuf, valid);
++    }
++
+     if (!valid) {
+         op_ret = sys_fchown(pfd->fd, -1, -1);
+         if (op_ret == -1) {
+@@ -2578,7 +2566,7 @@ _handle_setxattr_keyvalue_pair(dict_t *d, char *k, data_t *v, void *tmp)
+ 
+     filler = tmp;
+ 
+-    return posix_handle_pair(filler->this, filler->real_path, k, v,
++    return posix_handle_pair(filler->this, filler->loc, filler->real_path, k, v,
+                              filler->flags, filler->stbuf);
+ }
+ 
+@@ -2641,27 +2629,27 @@ posix_setxattr(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *dict,
+     priv = this->private;
+     DISK_SPACE_CHECK_AND_GOTO(frame, priv, xdata, op_ret, op_errno, out);
+ 
++    MAKE_INODE_HANDLE(real_path, this, loc, NULL);
++    if (!real_path) {
++        op_ret = -1;
++        op_errno = ESTALE;
++        goto out;
++    }
++
+     ret = dict_get_mdata(dict, CTIME_MDATA_XDATA_KEY, &mdata_iatt);
+     if (ret == 0) {
+         /* This is initiated by lookup when ctime feature is enabled to create
+          * "trusted.glusterfs.mdata" xattr if not present. These are the files
+          * which were created when ctime feature is disabled.
+          */
+-        ret = posix_set_mdata_xattr_legacy_files(this, loc->inode, &mdata_iatt,
+-                                                 &op_errno);
++        ret = posix_set_mdata_xattr_legacy_files(this, loc->inode, real_path,
++                                                 &mdata_iatt, &op_errno);
+         if (ret != 0) {
+             op_ret = -1;
+         }
+         goto out;
+     }
+ 
+-    MAKE_INODE_HANDLE(real_path, this, loc, NULL);
+-    if (!real_path) {
+-        op_ret = -1;
+-        op_errno = ESTALE;
+-        goto out;
+-    }
+-
+     posix_pstat(this, loc->inode, loc->gfid, real_path, &preop, _gf_false);
+ 
+     op_ret = -1;
+@@ -2796,6 +2784,7 @@ posix_setxattr(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *dict,
+     filler.real_path = real_path;
+     filler.this = this;
+     filler.stbuf = &preop;
++    filler.loc = loc;
+ 
+ #ifdef GF_DARWIN_HOST_OS
+     filler.flags = map_xattr_flags(flags);
+diff --git a/xlators/storage/posix/src/posix-metadata.c b/xlators/storage/posix/src/posix-metadata.c
+index 532daa2..9efaf99 100644
+--- a/xlators/storage/posix/src/posix-metadata.c
++++ b/xlators/storage/posix/src/posix-metadata.c
+@@ -56,6 +56,19 @@ posix_mdata_from_disk(posix_mdata_t *out, posix_mdata_disk_t *in)
+     out->atime.tv_nsec = be64toh(in->atime.tv_nsec);
+ }
+ 
++void
++posix_mdata_iatt_from_disk(struct mdata_iatt *out, posix_mdata_disk_t *in)
++{
++    out->ia_ctime = be64toh(in->ctime.tv_sec);
++    out->ia_ctime_nsec = be64toh(in->ctime.tv_nsec);
++
++    out->ia_mtime = be64toh(in->mtime.tv_sec);
++    out->ia_mtime_nsec = be64toh(in->mtime.tv_nsec);
++
++    out->ia_atime = be64toh(in->atime.tv_sec);
++    out->ia_atime_nsec = be64toh(in->atime.tv_nsec);
++}
++
+ /* posix_fetch_mdata_xattr fetches the posix_mdata_t from disk */
+ static int
+ posix_fetch_mdata_xattr(xlator_t *this, const char *real_path_arg, int _fd,
+@@ -341,6 +354,7 @@ posix_compare_timespec(struct timespec *first, struct timespec *second)
+ 
+ int
+ posix_set_mdata_xattr_legacy_files(xlator_t *this, inode_t *inode,
++                                   const char *realpath,
+                                    struct mdata_iatt *mdata_iatt, int *op_errno)
+ {
+     posix_mdata_t *mdata = NULL;
+@@ -369,8 +383,8 @@ posix_set_mdata_xattr_legacy_files(xlator_t *this, inode_t *inode,
+                 goto unlock;
+             }
+ 
+-            ret = posix_fetch_mdata_xattr(this, NULL, -1, inode, (void *)mdata,
+-                                          op_errno);
++            ret = posix_fetch_mdata_xattr(this, realpath, -1, inode,
++                                          (void *)mdata, op_errno);
+             if (ret == 0) {
+                 /* Got mdata from disk. This is a race, another client
+                  * has healed the xattr during lookup. So set it in inode
+@@ -412,7 +426,7 @@ posix_set_mdata_xattr_legacy_files(xlator_t *this, inode_t *inode,
+             }
+         }
+ 
+-        ret = posix_store_mdata_xattr(this, NULL, -1, inode, mdata);
++        ret = posix_store_mdata_xattr(this, realpath, -1, inode, mdata);
+         if (ret) {
+             gf_msg(this->name, GF_LOG_ERROR, errno, P_MSG_STOREMDATA_FAILED,
+                    "gfid: %s key:%s ", uuid_utoa(inode->gfid),
+@@ -445,7 +459,8 @@ posix_set_mdata_xattr(xlator_t *this, const char *real_path, int fd,
+     GF_VALIDATE_OR_GOTO(this->name, inode, out);
+     GF_VALIDATE_OR_GOTO(this->name, time, out);
+ 
+-    if (update_utime && (!u_atime || !u_mtime)) {
++    if (update_utime && (flag->ctime && !time) && (flag->atime && !u_atime) &&
++        (flag->mtime && !u_mtime)) {
+         goto out;
+     }
+ 
+@@ -652,6 +667,48 @@ posix_update_utime_in_mdata(xlator_t *this, const char *real_path, int fd,
+     return;
+ }
+ 
++/* posix_update_ctime_in_mdata updates the posix_mdata_t when ctime needs
++ * to be modified
++ */
++void
++posix_update_ctime_in_mdata(xlator_t *this, const char *real_path, int fd,
++                            inode_t *inode, struct timespec *ctime,
++                            struct iatt *stbuf, int valid)
++{
++    int32_t ret = 0;
++#if defined(HAVE_UTIMENSAT)
++    struct timespec tv_ctime = {
++        0,
++    };
++#else
++    struct timeval tv_ctime = {
++        0,
++    };
++#endif
++    posix_mdata_flag_t flag = {
++        0,
++    };
++
++    struct posix_private *priv = NULL;
++    priv = this->private;
++
++    if (inode && priv->ctime) {
++        tv_ctime.tv_sec = stbuf->ia_ctime;
++        SET_TIMESPEC_NSEC_OR_TIMEVAL_USEC(tv_ctime, stbuf->ia_ctime_nsec);
++        flag.ctime = 1;
++
++        ret = posix_set_mdata_xattr(this, real_path, -1, inode, &tv_ctime, NULL,
++                                    NULL, NULL, &flag, _gf_true);
++        if (ret) {
++            gf_msg(this->name, GF_LOG_WARNING, errno, P_MSG_SETMDATA_FAILED,
++                   "posix set mdata atime failed on file:"
++                   " %s gfid:%s",
++                   real_path, uuid_utoa(inode->gfid));
++        }
++    }
++    return;
++}
++
+ static void
+ posix_get_mdata_flag(uint64_t flags, posix_mdata_flag_t *flag)
+ {
+diff --git a/xlators/storage/posix/src/posix-metadata.h b/xlators/storage/posix/src/posix-metadata.h
+index c176699..63e8771 100644
+--- a/xlators/storage/posix/src/posix-metadata.h
++++ b/xlators/storage/posix/src/posix-metadata.h
+@@ -43,6 +43,10 @@ posix_update_utime_in_mdata(xlator_t *this, const char *real_path, int fd,
+                             inode_t *inode, struct timespec *ctime,
+                             struct iatt *stbuf, int valid);
+ void
++posix_update_ctime_in_mdata(xlator_t *this, const char *real_path, int fd,
++                            inode_t *inode, struct timespec *ctime,
++                            struct iatt *stbuf, int valid);
++void
+ posix_set_ctime(call_frame_t *frame, xlator_t *this, const char *real_path,
+                 int fd, inode_t *inode, struct iatt *stbuf);
+ void
+@@ -56,7 +60,10 @@ posix_set_ctime_cfr(call_frame_t *frame, xlator_t *this,
+                     int fd_out, inode_t *inode_out, struct iatt *stbuf_out);
+ int
+ posix_set_mdata_xattr_legacy_files(xlator_t *this, inode_t *inode,
++                                   const char *realpath,
+                                    struct mdata_iatt *mdata_iatt,
+                                    int *op_errno);
++void
++posix_mdata_iatt_from_disk(struct mdata_iatt *out, posix_mdata_disk_t *in);
+ 
+ #endif /* _POSIX_METADATA_H */
+diff --git a/xlators/storage/posix/src/posix.h b/xlators/storage/posix/src/posix.h
+index 64288a7..dd51062 100644
+--- a/xlators/storage/posix/src/posix.h
++++ b/xlators/storage/posix/src/posix.h
+@@ -339,7 +339,7 @@ dict_t *
+ posix_xattr_fill(xlator_t *this, const char *path, loc_t *loc, fd_t *fd,
+                  int fdnum, dict_t *xattr, struct iatt *buf);
+ int
+-posix_handle_pair(xlator_t *this, const char *real_path, char *key,
++posix_handle_pair(xlator_t *this, loc_t *loc, const char *real_path, char *key,
+                   data_t *value, int flags, struct iatt *stbuf);
+ int
+ posix_fhandle_pair(call_frame_t *frame, xlator_t *this, int fd, char *key,
+@@ -352,7 +352,8 @@ int
+ posix_gfid_heal(xlator_t *this, const char *path, loc_t *loc,
+                 dict_t *xattr_req);
+ int
+-posix_entry_create_xattr_set(xlator_t *this, const char *path, dict_t *dict);
++posix_entry_create_xattr_set(xlator_t *this, loc_t *loc, const char *path,
++                             dict_t *dict);
+ 
+ int
+ posix_fd_ctx_get(fd_t *fd, xlator_t *this, struct posix_fd **pfd,
+-- 
+1.8.3.1
+

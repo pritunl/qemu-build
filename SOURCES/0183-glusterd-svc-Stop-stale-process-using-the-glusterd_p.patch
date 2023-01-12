@@ -1,0 +1,47 @@
+From fe9159ee42f0f67b01e6a495df8105ea0f66738d Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Thu, 30 May 2019 23:48:05 +0530
+Subject: [PATCH 183/192] glusterd/svc: Stop stale process using the
+ glusterd_proc_stop
+
+While restarting a glusterd process, when we have a stale pid
+we were doing a simple kill. Instead we can use glusterd_proc_stop
+Because it has more logging plus force kill in case if there is
+any problem with kill signal handling.
+
+Upstream patch: https://review.gluster.org/#/c/glusterfs/+/22791/
+
+>Change-Id: I4a2dadc210a7a65762dd714e809899510622b7ec
+>updates: bz#1710054
+>Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+
+Change-Id: I3327528d8ebf90bbb2221265a0cf059c9359f141
+BUG: 1720248
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172290
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-svc-helper.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+index 6a3ca52..a6e662f 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
++++ b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+@@ -488,9 +488,9 @@ glusterd_shd_svc_mux_init(glusterd_volinfo_t *volinfo, glusterd_svc_t *svc)
+ 
+             if (!mux_proc) {
+                 if (pid != -1 && sys_access(svc->proc.pidfile, R_OK) == 0) {
+-                    /* stale pid file, unlink it. */
+-                    kill(pid, SIGTERM);
+-                    sys_unlink(svc->proc.pidfile);
++                    /* stale pid file, stop and unlink it */
++                    glusterd_proc_stop(&svc->proc, SIGTERM, PROC_STOP_FORCE);
++                    glusterd_unlink_file(svc->proc.pidfile);
+                 }
+                 mux_proc = __gf_find_compatible_svc(GD_NODE_SHD);
+             }
+-- 
+1.8.3.1
+

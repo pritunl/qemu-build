@@ -1,0 +1,38 @@
+From 3943fce5818a353117fc1c492e6383434d742979 Mon Sep 17 00:00:00 2001
+From: Barak Sason <bsasonro@redhat.com>
+Date: Sun, 18 Aug 2019 17:52:04 +0300
+Subject: [PATCH 427/449] storage/posix - Fixing a coverity issue
+
+Fixed a resource leak of variable 'pfd'
+
+backport of https://review.gluster.org/#/c/glusterfs/+/23261/
+>CID: 1400673
+>Updates: bz#789278
+>Change-Id: I78e1e8a89e0604b56e35a75c25d436b35db096c3
+>Signed-off-by: Barak Sason <bsasonro@redhat.com>
+
+BUG: 1787310
+Change-Id: I78e1e8a89e0604b56e35a75c25d436b35db096c3
+Signed-off-by: Barak Sason Rofman <bsasonro@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202563
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/storage/posix/src/posix-inode-fd-ops.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/xlators/storage/posix/src/posix-inode-fd-ops.c b/xlators/storage/posix/src/posix-inode-fd-ops.c
+index bcce06e..5748b9f 100644
+--- a/xlators/storage/posix/src/posix-inode-fd-ops.c
++++ b/xlators/storage/posix/src/posix-inode-fd-ops.c
+@@ -1603,6 +1603,7 @@ posix_open(call_frame_t *frame, xlator_t *this, loc_t *loc, int32_t flags,
+         if (op_ret == -1) {
+             gf_msg(this->name, GF_LOG_ERROR, errno, P_MSG_FSTAT_FAILED,
+                    "pre-operation fstat failed on fd=%p", fd);
++            GF_FREE(pfd);
+             goto out;
+         }
+ 
+-- 
+1.8.3.1
+

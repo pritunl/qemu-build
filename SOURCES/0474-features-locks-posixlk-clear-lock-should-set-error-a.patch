@@ -1,0 +1,49 @@
+From 3612b3a46c33d19bb7d4aee6eb6625d8d903d459 Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Wed, 17 Jun 2020 10:44:37 +0530
+Subject: [PATCH 474/478] features/locks: posixlk-clear-lock should set error
+ as EINTR
+
+Problem:
+fuse on receiving interrupt for setlk sends clear-lock "fop"
+using virtual-getxattr. At the moment blocked locks which are
+cleared return EAGAIN errno as opposed to EINTR errno
+
+Fix:
+Return EINTR errno.
+
+Upstream:
+> Reviewed-on: https://review.gluster.org/24587
+> Updates: #1310
+> Change-Id: I47de0fcaec370b267f2f5f89deeb37e1b9c0ee9b
+> Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+
+BUG: 1821743
+Change-Id: Id8301ce6e21c009949e88db5904d8b6ecc278f66
+Signed-off-by: Csaba Henk <csaba@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/216157
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/features/locks/src/clear.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/features/locks/src/clear.c b/xlators/features/locks/src/clear.c
+index 116aed6..ab1eac6 100644
+--- a/xlators/features/locks/src/clear.c
++++ b/xlators/features/locks/src/clear.c
+@@ -181,9 +181,9 @@ clrlk_clear_posixlk(xlator_t *this, pl_inode_t *pl_inode, clrlk_args *args,
+             if (plock->blocked) {
+                 bcount++;
+                 pl_trace_out(this, plock->frame, NULL, NULL, F_SETLKW,
+-                             &plock->user_flock, -1, EAGAIN, NULL);
++                             &plock->user_flock, -1, EINTR, NULL);
+ 
+-                STACK_UNWIND_STRICT(lk, plock->frame, -1, EAGAIN,
++                STACK_UNWIND_STRICT(lk, plock->frame, -1, EINTR,
+                                     &plock->user_flock, NULL);
+ 
+             } else {
+-- 
+1.8.3.1
+

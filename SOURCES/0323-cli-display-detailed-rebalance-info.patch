@@ -1,0 +1,101 @@
+From 852c475040a599ed35798dbb388c6b59c1d0a820 Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Tue, 22 Oct 2019 15:06:29 +0530
+Subject: [PATCH 323/335] cli: display detailed rebalance info
+
+Problem: When one of the node is down in cluster,
+rebalance status is not displaying detailed
+information.
+
+Cause: In glusterd_volume_rebalance_use_rsp_dict()
+we are aggregating rsp from all the nodes into a
+dictionary and sending it to cli for printing. While
+assigning a index to keys we are considering all the
+peers instead of considering only the peers which are
+up. Because of which, index is not reaching till 1.
+while parsing the rsp cli unable to find status-1
+key in dictionary and going out without printing
+any information.
+
+Solution: The simplest fix for this without much
+code change is to continue to look for other keys
+when status-1 key is not found.
+
+> upstream patch: https://review.gluster.org/#/c/glusterfs/+/23588
+> fixes: bz#1764119
+> Change-Id: I0062839933c9706119eb85416256eade97e976dc
+> Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+
+BUG: 1761326
+Change-Id: I0062839933c9706119eb85416256eade97e976dc
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/185749
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ cli/src/cli-rpc-ops.c                      | 21 ++++++++++++++-------
+ tests/bugs/glusterd/rebalance-in-cluster.t |  9 +++++++++
+ 2 files changed, 23 insertions(+), 7 deletions(-)
+
+diff --git a/cli/src/cli-rpc-ops.c b/cli/src/cli-rpc-ops.c
+index b167e26..4e91265 100644
+--- a/cli/src/cli-rpc-ops.c
++++ b/cli/src/cli-rpc-ops.c
+@@ -1597,13 +1597,20 @@ gf_cli_print_rebalance_status(dict_t *dict, enum gf_task_types task_type,
+         goto out;
+     }
+ 
+-    snprintf(key, sizeof(key), "status-1");
+-
+-    ret = dict_get_int32(dict, key, (int32_t *)&status_rcd);
+-    if (ret) {
+-        gf_log("cli", GF_LOG_TRACE, "count %d %d", count, 1);
+-        gf_log("cli", GF_LOG_TRACE, "failed to get status");
+-        goto out;
++    for (i = 1; i <= count; i++) {
++        snprintf(key, sizeof(key), "status-%d", i);
++        ret = dict_get_int32(dict, key, (int32_t *)&status_rcd);
++        /* If information from a node is missing we should skip
++         * the node and try to fetch information of other nodes.
++         * If information is not found for all nodes, we should
++         * error out.
++         */
++        if (!ret)
++            break;
++        if (ret && i == count) {
++            gf_log("cli", GF_LOG_TRACE, "failed to get status");
++            goto out;
++        }
+     }
+ 
+     /* Fix layout will be sent to all nodes for the volume
+diff --git a/tests/bugs/glusterd/rebalance-in-cluster.t b/tests/bugs/glusterd/rebalance-in-cluster.t
+index 9565fae..469ec6c 100644
+--- a/tests/bugs/glusterd/rebalance-in-cluster.t
++++ b/tests/bugs/glusterd/rebalance-in-cluster.t
+@@ -4,6 +4,10 @@
+ . $(dirname $0)/../../cluster.rc
+ . $(dirname $0)/../../volume.rc
+ 
++function rebalance_status_field_1 {
++        $CLI_1 volume rebalance $1 status | awk '{print $7}' | sed -n 3p
++}
++
+ cleanup;
+ TEST launch_cluster 2;
+ TEST $CLI_1 peer probe $H2;
+@@ -29,6 +33,11 @@ TEST $CLI_1 volume add-brick $V0 $H1:$B1/${V0}1 $H2:$B2/${V0}1
+ TEST $CLI_1 volume rebalance $V0  start
+ EXPECT_WITHIN $REBALANCE_TIMEOUT "completed" cluster_rebalance_status_field 1  $V0
+ 
++#bug - 1764119 - rebalance status should display detailed info when any of the node is dowm
++TEST kill_glusterd 2
++EXPECT_WITHIN $REBALANCE_TIMEOUT "completed" rebalance_status_field_1 $V0
++
++TEST start_glusterd 2
+ #bug-1245142
+ 
+ $CLI_1 volume rebalance $V0  start &
+-- 
+1.8.3.1
+

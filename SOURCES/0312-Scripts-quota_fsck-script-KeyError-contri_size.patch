@@ -1,0 +1,59 @@
+From b1d8a5ee8b2e320aaaf9b2a145fbc285178d07bb Mon Sep 17 00:00:00 2001
+From: hari gowtham <hgowtham@redhat.com>
+Date: Tue, 22 Oct 2019 15:11:03 +0530
+Subject: [PATCH 312/313] Scripts: quota_fsck script KeyError: 'contri_size'
+
+    back-port of: https://review.gluster.org/#/c/glusterfs/+/23586/
+
+Problem: In a certain code flow, we weren't handling the
+unavailability of the contri value in the dict. Trying to print
+without the value resulted in erroring out.
+
+Fix: Have printed the whole of dictionary as the values will be
+helpful in understanding the state of the file/dir
+
+>Fixes: bz#1764129
+>Change-Id: I99c538adb712f281ca10e4e0088f404f515b9725
+>Signed-off-by: hari gowtham <hgowtham@redhat.com>
+
+BUG: 1719171
+Change-Id: I99c538adb712f281ca10e4e0088f404f515b9725
+Signed-off-by: hari gowtham <hgowtham@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/183720
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/quota/quota_fsck.py | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/extras/quota/quota_fsck.py b/extras/quota/quota_fsck.py
+index f03895d..485a37a 100755
+--- a/extras/quota/quota_fsck.py
++++ b/extras/quota/quota_fsck.py
+@@ -52,17 +52,17 @@ epilog_msg='''
+ 
+ def print_msg(log_type, path, xattr_dict = {}, stbuf = "", dir_size = None):
+     if log_type == QUOTA_VERBOSE:
+-        print('%-24s %-60s\nxattr_values: %s\n%s\n' % {"Verbose", path,  xattr_dict, stbuf})
++        print('%-24s %-60s\nxattr_values: %s\n%s\n' % ("Verbose", path, xattr_dict, stbuf))
+     elif log_type == QUOTA_META_ABSENT:
+-        print('%-24s %-60s\n%s\n' % {"Quota-Meta Absent", path, xattr_dict})
++        print('%-24s %-60s\n%s\n' % ("Quota-Meta Absent", path, xattr_dict))
+     elif log_type == QUOTA_SIZE_MISMATCH:
+         print("mismatch")
+         if dir_size is not None:
+-            print('%24s %60s %12s %12s' % {"Size Mismatch", path, xattr_dict['contri_size'],
+-                   dir_size})
++            print('%24s %60s %12s %12s' % ("Size Mismatch", path, 
++                xattr_dict, dir_size))
+         else:
+-            print('%-24s %-60s %-12i %-12i' % {"Size Mismatch", path, xattr_dict['contri_size'],
+-                   stbuf.st_size})
++            print('%-24s %-60s %-12i %-12i' % ("Size Mismatch", path, xattr_dict,
++                   stbuf.st_size))
+ 
+ def size_differs_lot(s1, s2):
+     '''
+-- 
+1.8.3.1
+

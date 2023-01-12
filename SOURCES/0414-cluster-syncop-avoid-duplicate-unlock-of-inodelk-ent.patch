@@ -1,0 +1,62 @@
+From 5b549cbf3f1873054c6d187b09aa9f9313971b1f Mon Sep 17 00:00:00 2001
+From: Kinglong Mee <kinglongmee@gmail.com>
+Date: Mon, 18 Mar 2019 20:47:54 +0800
+Subject: [PATCH 414/449] cluster-syncop: avoid duplicate unlock of
+ inodelk/entrylk
+
+When using ec, there are many spam messages in brick and client
+logs files.
+
+When shd does entry heal, it takes lock on a directory using
+cluster_tiebreaker_inodelk(). If it does not get lock on all
+the bricks because other clients has got lock on some bricks,
+it will unlock the locks on those bricks which it got and then
+will try blocking locks (If any one of the previous was successful).
+
+The problem come here. In case we do not get locks on all the
+required bricks, we are sending unlock request twice on those
+bricks where we got the locks.
+
+BUG: 1750211
+> Upstream patch: https://review.gluster.org/#/c/glusterfs/+/22377/
+> Change-Id: Ib164d29ebb071f620a4ca9679c4345ef7c88512a
+> Updates: bz#1689920
+> Signed-off-by: Kinglong Mee <mijinlong@open-fs.com>
+
+Change-Id: I1647548ba75fdd27fd4e20dec08db67774f43375
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202477
+Tested-by: Ashish Pandey <aspandey@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/cluster-syncop.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/libglusterfs/src/cluster-syncop.c b/libglusterfs/src/cluster-syncop.c
+index 5a08f26..6ee89dd 100644
+--- a/libglusterfs/src/cluster-syncop.c
++++ b/libglusterfs/src/cluster-syncop.c
+@@ -1203,6 +1203,10 @@ cluster_tiebreaker_inodelk(xlator_t **subvols, unsigned char *on,
+             if (num_success) {
+                 FOP_SEQ(subvols, on, numsubvols, replies, locked_on, frame,
+                         inodelk, dom, &loc, F_SETLKW, &flock, NULL);
++            } else {
++                loc_wipe(&loc);
++                memset(locked_on, 0, numsubvols);
++                return 0;
+             }
+             break;
+         }
+@@ -1244,7 +1248,9 @@ cluster_tiebreaker_entrylk(xlator_t **subvols, unsigned char *on,
+                         entrylk, dom, &loc, name, ENTRYLK_LOCK, ENTRYLK_WRLCK,
+                         NULL);
+             } else {
++                loc_wipe(&loc);
+                 memset(locked_on, 0, numsubvols);
++                return 0;
+             }
+             break;
+         }
+-- 
+1.8.3.1
+

@@ -1,0 +1,49 @@
+From e205516ef874d617e4756856098bf10e17b0ea3d Mon Sep 17 00:00:00 2001
+From: Raghavendra G <rgowdapp@redhat.com>
+Date: Fri, 22 Mar 2019 10:40:45 +0530
+Subject: [PATCH 49/52] transport/socket: log shutdown msg occasionally
+
+>Change-Id: If3fc0884e7e2f45de2d278b98693b7a473220a5f
+>Signed-off-by: Raghavendra G <rgowdapp@redhat.com>
+>Fixes: bz#1691616
+
+BUG: 1691620
+Change-Id: If3fc0884e7e2f45de2d278b98693b7a473220a5f
+Signed-off-by: Sunil Kumar Acharya <sheggodu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167088
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ rpc/rpc-transport/socket/src/socket.c | 4 ++--
+ rpc/rpc-transport/socket/src/socket.h | 1 +
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/rpc/rpc-transport/socket/src/socket.c b/rpc/rpc-transport/socket/src/socket.c
+index 121d46b..f6de1d3 100644
+--- a/rpc/rpc-transport/socket/src/socket.c
++++ b/rpc/rpc-transport/socket/src/socket.c
+@@ -807,8 +807,8 @@ __socket_shutdown(rpc_transport_t *this)
+         gf_log(this->name, GF_LOG_DEBUG, "shutdown() returned %d. %s", ret,
+                strerror(errno));
+     } else {
+-        gf_log(this->name, GF_LOG_INFO, "intentional socket shutdown(%d)",
+-               priv->sock);
++        GF_LOG_OCCASIONALLY(priv->shutdown_log_ctr, this->name, GF_LOG_INFO,
++                            "intentional socket shutdown(%d)", priv->sock);
+     }
+ 
+     return ret;
+diff --git a/rpc/rpc-transport/socket/src/socket.h b/rpc/rpc-transport/socket/src/socket.h
+index 32339d3..e1ccae2 100644
+--- a/rpc/rpc-transport/socket/src/socket.h
++++ b/rpc/rpc-transport/socket/src/socket.h
+@@ -219,6 +219,7 @@ typedef struct {
+     int keepalivecnt;
+     int timeout;
+     int log_ctr;
++    int shutdown_log_ctr;
+     /* ssl_error_required is used only during the SSL connection setup
+      * phase.
+      * It holds the error code returned by SSL_get_error() and is used to
+-- 
+1.8.3.1
+

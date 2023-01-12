@@ -1,0 +1,102 @@
+From 7c51addf7912a94320e6b148bd66f2dbf274c533 Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Mon, 11 Mar 2019 14:04:39 +0530
+Subject: [PATCH 464/465] storage/posix: Remove nr_files usage
+
+nr_files is supposed to represent the number of files opened in posix.
+Present logic doesn't seem to handle anon-fds because of which the
+counts would always be wrong.
+
+I don't remember anyone using this value in debugging any problem probably
+because we always have 'ls -l /proc/<pid>/fd' which not only prints the
+fds that are active but also prints their paths. It also handles directories
+and anon-fds which actually opened the file. So removing this code
+instead of fixing the buggy logic to have the nr_files.
+
+> fixes bz#1688106
+> Change-Id: Ibf8713fdfdc1ef094e08e6818152637206a54040
+> Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+> (Cherry pick from commit f5987d38f216a3142dfe45f03bf66ff4827d9b55)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/22333/)
+
+Change-Id: Ibf8713fdfdc1ef094e08e6818152637206a54040
+BUG: 1851989
+Signed-off-by: Mohit Agrawal<moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/209468
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/storage/posix/src/posix-common.c       | 2 --
+ xlators/storage/posix/src/posix-entry-ops.c    | 2 --
+ xlators/storage/posix/src/posix-inode-fd-ops.c | 2 --
+ xlators/storage/posix/src/posix.h              | 1 -
+ 4 files changed, 7 deletions(-)
+
+diff --git a/xlators/storage/posix/src/posix-common.c b/xlators/storage/posix/src/posix-common.c
+index ac53796..b317627 100644
+--- a/xlators/storage/posix/src/posix-common.c
++++ b/xlators/storage/posix/src/posix-common.c
+@@ -128,7 +128,6 @@ posix_priv(xlator_t *this)
+     gf_proc_dump_write("max_read", "%" PRId64, GF_ATOMIC_GET(priv->read_value));
+     gf_proc_dump_write("max_write", "%" PRId64,
+                        GF_ATOMIC_GET(priv->write_value));
+-    gf_proc_dump_write("nr_files", "%" PRId64, GF_ATOMIC_GET(priv->nr_files));
+ 
+     return 0;
+ }
+@@ -815,7 +814,6 @@ posix_init(xlator_t *this)
+     }
+ 
+     LOCK_INIT(&_private->lock);
+-    GF_ATOMIC_INIT(_private->nr_files, 0);
+     GF_ATOMIC_INIT(_private->read_value, 0);
+     GF_ATOMIC_INIT(_private->write_value, 0);
+ 
+diff --git a/xlators/storage/posix/src/posix-entry-ops.c b/xlators/storage/posix/src/posix-entry-ops.c
+index 65650b3..b3a5381 100644
+--- a/xlators/storage/posix/src/posix-entry-ops.c
++++ b/xlators/storage/posix/src/posix-entry-ops.c
+@@ -2243,8 +2243,6 @@ fill_stat:
+         gf_msg(this->name, GF_LOG_WARNING, 0, P_MSG_FD_PATH_SETTING_FAILED,
+                "failed to set the fd context path=%s fd=%p", real_path, fd);
+ 
+-    GF_ATOMIC_INC(priv->nr_files);
+-
+     op_ret = 0;
+ 
+ out:
+diff --git a/xlators/storage/posix/src/posix-inode-fd-ops.c b/xlators/storage/posix/src/posix-inode-fd-ops.c
+index d135d8b..81f4a6b 100644
+--- a/xlators/storage/posix/src/posix-inode-fd-ops.c
++++ b/xlators/storage/posix/src/posix-inode-fd-ops.c
+@@ -1605,7 +1605,6 @@ posix_open(call_frame_t *frame, xlator_t *this, loc_t *loc, int32_t flags,
+         gf_msg(this->name, GF_LOG_WARNING, 0, P_MSG_FD_PATH_SETTING_FAILED,
+                "failed to set the fd context path=%s fd=%p", real_path, fd);
+ 
+-    GF_ATOMIC_INC(priv->nr_files);
+     op_ret = 0;
+ 
+ out:
+@@ -2526,7 +2525,6 @@ posix_release(xlator_t *this, fd_t *fd)
+     if (!priv)
+         goto out;
+ 
+-    GF_ATOMIC_DEC(priv->nr_files);
+ out:
+     return 0;
+ }
+diff --git a/xlators/storage/posix/src/posix.h b/xlators/storage/posix/src/posix.h
+index 61495a7..124dbb4 100644
+--- a/xlators/storage/posix/src/posix.h
++++ b/xlators/storage/posix/src/posix.h
+@@ -154,7 +154,6 @@ struct posix_private {
+ 
+     gf_atomic_t read_value;  /* Total read, from init */
+     gf_atomic_t write_value; /* Total write, from init */
+-    gf_atomic_t nr_files;
+     /*
+        In some cases, two exported volumes may reside on the same
+        partition on the server. Sending statvfs info for both
+-- 
+1.8.3.1
+

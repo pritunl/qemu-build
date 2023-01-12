@@ -1,0 +1,48 @@
+From 63ea2aad2474a0ca169342c699cb1689e6c1d83f Mon Sep 17 00:00:00 2001
+From: Susant Palai <spalai@redhat.com>
+Date: Fri, 22 May 2020 13:49:14 +0530
+Subject: [PATCH 381/382] dht: add null check in gf_defrag_free_dir_dfmeta
+
+Backport of https://review.gluster.org/#/c/glusterfs/+/24479/
+
+BUG:1812789
+Change-Id: I502ed43051bd60d9e5d2b69d4e4d7b6eea997285
+Signed-off-by: Susant Palai <spalai@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/201150
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Ashish Pandey <aspandey@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/dht/src/dht-rebalance.c | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/xlators/cluster/dht/src/dht-rebalance.c b/xlators/cluster/dht/src/dht-rebalance.c
+index 957deaa..8f31dca 100644
+--- a/xlators/cluster/dht/src/dht-rebalance.c
++++ b/xlators/cluster/dht/src/dht-rebalance.c
+@@ -47,7 +47,8 @@ gf_defrag_free_dir_dfmeta(struct dir_dfmeta *meta, int local_subvols_cnt)
+ 
+     if (meta) {
+         for (i = 0; i < local_subvols_cnt; i++) {
+-            gf_dirent_free(&meta->equeue[i]);
++            if (meta->equeue)
++                gf_dirent_free(&meta->equeue[i]);
+             if (meta->lfd && meta->lfd[i])
+                 fd_unref(meta->lfd[i]);
+         }
+@@ -3344,9 +3345,9 @@ gf_defrag_process_dir(xlator_t *this, gf_defrag_info_t *defrag, loc_t *loc,
+         if (ret) {
+             fd_unref(dir_dfmeta->lfd[i]);
+             dir_dfmeta->lfd[i] = NULL;
+-            gf_smsg(this->name, GF_LOG_WARNING, 0, 0,
+-                    "failed to open dir: %s subvol: %s", loc->path,
+-                    conf->local_subvols[i]->name);
++            gf_msg(this->name, GF_LOG_WARNING, -ret, 0,
++                   "failed to open dir: %s subvol: %s", loc->path,
++                   conf->local_subvols[i]->name);
+ 
+             if (conf->decommission_in_progress) {
+                 *perrno = -ret;
+-- 
+1.8.3.1
+

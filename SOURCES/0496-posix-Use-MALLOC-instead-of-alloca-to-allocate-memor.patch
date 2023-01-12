@@ -1,0 +1,139 @@
+From 5893e64ca8c147b7acfa12cd9824f254d53ee261 Mon Sep 17 00:00:00 2001
+From: mohit84 <moagrawa@redhat.com>
+Date: Wed, 4 Nov 2020 09:02:03 +0530
+Subject: [PATCH 496/511] posix: Use MALLOC instead of alloca to allocate
+ memory for xattrs list (#1730)
+
+In case of file is having huge xattrs on backend a brick process is
+crashed while alloca(size) limit has been crossed 256k because iot_worker
+stack size is 256k.
+
+> Fixes: #1699
+> Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+> Change-Id: I100468234f83329a7d65b43cbe4e10450c1ccecd
+> (Cherry pick from commit fd666caa35ac84dd1cba55399761982011b77112)
+> (Reviewed on upstream link https://github.com/gluster/glusterfs/pull/1828)
+
+Change-Id: I100468234f83329a7d65b43cbe4e10450c1ccecd
+Bug: 1903468
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/220872
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/storage/posix/src/posix-gfid-path.c    |  5 ++++-
+ xlators/storage/posix/src/posix-helpers.c      |  3 ++-
+ xlators/storage/posix/src/posix-inode-fd-ops.c | 12 +++++++++---
+ 3 files changed, 15 insertions(+), 5 deletions(-)
+
+diff --git a/xlators/storage/posix/src/posix-gfid-path.c b/xlators/storage/posix/src/posix-gfid-path.c
+index 64b5c6c..01315ac 100644
+--- a/xlators/storage/posix/src/posix-gfid-path.c
++++ b/xlators/storage/posix/src/posix-gfid-path.c
+@@ -195,7 +195,8 @@ posix_get_gfid2path(xlator_t *this, inode_t *inode, const char *real_path,
+             if (size == 0)
+                 goto done;
+         }
+-        list = alloca(size);
++
++        list = GF_MALLOC(size, gf_posix_mt_char);
+         if (!list) {
+             *op_errno = errno;
+             goto err;
+@@ -309,6 +310,7 @@ done:
+             GF_FREE(paths[j]);
+     }
+     ret = 0;
++    GF_FREE(list);
+     return ret;
+ err:
+     if (path)
+@@ -317,5 +319,6 @@ err:
+         if (paths[j])
+             GF_FREE(paths[j]);
+     }
++    GF_FREE(list);
+     return ret;
+ }
+diff --git a/xlators/storage/posix/src/posix-helpers.c b/xlators/storage/posix/src/posix-helpers.c
+index 73a44be..ceac52a 100644
+--- a/xlators/storage/posix/src/posix-helpers.c
++++ b/xlators/storage/posix/src/posix-helpers.c
+@@ -349,7 +349,7 @@ _posix_get_marker_all_contributions(posix_xattr_filler_t *filler)
+         goto out;
+     }
+ 
+-    list = alloca(size);
++    list = GF_MALLOC(size, gf_posix_mt_char);
+     if (!list) {
+         goto out;
+     }
+@@ -379,6 +379,7 @@ _posix_get_marker_all_contributions(posix_xattr_filler_t *filler)
+     ret = 0;
+ 
+ out:
++    GF_FREE(list);
+     return ret;
+ }
+ 
+diff --git a/xlators/storage/posix/src/posix-inode-fd-ops.c b/xlators/storage/posix/src/posix-inode-fd-ops.c
+index 21119ea..1d37aed 100644
+--- a/xlators/storage/posix/src/posix-inode-fd-ops.c
++++ b/xlators/storage/posix/src/posix-inode-fd-ops.c
+@@ -3305,7 +3305,7 @@ posix_get_ancestry_non_directory(xlator_t *this, inode_t *leaf_inode,
+         goto out;
+     }
+ 
+-    list = alloca(size);
++    list = GF_MALLOC(size, gf_posix_mt_char);
+     if (!list) {
+         *op_errno = errno;
+         goto out;
+@@ -3385,6 +3385,7 @@ posix_get_ancestry_non_directory(xlator_t *this, inode_t *leaf_inode,
+     op_ret = 0;
+ 
+ out:
++    GF_FREE(list);
+     return op_ret;
+ }
+ 
+@@ -3810,7 +3811,8 @@ posix_getxattr(call_frame_t *frame, xlator_t *this, loc_t *loc,
+         if (size == 0)
+             goto done;
+     }
+-    list = alloca(size);
++
++    list = GF_MALLOC(size, gf_posix_mt_char);
+     if (!list) {
+         op_errno = errno;
+         goto out;
+@@ -3937,6 +3939,7 @@ out:
+         dict_unref(dict);
+     }
+ 
++    GF_FREE(list);
+     return 0;
+ }
+ 
+@@ -4136,7 +4139,8 @@ posix_fgetxattr(call_frame_t *frame, xlator_t *this, fd_t *fd, const char *name,
+         if (size == 0)
+             goto done;
+     }
+-    list = alloca(size + 1);
++
++    list = GF_MALLOC(size, gf_posix_mt_char);
+     if (!list) {
+         op_ret = -1;
+         op_errno = ENOMEM;
+@@ -4240,6 +4244,8 @@ out:
+     if (dict)
+         dict_unref(dict);
+ 
++    GF_FREE(list);
++
+     return 0;
+ }
+ 
+-- 
+1.8.3.1
+

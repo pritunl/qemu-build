@@ -1,0 +1,82 @@
+From a80743a3053798521ae4dd830adcde8bc7da11b6 Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Tue, 20 Feb 2018 11:50:33 +0530
+Subject: [PATCH 083/124] common-ha: enable and disable selinux
+ ganesha_use_fusefs
+
+Adding missing changes in a downstream backport(https://code.engineering.redhat.com/gerrit/#/c/109845/)
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I59fd2fc2228ded9547c2d1e08c22f7a10c35f86f
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167244
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Reviewed-by: Kaleb Keithley <kkeithle@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfs.spec.in | 15 ++++++++++-----
+ 1 file changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index bc27058..2149f86 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -472,11 +472,16 @@ Requires:         resource-agents >= 3.9.5
+ Requires:         net-tools
+ %endif
+ 
+-%if ( 0%{?fedora} && 0%{?fedora} > 25 )
++%if ( 0%{?fedora} && 0%{?fedora} > 25  || ( 0%{?rhel} && 0%{?rhel} > 6 ) )
++%if ( 0%{?rhel} )
+ Requires: selinux-policy >= 3.13.1-160
++Requires(post):   policycoreutils-python
++Requires(postun): policycoreutils-python
++%else
+ Requires(post):   policycoreutils-python-utils
+ Requires(postun): policycoreutils-python-utils
+ %endif
++%endif
+ 
+ %description ganesha
+ GlusterFS is a distributed file-system capable of scaling to several
+@@ -936,7 +941,7 @@ exit 0
+ %endif
+ 
+ %if ( 0%{!?_without_server:1} )
+-%if ( 0%{?fedora} && 0%{?fedora} > 25 )
++%if ( 0%{?fedora} && 0%{?fedora} > 25 || ( 0%{?rhel} && 0%{?rhel} > 6 ) )
+ %post ganesha
+ semanage boolean -m ganesha_use_fusefs --on
+ exit 0
+@@ -1076,7 +1081,7 @@ exit 0
+ %endif
+ 
+ %if ( 0%{!?_without_server:1} )
+-%if ( 0%{?fedora} && 0%{?fedora} > 25 )
++%if ( 0%{?fedora} && 0%{?fedora} > 25  || ( 0%{?rhel} && 0%{?rhel} > 6 ) )
+ %postun ganesha
+ semanage boolean -m ganesha_use_fusefs --off
+ exit 0
+@@ -1087,7 +1092,7 @@ exit 0
+ ## All %%trigger should be placed here and keep them sorted
+ ##
+ %if ( 0%{!?_without_server:1} )
+-%if ( 0%{?fedora} && 0%{?fedora} > 25 )
++%if ( 0%{?fedora} && 0%{?fedora} > 25  || ( 0%{?rhel} && 0%{?rhel} > 6 ) )
+ %trigger ganesha -- selinux-policy-targeted
+ semanage boolean -m ganesha_use_fusefs --on
+ exit 0
+@@ -1098,7 +1103,7 @@ exit 0
+ ## All %%triggerun should be placed here and keep them sorted
+ ##
+ %if ( 0%{!?_without_server:1} )
+-%if ( 0%{?fedora} && 0%{?fedora} > 25 )
++%if ( 0%{?fedora} && 0%{?fedora} > 25  || ( 0%{?rhel} && 0%{?rhel} > 6 ) )
+ %triggerun ganesha -- selinux-policy-targeted
+ semanage boolean -m ganesha_use_fusefs --off
+ exit 0
+-- 
+1.8.3.1
+

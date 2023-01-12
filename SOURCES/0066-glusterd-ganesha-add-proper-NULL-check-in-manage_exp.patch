@@ -1,0 +1,41 @@
+From d91eadbbb3e2d02e7297214da394b0e232544386 Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Tue, 2 May 2017 14:06:00 +0530
+Subject: [PATCH 066/124] glusterd/ganesha : add proper NULL check in
+ manage_export_config
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I872b2b6b027f04e61f60ad85588f50e1ef2f988c
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://review.gluster.org/17150
+Smoke: Gluster Build System <jenkins@build.gluster.org>
+Reviewed-by: soumya k <skoduri@redhat.com>
+NetBSD-regression: NetBSD Build System <jenkins@build.gluster.org>
+Reviewed-by: Kaleb KEITHLEY <kkeithle@redhat.com>
+CentOS-regression: Gluster Build System <jenkins@build.gluster.org>
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167151
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-ganesha.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-ganesha.c b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+index d9fdfc6..fe0bffc 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-ganesha.c
++++ b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+@@ -435,7 +435,7 @@ manage_export_config(char *volname, char *value, char **op_errstr)
+                     CONFDIR, value, volname, NULL);
+     ret = runner_run(&runner);
+ 
+-    if (ret && !(*op_errstr))
++    if (ret && op_errstr)
+         gf_asprintf(op_errstr,
+                     "Failed to create"
+                     " NFS-Ganesha export config file.");
+-- 
+1.8.3.1
+

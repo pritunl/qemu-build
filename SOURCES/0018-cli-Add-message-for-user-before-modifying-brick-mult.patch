@@ -1,0 +1,56 @@
+From 539626a64e5b8cfe05d42f5398073e8a57644073 Mon Sep 17 00:00:00 2001
+From: Samikshan Bairagya <sbairagy@redhat.com>
+Date: Wed, 9 Aug 2017 14:32:59 +0530
+Subject: [PATCH 18/52] cli: Add message for user before modifying
+ brick-multiplex option
+
+Users should ne notified that brick-multiplexing feature is
+supported only for container workloads (CNS/CRS). It should also be
+made known to users that it is advisable to either have all volumes
+in stopped state or have no bricks running before modifying the
+"brick-multiplex" option. This commit makes sure these messages
+are displayed to the user before brick-multiplexing is enabled or
+disabled.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Ic40294b26c691ea03185c4d1fce840ef23f95718
+Signed-off-by: Samikshan Bairagya <sbairagy@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/114793
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ cli/src/cli-cmd-parser.c | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/cli/src/cli-cmd-parser.c b/cli/src/cli-cmd-parser.c
+index d9913f6..f148c59 100644
+--- a/cli/src/cli-cmd-parser.c
++++ b/cli/src/cli-cmd-parser.c
+@@ -1698,6 +1698,24 @@ cli_cmd_volume_set_parse(struct cli_state *state, const char **words,
+         }
+     }
+ 
++    if ((strcmp (key, "cluster.brick-multiplex") == 0)) {
++        question = "Brick-multiplexing is supported only for "
++                   "container workloads (CNS/CRS). Also it is "
++                   "advised to make sure that either all "
++                   "volumes are in stopped state or no bricks "
++                   "are running before this option is modified."
++                   "Do you still want to continue?";
++
++        answer = cli_cmd_get_confirmation (state, question);
++        if (GF_ANSWER_NO == answer) {
++            gf_log ("cli", GF_LOG_ERROR, "Operation "
++                    "cancelled, exiting");
++            *op_errstr = gf_strdup ("Aborted by user.");
++            ret = -1;
++            goto out;
++        }
++    }
++
+     ret = dict_set_int32(dict, "count", wordcount - 3);
+ 
+     if (ret)
+-- 
+1.8.3.1
+

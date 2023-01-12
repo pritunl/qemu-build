@@ -1,0 +1,503 @@
+From aa215163cb7d806dc98bef2386a4e282a5e54a31 Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Thu, 25 Apr 2019 12:00:52 +0530
+Subject: [PATCH 432/449] glusterd: Fix coverity defects & put coverity
+ annotations
+
+Along with fixing few defect, put the required annotations for the defects which
+are marked ignore/false positive/intentional as per the coverity defect sheet.
+This should avoid the per component graph showing many defects as open in the
+coverity glusterfs web page.
+
+> upstream patch link: https://review.gluster.org/#/c/glusterfs/+/22619/
+> Updates: bz#789278
+> Change-Id: I19461dc3603a3bd8f88866a1ab3db43d783af8e4
+> Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+
+BUG: 1787310
+Change-Id: I19461dc3603a3bd8f88866a1ab3db43d783af8e4
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202631
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-brick-ops.c     |  7 +++--
+ xlators/mgmt/glusterd/src/glusterd-geo-rep.c       |  3 +-
+ .../glusterd/src/glusterd-gfproxyd-svc-helper.c    |  2 +-
+ xlators/mgmt/glusterd/src/glusterd-handler.c       |  8 ++++-
+ xlators/mgmt/glusterd/src/glusterd-mountbroker.c   |  5 ++-
+ xlators/mgmt/glusterd/src/glusterd-op-sm.c         |  8 +++++
+ xlators/mgmt/glusterd/src/glusterd-peer-utils.c    |  2 ++
+ xlators/mgmt/glusterd/src/glusterd-server-quorum.c |  1 +
+ xlators/mgmt/glusterd/src/glusterd-store.c         |  4 ---
+ xlators/mgmt/glusterd/src/glusterd-svc-helper.c    |  4 +--
+ xlators/mgmt/glusterd/src/glusterd-syncop.c        |  1 +
+ .../mgmt/glusterd/src/glusterd-tierd-svc-helper.c  |  4 +--
+ xlators/mgmt/glusterd/src/glusterd-utils.c         |  9 ++++--
+ xlators/mgmt/glusterd/src/glusterd-volgen.c        | 36 +++++++++++++---------
+ 14 files changed, 63 insertions(+), 31 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-brick-ops.c b/xlators/mgmt/glusterd/src/glusterd-brick-ops.c
+index d424f31..121346c 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-brick-ops.c
++++ b/xlators/mgmt/glusterd/src/glusterd-brick-ops.c
+@@ -2032,7 +2032,6 @@ glusterd_op_stage_remove_brick(dict_t *dict, char **op_errstr)
+         case GF_OP_CMD_STATUS:
+             ret = 0;
+             goto out;
+-
+         case GF_OP_CMD_DETACH_START:
+             if (volinfo->type != GF_CLUSTER_TYPE_TIER) {
+                 snprintf(msg, sizeof(msg),
+@@ -2044,7 +2043,7 @@ glusterd_op_stage_remove_brick(dict_t *dict, char **op_errstr)
+                        errstr);
+                 goto out;
+             }
+-
++        /* Fall through */
+         case GF_OP_CMD_START: {
+             if ((volinfo->type == GF_CLUSTER_TYPE_REPLICATE) &&
+                 dict_getn(dict, "replica-count", SLEN("replica-count"))) {
+@@ -2259,7 +2258,8 @@ out:
+         if (op_errstr)
+             *op_errstr = errstr;
+     }
+-
++    if (!op_errstr && errstr)
++        GF_FREE(errstr);
+     return ret;
+ }
+ 
+@@ -2687,6 +2687,7 @@ glusterd_op_remove_brick(dict_t *dict, char **op_errstr)
+              * Update defrag_cmd as well or it will only be done
+              * for nodes on which the brick to be removed exists.
+              */
++            /* coverity[MIXED_ENUMS] */
+             volinfo->rebal.defrag_cmd = cmd;
+             volinfo->rebal.defrag_status = GF_DEFRAG_STATUS_NOT_STARTED;
+             ret = dict_get_strn(dict, GF_REMOVE_BRICK_TID_KEY,
+diff --git a/xlators/mgmt/glusterd/src/glusterd-geo-rep.c b/xlators/mgmt/glusterd/src/glusterd-geo-rep.c
+index 85c06c1..5a91df4 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-geo-rep.c
++++ b/xlators/mgmt/glusterd/src/glusterd-geo-rep.c
+@@ -4107,6 +4107,7 @@ gd_pause_or_resume_gsync(dict_t *dict, char *master, char *slave,
+ 
+ out:
+     sys_close(pfd);
++    /* coverity[INTEGER_OVERFLOW] */
+     return ret;
+ }
+ 
+@@ -4183,7 +4184,7 @@ stop_gsync(char *master, char *slave, char **msg, char *conf_path,
+ 
+ out:
+     sys_close(pfd);
+-
++    /* coverity[INTEGER_OVERFLOW] */
+     return ret;
+ }
+ 
+diff --git a/xlators/mgmt/glusterd/src/glusterd-gfproxyd-svc-helper.c b/xlators/mgmt/glusterd/src/glusterd-gfproxyd-svc-helper.c
+index 67e3f41..e338bf4 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-gfproxyd-svc-helper.c
++++ b/xlators/mgmt/glusterd/src/glusterd-gfproxyd-svc-helper.c
+@@ -111,7 +111,7 @@ glusterd_svc_get_gfproxyd_volfile(glusterd_volinfo_t *volinfo, char *svc_name,
+         goto out;
+     }
+ 
+-    /* coverity[secure_temp] mkstemp uses 0600 as the mode and is safe */
++    /* coverity[SECURE_TEMP] mkstemp uses 0600 as the mode and is safe */
+     tmp_fd = mkstemp(*tmpvol);
+     if (tmp_fd < 0) {
+         gf_msg("glusterd", GF_LOG_WARNING, errno, GD_MSG_FILE_OP_FAILED,
+diff --git a/xlators/mgmt/glusterd/src/glusterd-handler.c b/xlators/mgmt/glusterd/src/glusterd-handler.c
+index 2e73c98..1f31e72 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-handler.c
++++ b/xlators/mgmt/glusterd/src/glusterd-handler.c
+@@ -930,6 +930,7 @@ __glusterd_handle_cluster_lock(rpcsvc_request_t *req)
+ 
+     op_ctx = dict_new();
+     if (!op_ctx) {
++        ret = -1;
+         gf_msg(this->name, GF_LOG_ERROR, ENOMEM, GD_MSG_DICT_CREATE_FAIL,
+                "Unable to set new dict");
+         goto out;
+@@ -956,6 +957,9 @@ out:
+     glusterd_friend_sm();
+     glusterd_op_sm();
+ 
++    if (ret)
++        GF_FREE(ctx);
++
+     return ret;
+ }
+ 
+@@ -3470,6 +3474,7 @@ glusterd_rpc_create(struct rpc_clnt **rpc, dict_t *options,
+     GF_ASSERT(this);
+ 
+     GF_ASSERT(options);
++    GF_VALIDATE_OR_GOTO(this->name, rpc, out);
+ 
+     if (force && rpc && *rpc) {
+         (void)rpc_clnt_unref(*rpc);
+@@ -3482,7 +3487,6 @@ glusterd_rpc_create(struct rpc_clnt **rpc, dict_t *options,
+         goto out;
+ 
+     ret = rpc_clnt_register_notify(new_rpc, notify_fn, notify_data);
+-    *rpc = new_rpc;
+     if (ret)
+         goto out;
+     ret = rpc_clnt_start(new_rpc);
+@@ -3491,6 +3495,8 @@ out:
+         if (new_rpc) {
+             (void)rpc_clnt_unref(new_rpc);
+         }
++    } else {
++        *rpc = new_rpc;
+     }
+ 
+     gf_msg_debug(this->name, 0, "returning %d", ret);
+diff --git a/xlators/mgmt/glusterd/src/glusterd-mountbroker.c b/xlators/mgmt/glusterd/src/glusterd-mountbroker.c
+index 332ddef..c017ccb 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-mountbroker.c
++++ b/xlators/mgmt/glusterd/src/glusterd-mountbroker.c
+@@ -334,7 +334,10 @@ make_ghadoop_mountspec(gf_mount_spec_t *mspec, const char *volname, char *user,
+     if (ret == -1)
+         return ret;
+ 
+-    return parse_mount_pattern_desc(mspec, hadoop_mnt_desc);
++    ret = parse_mount_pattern_desc(mspec, hadoop_mnt_desc);
++    GF_FREE(hadoop_mnt_desc);
++
++    return ret;
+ }
+ 
+ static gf_boolean_t
+diff --git a/xlators/mgmt/glusterd/src/glusterd-op-sm.c b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+index 6475611..46fc607 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-op-sm.c
++++ b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+@@ -2467,6 +2467,7 @@ glusterd_start_bricks(glusterd_volinfo_t *volinfo)
+         if (!brickinfo->start_triggered) {
+             pthread_mutex_lock(&brickinfo->restart_mutex);
+             {
++                /* coverity[SLEEP] */
+                 ret = glusterd_brick_start(volinfo, brickinfo, _gf_false,
+                                            _gf_false);
+             }
+@@ -3466,6 +3467,7 @@ _add_task_to_dict(dict_t *dict, glusterd_volinfo_t *volinfo, int op, int index)
+ 
+     switch (op) {
+         case GD_OP_REMOVE_TIER_BRICK:
++        /* Fall through */
+         case GD_OP_REMOVE_BRICK:
+             snprintf(key, sizeof(key), "task%d", index);
+             ret = _add_remove_bricks_to_dict(dict, volinfo, key);
+@@ -7550,6 +7552,7 @@ glusterd_op_ac_send_brick_op(glusterd_op_sm_event_t *event, void *ctx)
+     glusterd_op_t op = GD_OP_NONE;
+     glusterd_req_ctx_t *req_ctx = NULL;
+     char *op_errstr = NULL;
++    gf_boolean_t free_req_ctx = _gf_false;
+ 
+     this = THIS;
+     priv = this->private;
+@@ -7558,6 +7561,9 @@ glusterd_op_ac_send_brick_op(glusterd_op_sm_event_t *event, void *ctx)
+         req_ctx = ctx;
+     } else {
+         req_ctx = GF_CALLOC(1, sizeof(*req_ctx), gf_gld_mt_op_allack_ctx_t);
++        if (!req_ctx)
++            goto out;
++        free_req_ctx = _gf_true;
+         op = glusterd_op_get_op();
+         req_ctx->op = op;
+         gf_uuid_copy(req_ctx->uuid, MY_UUID);
+@@ -7588,6 +7594,8 @@ glusterd_op_ac_send_brick_op(glusterd_op_sm_event_t *event, void *ctx)
+     }
+ 
+ out:
++    if (ret && req_ctx && free_req_ctx)
++        GF_FREE(req_ctx);
+     gf_msg_debug(this->name, 0, "Returning with %d", ret);
+ 
+     return ret;
+diff --git a/xlators/mgmt/glusterd/src/glusterd-peer-utils.c b/xlators/mgmt/glusterd/src/glusterd-peer-utils.c
+index 8c1feeb..1a65359 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-peer-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-peer-utils.c
+@@ -82,6 +82,7 @@ glusterd_peerinfo_cleanup(glusterd_peerinfo_t *peerinfo)
+     call_rcu(&peerinfo->rcu_head.head, glusterd_peerinfo_destroy);
+ 
+     if (quorum_action)
++        /* coverity[SLEEP] */
+         glusterd_do_quorum_action();
+     return 0;
+ }
+@@ -358,6 +359,7 @@ glusterd_uuid_to_hostname(uuid_t uuid)
+ 
+     if (!gf_uuid_compare(MY_UUID, uuid)) {
+         hostname = gf_strdup("localhost");
++        return hostname;
+     }
+     RCU_READ_LOCK;
+     if (!cds_list_empty(&priv->peers)) {
+diff --git a/xlators/mgmt/glusterd/src/glusterd-server-quorum.c b/xlators/mgmt/glusterd/src/glusterd-server-quorum.c
+index fd334e6..f378187 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-server-quorum.c
++++ b/xlators/mgmt/glusterd/src/glusterd-server-quorum.c
+@@ -372,6 +372,7 @@ glusterd_do_volume_quorum_action(xlator_t *this, glusterd_volinfo_t *volinfo,
+             if (!brickinfo->start_triggered) {
+                 pthread_mutex_lock(&brickinfo->restart_mutex);
+                 {
++                    /* coverity[SLEEP] */
+                     ret = glusterd_brick_start(volinfo, brickinfo, _gf_false,
+                                                _gf_false);
+                 }
+diff --git a/xlators/mgmt/glusterd/src/glusterd-store.c b/xlators/mgmt/glusterd/src/glusterd-store.c
+index b3b5ee9..4fa8116 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-store.c
++++ b/xlators/mgmt/glusterd/src/glusterd-store.c
+@@ -4764,10 +4764,6 @@ glusterd_store_retrieve_peers(xlator_t *this)
+          */
+         address = cds_list_entry(peerinfo->hostnames.next,
+                                  glusterd_peer_hostname_t, hostname_list);
+-        if (!address) {
+-            ret = -1;
+-            goto next;
+-        }
+         peerinfo->hostname = gf_strdup(address->hostname);
+ 
+         ret = glusterd_friend_add_from_peerinfo(peerinfo, 1, NULL);
+diff --git a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+index ca19a75..1d1f42d 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
++++ b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+@@ -179,7 +179,7 @@ glusterd_svc_check_volfile_identical(char *svc_name,
+         goto out;
+     }
+ 
+-    /* coverity[secure_temp] mkstemp uses 0600 as the mode and is safe */
++    /* coverity[SECURE_TEMP] mkstemp uses 0600 as the mode and is safe */
+     tmp_fd = mkstemp(tmpvol);
+     if (tmp_fd < 0) {
+         gf_msg(this->name, GF_LOG_WARNING, errno, GD_MSG_FILE_OP_FAILED,
+@@ -241,7 +241,7 @@ glusterd_svc_check_topology_identical(char *svc_name,
+         goto out;
+     }
+ 
+-    /* coverity[secure_temp] mkstemp uses 0600 as the mode and is safe */
++    /* coverity[SECURE_TEMP] mkstemp uses 0600 as the mode and is safe */
+     tmpfd = mkstemp(tmpvol);
+     if (tmpfd < 0) {
+         gf_msg(this->name, GF_LOG_WARNING, errno, GD_MSG_FILE_OP_FAILED,
+diff --git a/xlators/mgmt/glusterd/src/glusterd-syncop.c b/xlators/mgmt/glusterd/src/glusterd-syncop.c
+index 618d8bc..9e47d14 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-syncop.c
++++ b/xlators/mgmt/glusterd/src/glusterd-syncop.c
+@@ -1752,6 +1752,7 @@ gd_brick_op_phase(glusterd_op_t op, dict_t *op_ctx, dict_t *req_dict,
+                 if (dict_get(op_ctx, "client-count"))
+                     break;
+             }
++            /* coverity[MIXED_ENUMS] */
+         } else if (cmd == GF_OP_CMD_DETACH_START) {
+             op = GD_OP_REMOVE_BRICK;
+             dict_del(req_dict, "rebalance-command");
+diff --git a/xlators/mgmt/glusterd/src/glusterd-tierd-svc-helper.c b/xlators/mgmt/glusterd/src/glusterd-tierd-svc-helper.c
+index 922eae7..59843a0 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-tierd-svc-helper.c
++++ b/xlators/mgmt/glusterd/src/glusterd-tierd-svc-helper.c
+@@ -116,7 +116,7 @@ glusterd_svc_check_tier_volfile_identical(char *svc_name,
+         goto out;
+     }
+ 
+-    /* coverity[secure_temp] mkstemp uses 0600 as the mode and is safe */
++    /* coverity[SECURE_TEMP] mkstemp uses 0600 as the mode and is safe */
+     tmp_fd = mkstemp(tmpvol);
+     if (tmp_fd < 0) {
+         gf_msg(this->name, GF_LOG_WARNING, errno, GD_MSG_FILE_OP_FAILED,
+@@ -177,7 +177,7 @@ glusterd_svc_check_tier_topology_identical(char *svc_name,
+         goto out;
+     }
+ 
+-    /* coverity[secure_temp] mkstemp uses 0600 as the mode and is safe */
++    /* coverity[SECURE_TEMP] mkstemp uses 0600 as the mode and is safe */
+     tmpfd = mkstemp(tmpvol);
+     if (tmpfd < 0) {
+         gf_msg(this->name, GF_LOG_WARNING, errno, GD_MSG_FILE_OP_FAILED,
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index 14e23d1..8b0fc9a 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -908,6 +908,7 @@ glusterd_create_sub_tier_volinfo(glusterd_volinfo_t *volinfo,
+         (*dup_volinfo)->brick_count = tier_info->cold_brick_count;
+     }
+ out:
++    /* coverity[REVERSE_NULL] */
+     if (ret && *dup_volinfo) {
+         glusterd_volinfo_delete(*dup_volinfo);
+         *dup_volinfo = NULL;
+@@ -2738,6 +2739,7 @@ glusterd_readin_file(const char *filepath, int *line_count)
+     /* Reduce allocation to minimal size.  */
+     p = GF_REALLOC(lines, (counter + 1) * sizeof(char *));
+     if (!p) {
++        /* coverity[TAINTED_SCALAR] */
+         free_lines(lines, counter);
+         lines = NULL;
+         goto out;
+@@ -6782,6 +6784,7 @@ glusterd_restart_bricks(void *opaque)
+                 if (!brickinfo->start_triggered) {
+                     pthread_mutex_lock(&brickinfo->restart_mutex);
+                     {
++                        /* coverity[SLEEP] */
+                         glusterd_brick_start(volinfo, brickinfo, _gf_false,
+                                              _gf_false);
+                     }
+@@ -8886,7 +8889,7 @@ glusterd_nfs_statedump(char *options, int option_cnt, char **op_errstr)
+     kill(pid, SIGUSR1);
+ 
+     sleep(1);
+-
++    /* coverity[TAINTED_STRING] */
+     sys_unlink(dumpoptions_path);
+     ret = 0;
+ out:
+@@ -9012,6 +9015,7 @@ glusterd_quotad_statedump(char *options, int option_cnt, char **op_errstr)
+ 
+     sleep(1);
+ 
++    /* coverity[TAINTED_STRING] */
+     sys_unlink(dumpoptions_path);
+     ret = 0;
+ out:
+@@ -13423,7 +13427,7 @@ glusterd_get_global_options_for_all_vols(rpcsvc_request_t *req, dict_t *ctx,
+         if (key_fixed)
+             key = key_fixed;
+     }
+-
++    /* coverity[CONSTANT_EXPRESSION_RESULT] */
+     ALL_VOLUME_OPTION_CHECK("all", _gf_true, key, ret, op_errstr, out);
+ 
+     for (i = 0; valid_all_vol_opts[i].option; i++) {
+@@ -14153,6 +14157,7 @@ glusterd_disallow_op_for_tier(glusterd_volinfo_t *volinfo, glusterd_op_t op,
+             break;
+         case GD_OP_REMOVE_BRICK:
+             switch (cmd) {
++                /* coverity[MIXED_ENUMS] */
+                 case GF_DEFRAG_CMD_DETACH_START:
+                 case GF_OP_CMD_DETACH_COMMIT_FORCE:
+                 case GF_OP_CMD_DETACH_COMMIT:
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volgen.c b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+index 539e8a5..6852f8e 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volgen.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+@@ -322,7 +322,7 @@ volopt_trie_cbk(char *word, void *param)
+ }
+ 
+ static int
+-process_nodevec(struct trienodevec *nodevec, char **hint)
++process_nodevec(struct trienodevec *nodevec, char **outputhint, char *inputhint)
+ {
+     int ret = 0;
+     char *hint1 = NULL;
+@@ -331,14 +331,14 @@ process_nodevec(struct trienodevec *nodevec, char **hint)
+     trienode_t **nodes = nodevec->nodes;
+ 
+     if (!nodes[0]) {
+-        *hint = NULL;
++        *outputhint = NULL;
+         return 0;
+     }
+ 
+ #if 0
+         /* Limit as in git */
+         if (trienode_get_dist (nodes[0]) >= 6) {
+-                *hint = NULL;
++                *outputhint = NULL;
+                 return 0;
+         }
+ #endif
+@@ -347,23 +347,30 @@ process_nodevec(struct trienodevec *nodevec, char **hint)
+         return -1;
+ 
+     if (nodevec->cnt < 2 || !nodes[1]) {
+-        *hint = hint1;
++        *outputhint = hint1;
+         return 0;
+     }
+ 
+-    if (trienode_get_word(nodes[1], &hint2))
++    if (trienode_get_word(nodes[1], &hint2)) {
++        GF_FREE(hint1);
+         return -1;
++    }
+ 
+-    if (*hint)
+-        hintinfx = *hint;
+-    ret = gf_asprintf(hint, "%s or %s%s", hint1, hintinfx, hint2);
++    if (inputhint)
++        hintinfx = inputhint;
++    ret = gf_asprintf(outputhint, "%s or %s%s", hint1, hintinfx, hint2);
+     if (ret > 0)
+         ret = 0;
++    if (hint1)
++        GF_FREE(hint1);
++    if (hint2)
++        GF_FREE(hint2);
+     return ret;
+ }
+ 
+ static int
+-volopt_trie_section(int lvl, char **patt, char *word, char **hint, int hints)
++volopt_trie_section(int lvl, char **patt, char *word, char **outputhint,
++                    char *inputhint, int hints)
+ {
+     trienode_t *nodes[] = {NULL, NULL};
+     struct trienodevec nodevec = {nodes, 2};
+@@ -384,7 +391,7 @@ volopt_trie_section(int lvl, char **patt, char *word, char **hint, int hints)
+     nodevec.cnt = hints;
+     ret = trie_measure_vec(trie, word, &nodevec);
+     if (!ret && nodevec.nodes[0])
+-        ret = process_nodevec(&nodevec, hint);
++        ret = process_nodevec(&nodevec, outputhint, inputhint);
+ 
+     trie_destroy(trie);
+ 
+@@ -396,6 +403,7 @@ volopt_trie(char *key, char **hint)
+ {
+     char *patt[] = {NULL};
+     char *fullhint = NULL;
++    char *inputhint = NULL;
+     char *dot = NULL;
+     char *dom = NULL;
+     int len = 0;
+@@ -405,7 +413,7 @@ volopt_trie(char *key, char **hint)
+ 
+     dot = strchr(key, '.');
+     if (!dot)
+-        return volopt_trie_section(1, patt, key, hint, 2);
++        return volopt_trie_section(1, patt, key, hint, inputhint, 2);
+ 
+     len = dot - key;
+     dom = gf_strdup(key);
+@@ -413,7 +421,7 @@ volopt_trie(char *key, char **hint)
+         return -1;
+     dom[len] = '\0';
+ 
+-    ret = volopt_trie_section(0, NULL, dom, patt, 1);
++    ret = volopt_trie_section(0, NULL, dom, patt, inputhint, 1);
+     GF_FREE(dom);
+     if (ret) {
+         patt[0] = NULL;
+@@ -422,8 +430,8 @@ volopt_trie(char *key, char **hint)
+     if (!patt[0])
+         goto out;
+ 
+-    *hint = "...";
+-    ret = volopt_trie_section(1, patt, dot + 1, hint, 2);
++    inputhint = "...";
++    ret = volopt_trie_section(1, patt, dot + 1, hint, inputhint, 2);
+     if (ret)
+         goto out;
+     if (*hint) {
+-- 
+1.8.3.1
+

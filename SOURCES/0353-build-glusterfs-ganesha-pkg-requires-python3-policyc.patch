@@ -1,0 +1,47 @@
+From 37e2d76579abf38031d1cd9769da798fa04b183a Mon Sep 17 00:00:00 2001
+From: "Kaleb S. KEITHLEY" <kkeithle@redhat.com>
+Date: Wed, 22 Jan 2020 14:14:33 -0500
+Subject: [PATCH 353/353] build: glusterfs-ganesha pkg requires
+ python3-policycoreutils on rhel8
+
+glusterfs-ganesha pkg requires policycoreutils-python-utils on rhel8,
+not policycoreutils-python
+
+also requires nfs-ganesha-selinux on rhel-8 (optional on rhel-7)
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Ia97b4dabdc098fb76e3f60e8b48ea4191e677136
+Signed-off-by: Kaleb S. KEITHLEY <kkeithle@redhat.com>
+BUG: 1794153
+Reviewed-on: https://code.engineering.redhat.com/gerrit/190130
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfs.spec.in | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index e95e539..7c8a751 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -462,6 +462,7 @@ Summary:          NFS-Ganesha configuration
+ Group:            Applications/File
+ 
+ Requires:         %{name}-server%{?_isa} = %{version}-%{release}
++Requires:         nfs-ganesha-selinux >= 2.7.3
+ Requires:         nfs-ganesha-gluster >= 2.7.3
+ Requires:         pcs, dbus
+ %if ( 0%{?rhel} && 0%{?rhel} == 6 )
+@@ -475,7 +476,7 @@ Requires:         net-tools
+ %endif
+ 
+ %if ( 0%{?fedora} && 0%{?fedora} > 25  || ( 0%{?rhel} && 0%{?rhel} > 6 ) )
+-%if ( 0%{?rhel} )
++%if ( 0%{?rhel} && 0%{?rhel} < 8 )
+ Requires: selinux-policy >= 3.13.1-160
+ Requires(post):   policycoreutils-python
+ Requires(postun): policycoreutils-python
+-- 
+1.8.3.1
+

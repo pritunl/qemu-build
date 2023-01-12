@@ -1,0 +1,195 @@
+From 1bde083cbd1e06be66d00e4ca52075687cee0d60 Mon Sep 17 00:00:00 2001
+From: Csaba Henk <csaba@redhat.com>
+Date: Fri, 8 May 2020 23:01:04 +0200
+Subject: [PATCH 441/449] fuse: occasional logging for fuse device 'weird'
+ write errors
+
+This change is a followup to
+I510158843e4b1d482bdc496c2e97b1860dc1ba93.
+
+In referred change we pushed log messages about 'weird'
+write errors to fuse device out of sight, by reporting
+them at Debug loglevel instead of Error (where
+'weird' means errno is not POSIX compliant but having
+meaningful semantics for FUSE protocol).
+
+This solved the issue of spurious error reporting.
+And so far so good: these messages don't indicate
+an error condition by themselves. However, when they
+come in high repetitions, that indicates a suboptimal
+condition which should be reported.[1]
+
+Therefore now we shall emit a Warning if a certain
+errno occurs a certain number of times[2] as the
+outcome of a write to the fuse device.
+
+___
+[1] typically ENOENTs and ENOTDIRs accumulate
+when glusterfs' inode invalidation lags behind
+the kernel's internal inode garbage collection
+(in this case above errnos mean that the inode
+which we requested to be invalidated is not found
+in kernel). This can be mitigated with the
+invalidate-limit command line / mount option,
+cf. bz#1732717.
+
+[2] 256, as of the current implementation.
+
+Upstream on https://review.gluster.org/24415
+> Change-Id: I8cc7fe104da43a88875f93b0db49d5677cc16045
+> Updates: #1000
+> Signed-off-by: Csaba Henk <csaba@redhat.com>
+
+BUG: 1839137
+Change-Id: I8448d6d328d47cb01d560cd99a2f43cd8dab312d
+Signed-off-by: Csaba Henk <csaba@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202646
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mount/fuse/src/fuse-bridge.c | 36 +++++++++++++++++++++++++++++++++++-
+ xlators/mount/fuse/src/fuse-bridge.h | 18 ++++++++++++++++++
+ 2 files changed, 53 insertions(+), 1 deletion(-)
+
+diff --git a/xlators/mount/fuse/src/fuse-bridge.c b/xlators/mount/fuse/src/fuse-bridge.c
+index 4264fad..2e7584c 100644
+--- a/xlators/mount/fuse/src/fuse-bridge.c
++++ b/xlators/mount/fuse/src/fuse-bridge.c
+@@ -218,14 +218,30 @@ check_and_dump_fuse_W(fuse_private_t *priv, struct iovec *iov_out, int count,
+     if (res == -1) {
+         const char *errdesc = NULL;
+         gf_loglevel_t loglevel = GF_LOG_ERROR;
++        gf_boolean_t errno_degraded = _gf_false;
++        gf_boolean_t errno_promoted = _gf_false;
++
++#define ACCOUNT_ERRNO(eno)                                                     \
++    do {                                                                       \
++        if (errno_degraded) {                                                  \
++            pthread_mutex_lock(&priv->fusedev_errno_cnt_mutex);                \
++            {                                                                  \
++                if (!++priv->fusedev_errno_cnt[FUSEDEV_##eno])                 \
++                    errno_promoted = _gf_true;                                 \
++            }                                                                  \
++            pthread_mutex_unlock(&priv->fusedev_errno_cnt_mutex);              \
++        }                                                                      \
++    } while (0)
+ 
+         /* If caller masked the errno, then it
+          * does not indicate an error at the application
+          * level, so we degrade the log severity to DEBUG.
+          */
+         if (errnomask && errno < ERRNOMASK_MAX &&
+-            GET_ERRNO_MASK(errnomask, errno))
++            GET_ERRNO_MASK(errnomask, errno)) {
+             loglevel = GF_LOG_DEBUG;
++            errno_degraded = _gf_true;
++        }
+ 
+         switch (errno) {
+             /* The listed errnos are FUSE status indicators,
+@@ -235,33 +251,43 @@ check_and_dump_fuse_W(fuse_private_t *priv, struct iovec *iov_out, int count,
+              */
+             case ENOENT:
+                 errdesc = "ENOENT";
++                ACCOUNT_ERRNO(ENOENT);
+                 break;
+             case ENOTDIR:
+                 errdesc = "ENOTDIR";
++                ACCOUNT_ERRNO(ENOTDIR);
+                 break;
+             case ENODEV:
+                 errdesc = "ENODEV";
++                ACCOUNT_ERRNO(ENODEV);
+                 break;
+             case EPERM:
+                 errdesc = "EPERM";
++                ACCOUNT_ERRNO(EPERM);
+                 break;
+             case ENOMEM:
+                 errdesc = "ENOMEM";
++                ACCOUNT_ERRNO(ENOMEM);
+                 break;
+             case ENOTCONN:
+                 errdesc = "ENOTCONN";
++                ACCOUNT_ERRNO(ENOTCONN);
+                 break;
+             case ECONNREFUSED:
+                 errdesc = "ECONNREFUSED";
++                ACCOUNT_ERRNO(ECONNREFUSED);
+                 break;
+             case EOVERFLOW:
+                 errdesc = "EOVERFLOW";
++                ACCOUNT_ERRNO(EOVERFLOW);
+                 break;
+             case EBUSY:
+                 errdesc = "EBUSY";
++                ACCOUNT_ERRNO(EBUSY);
+                 break;
+             case ENOTEMPTY:
+                 errdesc = "ENOTEMPTY";
++                ACCOUNT_ERRNO(ENOTEMPTY);
+                 break;
+             default:
+                 errdesc = strerror(errno);
+@@ -269,7 +295,13 @@ check_and_dump_fuse_W(fuse_private_t *priv, struct iovec *iov_out, int count,
+ 
+         gf_log_callingfn("glusterfs-fuse", loglevel,
+                          "writing to fuse device failed: %s", errdesc);
++        if (errno_promoted)
++            gf_log("glusterfs-fuse", GF_LOG_WARNING,
++                   "writing to fuse device yielded %s %d times", errdesc,
++                   UINT8_MAX + 1);
+         return errno;
++
++#undef ACCOUNT_ERRNO
+     }
+ 
+     fouh = iov_out[0].iov_base;
+@@ -6584,6 +6616,8 @@ init(xlator_t *this_xl)
+     INIT_LIST_HEAD(&priv->interrupt_list);
+     pthread_mutex_init(&priv->interrupt_mutex, NULL);
+ 
++    pthread_mutex_init(&priv->fusedev_errno_cnt_mutex, NULL);
++
+     /* get options from option dictionary */
+     ret = dict_get_str(options, ZR_MOUNTPOINT_OPT, &value_string);
+     if (ret == -1 || value_string == NULL) {
+diff --git a/xlators/mount/fuse/src/fuse-bridge.h b/xlators/mount/fuse/src/fuse-bridge.h
+index d2d462c..2fb15a6 100644
+--- a/xlators/mount/fuse/src/fuse-bridge.h
++++ b/xlators/mount/fuse/src/fuse-bridge.h
+@@ -78,6 +78,20 @@ typedef struct fuse_in_header fuse_in_header_t;
+ typedef void(fuse_handler_t)(xlator_t *this, fuse_in_header_t *finh, void *msg,
+                              struct iobuf *iobuf);
+ 
++enum fusedev_errno {
++    FUSEDEV_ENOENT,
++    FUSEDEV_ENOTDIR,
++    FUSEDEV_ENODEV,
++    FUSEDEV_EPERM,
++    FUSEDEV_ENOMEM,
++    FUSEDEV_ENOTCONN,
++    FUSEDEV_ECONNREFUSED,
++    FUSEDEV_EOVERFLOW,
++    FUSEDEV_EBUSY,
++    FUSEDEV_ENOTEMPTY,
++    FUSEDEV_EMAXPLUS
++};
++
+ struct fuse_private {
+     int fd;
+     uint32_t proto_minor;
+@@ -192,6 +206,10 @@ struct fuse_private {
+     /* LRU Limit, if not set, default is 64k for now */
+     uint32_t lru_limit;
+     uint32_t invalidate_limit;
++
++    /* counters for fusdev errnos */
++    uint8_t fusedev_errno_cnt[FUSEDEV_EMAXPLUS];
++    pthread_mutex_t fusedev_errno_cnt_mutex;
+ };
+ typedef struct fuse_private fuse_private_t;
+ 
+-- 
+1.8.3.1
+

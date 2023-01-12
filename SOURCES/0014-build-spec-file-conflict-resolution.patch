@@ -1,0 +1,72 @@
+From f76d2370160c50a1f59d08a03a444254c289da60 Mon Sep 17 00:00:00 2001
+From: Milind Changire <mchangir@redhat.com>
+Date: Fri, 7 Dec 2018 16:18:07 +0530
+Subject: [PATCH 14/52] build: spec file conflict resolution
+
+Missed conflict resolution for removing references to
+gluster.conf.example as mentioned in patch titled:
+packaging: gratuitous dependencies on rsyslog-mm{count,jsonparse}
+by Kaleb
+
+References to hook scripts S31ganesha-start.sh and
+S31ganesha-reset.sh got lost in the downstream only
+patch conflict resolution.
+
+Commented blanket reference to %{_sharedsstatedir}/glusterd/*
+in section %files server to avoid rpmbuild warning related to
+multiple references to hook scripts and other files under
+/var/lib/glusterd.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I9d409f1595ab985ed9f79d9d4f4298877609ba17
+Signed-off-by: Milind Changire <mchangir@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/70535
+Reviewed-by: Rajesh Joseph <rjoseph@redhat.com>
+Tested-by: Rajesh Joseph <rjoseph@redhat.com>
+---
+ glusterfs.spec.in | 21 +--------------------
+ 1 file changed, 1 insertion(+), 20 deletions(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index a1ff6e0..8c57f57 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -96,9 +96,7 @@
+ 
+ # disable server components forcefully as rhel <= 6
+ %if ( 0%{?rhel} )
+-%if ( "%{?dist}" == ".el6rhs" ) || ( "%{?dist}" == ".el7rhs" ) || ( "%{?dist}" == ".el7rhgs" )
+-%global _without_server %{nil}
+-%else
++%if (!(( "%{?dist}" == ".el6rhs" ) || ( "%{?dist}" == ".el7rhs" ) || ( "%{?dist}" == ".el7rhgs" )))
+ %global _without_server --without-server
+ %endif
+ %endif
+@@ -836,23 +834,6 @@ install -D -p -m 0644 extras/glusterfs-georep-logrotate \
+     %{buildroot}%{_sysconfdir}/logrotate.d/glusterfs-georep
+ %endif
+ 
+-%if ( 0%{!?_without_syslog:1} )
+-%if ( 0%{?fedora} ) || ( 0%{?rhel} && 0%{?rhel} > 6 )
+-install -D -p -m 0644 extras/gluster-rsyslog-7.2.conf \
+-    %{buildroot}%{_sysconfdir}/rsyslog.d/gluster.conf.example
+-%endif
+-
+-%if ( 0%{?rhel} && 0%{?rhel} == 6 )
+-install -D -p -m 0644 extras/gluster-rsyslog-5.8.conf \
+-    %{buildroot}%{_sysconfdir}/rsyslog.d/gluster.conf.example
+-%endif
+-
+-%if ( 0%{?fedora} ) || ( 0%{?rhel} && 0%{?rhel} >= 6 )
+-install -D -p -m 0644 extras/logger.conf.example \
+-    %{buildroot}%{_sysconfdir}/glusterfs/logger.conf.example
+-%endif
+-%endif
+-
+ %if ( 0%{!?_without_server:1} )
+ touch %{buildroot}%{_sharedstatedir}/glusterd/glusterd.info
+ touch %{buildroot}%{_sharedstatedir}/glusterd/options
+-- 
+1.8.3.1
+

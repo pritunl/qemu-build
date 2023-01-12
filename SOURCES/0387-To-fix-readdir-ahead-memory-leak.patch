@@ -1,0 +1,47 @@
+From d54f087a2484695ff7ac214d39f2750fddcef2d5 Mon Sep 17 00:00:00 2001
+From: HuangShujun <549702281@qq.com>
+Date: Thu, 5 Dec 2019 10:07:10 +0200
+Subject: [PATCH 387/449] To fix readdir-ahead memory leak
+
+Glusterfs client process has memory leak if create several files under
+one folder, and delete the folder. According to statedump, the ref
+counts of readdir-ahead is bigger than zero in the inode table.
+
+Readdir-ahead get parent inode by inode_parent in rda_mark_inode_dirty
+when each rda_writev_cbk,the inode ref count of parent folder will be
+increased in inode_parent, but readdir-ahead do not unref it later.
+
+The correction is unref the parent inode at the end of
+rda_mark_inode_dirty.
+
+Upstream patch:
+> Upstream patch link: https://review.gluster.org/c/glusterfs/+/23815
+> Fixes: bz#1779055
+> Signed-off-by: HuangShujun <549702281@qq.com>
+> Change-Id: Iee68ab1089cbc2fbc4185b93720fb1f66ee89524
+
+BUG: 1781550
+Change-Id: Iee68ab1089cbc2fbc4185b93720fb1f66ee89524
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202312
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/performance/readdir-ahead/src/readdir-ahead.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/xlators/performance/readdir-ahead/src/readdir-ahead.c b/xlators/performance/readdir-ahead/src/readdir-ahead.c
+index 7fd4f8d..933941d 100644
+--- a/xlators/performance/readdir-ahead/src/readdir-ahead.c
++++ b/xlators/performance/readdir-ahead/src/readdir-ahead.c
+@@ -254,6 +254,7 @@ rda_mark_inode_dirty(xlator_t *this, inode_t *inode)
+             }
+         }
+         UNLOCK(&parent->lock);
++        inode_unref(parent);
+     }
+ 
+     return;
+-- 
+1.8.3.1
+

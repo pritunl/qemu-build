@@ -1,0 +1,52 @@
+From 64ffcf770c5c0087f8937b5235ed0ad5b0efe7f2 Mon Sep 17 00:00:00 2001
+From: Krutika Dhananjay <kdhananj@redhat.com>
+Date: Wed, 12 Sep 2018 21:41:35 +0530
+Subject: [PATCH 28/52] glusterd: Reset op-version for
+ "features.shard-deletion-rate"
+
+The op-version for the "features.shard-deletion-rate" option was set to
+4.2.0 in the upstream patch and backported at
+e75be952569eb69325d5f505f7ab94aace31be52.
+This commit reverts the op-version for this option to 3.13.3.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Ie3d12f3119ad7a4b40d81bd8bd6ed591658e8371
+Signed-off-by: Krutika Dhananjay <kdhananj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/154865
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/glusterfs/globals.h            | 2 ++
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c | 2 +-
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/libglusterfs/src/glusterfs/globals.h b/libglusterfs/src/glusterfs/globals.h
+index 4a82889..4d95f75 100644
+--- a/libglusterfs/src/glusterfs/globals.h
++++ b/libglusterfs/src/glusterfs/globals.h
+@@ -120,6 +120,8 @@
+ 
+ #define GD_OP_VERSION_3_13_3 31303 /* Op-version for GlusterFS 3.13.3 */
+ 
++#define GD_OP_VERSION_3_13_4 31304 /* Op-version for GlusterFS 3.13.4 */
++
+ #define GD_OP_VERSION_4_0_0 40000 /* Op-version for GlusterFS 4.0.0 */
+ 
+ #define GD_OP_VERSION_4_1_0 40100 /* Op-version for GlusterFS 4.1.0 */
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index 2bd0a9c..2f3271f 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -2552,7 +2552,7 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+     },
+     {.key = "features.shard-deletion-rate",
+      .voltype = "features/shard",
+-     .op_version = GD_OP_VERSION_5_0,
++     .op_version = GD_OP_VERSION_3_13_4,
+      .flags = VOLOPT_FLAG_CLIENT_OPT},
+     {
+         .key = "features.scrub-throttle",
+-- 
+1.8.3.1
+

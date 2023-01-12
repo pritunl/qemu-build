@@ -1,0 +1,68 @@
+From a3538a7d1fb7674acdf0934847f4004d8fbc4709 Mon Sep 17 00:00:00 2001
+From: Milind Changire <mchangir@redhat.com>
+Date: Tue, 11 Dec 2018 17:57:50 +0530
+Subject: [PATCH 26/52] glusterd: Introduce daemon-log-level cluster wide
+ option
+
+This option, applicable to the node level daemons can be very helpful in
+controlling the log level of these services. Please note any daemon
+which is started prior to setting the specific value of this option (if
+not INFO) will need to go through a restart to have this change into
+effect.
+
+> upstream patch : https://review.gluster.org/#/c/20442/
+
+Please note there's a difference in deownstream delta. The op-version
+against this option is already tageed as 3_11_2 in RHGS 3.3.1 and hence
+the same is retained. Marking this DOWNSTREAM_ONLY label because of
+
+Label: DOWNSTREAM ONLY
+
+IMPORTANT:
+This patch only sets .op_version in glusterd-volume-set.c to
+GD_OP_VERSION_3_11_2 as per Atin's recommendation on
+Tue, Dec 11, 2018 5:46pm IST
+
+>Change-Id: I7f6d2620bab2b094c737f5cc816bc093e9c9c4c9
+>fixes: bz#1597473
+>Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+
+Change-Id: I7f6d2620bab2b094c737f5cc816bc093e9c9c4c9
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/143137
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sanju Rakonde <srakonde@redhat.com>
+---
+ libglusterfs/src/glusterfs/globals.h            | 2 ++
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c | 2 +-
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/libglusterfs/src/glusterfs/globals.h b/libglusterfs/src/glusterfs/globals.h
+index b9da872..a278f18 100644
+--- a/libglusterfs/src/glusterfs/globals.h
++++ b/libglusterfs/src/glusterfs/globals.h
+@@ -104,6 +104,8 @@
+ 
+ #define GD_OP_VERSION_3_11_1 31101 /* Op-version for GlusterFS 3.11.1 */
+ 
++#define GD_OP_VERSION_3_11_2 31102 /* Op-version for GlusterFS 3.11.2 */
++
+ #define GD_OP_VERSION_3_12_0 31200 /* Op-version for GlusterFS 3.12.0 */
+ 
+ #define GD_OP_VERSION_3_12_2 31202 /* Op-version for GlusterFS 3.12.2 */
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index fed2864..84f2705 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -2859,7 +2859,7 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+      .voltype = "mgmt/glusterd",
+      .type = GLOBAL_NO_DOC,
+      .value = "INFO",
+-     .op_version = GD_OP_VERSION_5_0},
++     .op_version = GD_OP_VERSION_3_11_2},
+     {.key = "debug.delay-gen",
+      .voltype = "debug/delay-gen",
+      .option = "!debug",
+-- 
+1.8.3.1
+

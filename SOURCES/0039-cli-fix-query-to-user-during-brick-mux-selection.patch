@@ -1,0 +1,61 @@
+From ec707e099d4e4338d1ea21560d367b02e6339532 Mon Sep 17 00:00:00 2001
+From: Sunil Kumar Acharya <sheggodu@redhat.com>
+Date: Mon, 1 Apr 2019 16:16:47 +0530
+Subject: [PATCH 39/52] cli: fix query to user during brick-mux selection
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I59472066b917ea2b23de72bcd91dc3e275d5e055
+Signed-off-by: Sunil Kumar Acharya <sheggodu@redhat.com>
+---
+ cli/src/cli-cmd-parser.c | 33 +++++++++++++++++----------------
+ 1 file changed, 17 insertions(+), 16 deletions(-)
+
+diff --git a/cli/src/cli-cmd-parser.c b/cli/src/cli-cmd-parser.c
+index 541dc62..d9ccba1 100644
+--- a/cli/src/cli-cmd-parser.c
++++ b/cli/src/cli-cmd-parser.c
+@@ -1693,23 +1693,24 @@ cli_cmd_volume_set_parse(struct cli_state *state, const char **words,
+                 goto out;
+             }
+         }
+-    }
+-
+-    if ((strcmp (key, "cluster.brick-multiplex") == 0)) {
+-        question = "Brick-multiplexing is supported only for "
+-                   "OCS converged or independent mode. Also it is "
+-                   "advised to make sure that either all "
+-                   "volumes are in stopped state or no bricks "
+-                   "are running before this option is modified."
+-                   "Do you still want to continue?";
+ 
+-        answer = cli_cmd_get_confirmation (state, question);
+-        if (GF_ANSWER_NO == answer) {
+-            gf_log ("cli", GF_LOG_ERROR, "Operation "
+-                    "cancelled, exiting");
+-            *op_errstr = gf_strdup ("Aborted by user.");
+-            ret = -1;
+-            goto out;
++        if ((strcmp (key, "cluster.brick-multiplex") == 0)) {
++            question =
++                "Brick-multiplexing is supported only for "
++                "OCS converged or independent mode. Also it is "
++                "advised to make sure that either all "
++                "volumes are in stopped state or no bricks "
++                "are running before this option is modified."
++                "Do you still want to continue?";
++
++            answer = cli_cmd_get_confirmation (state, question);
++            if (GF_ANSWER_NO == answer) {
++                gf_log ("cli", GF_LOG_ERROR, "Operation "
++                        "cancelled, exiting");
++                *op_errstr = gf_strdup ("Aborted by user.");
++                ret = -1;
++                goto out;
++            }
+         }
+     }
+ 
+-- 
+1.8.3.1
+

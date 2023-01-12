@@ -1,0 +1,89 @@
+From 909a6461c860fffde5f886891dd53752f60eae67 Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Tue, 18 Jun 2019 12:10:55 +0530
+Subject: [PATCH 195/221] build : package glusterfs-ganesha for rhel7 and above
+
+Label : DOWNSTREAM ONLY
+
+Change-Id: If845675b18fe055708d905ec566014baf004cb76
+fixes: bz#1720551
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/173748
+Reviewed-by: Sreenath Girijan Menon <sgirijan@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Kaleb Keithley <kkeithle@redhat.com>
+---
+ glusterfs.spec.in | 19 ++++++++++++++-----
+ 1 file changed, 14 insertions(+), 5 deletions(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 1150101..00603ec 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -302,6 +302,9 @@ Obsoletes:        %{name}-ufo
+ %if ( 0%{!?_with_gnfs:1} )
+ Obsoletes:        %{name}-gnfs
+ %endif
++%if ( 0%{?rhel} < 7 )
++Obsoletes:        %{name}-ganesha
++%endif
+ Provides:         %{name}-common = %{version}-%{release}
+ Provides:         %{name}-core = %{version}-%{release}
+ 
+@@ -452,7 +455,7 @@ is in user space and easily manageable.
+ This package provides support to FUSE based clients and inlcudes the
+ glusterfs(d) binary.
+ 
+-%if ( 0%{!?_without_server:1} )
++%if ( 0%{!?_without_server:1} && 0%{?rhel} > 6 )
+ %package ganesha
+ Summary:          NFS-Ganesha configuration
+ Group:            Applications/File
+@@ -855,7 +858,7 @@ install -D -p -m 0644 extras/glusterfs-logrotate \
+     %{buildroot}%{_sysconfdir}/logrotate.d/glusterfs
+ 
+ # ganesha ghosts
+-%if ( 0%{!?_without_server:1} )
++%if ( 0%{!?_without_server:1} && 0%{?rhel} > 6 )
+ mkdir -p %{buildroot}%{_sysconfdir}/ganesha
+ touch %{buildroot}%{_sysconfdir}/ganesha/ganesha-ha.conf
+ mkdir -p %{buildroot}%{_localstatedir}/run/gluster/shared_storage/nfs-ganesha/
+@@ -1165,11 +1168,14 @@ exit 0
+ %endif
+ %endif
+ 
+-%if ( 0%{?_without_server:1} )
+-#exclude ganesha related files
++%if ( 0%{?_without_server:1} || 0%{?rhel} < 7 )
++#exclude ganesha related files for rhel 6 and client builds
+ %exclude %{_sysconfdir}/ganesha/ganesha-ha.conf.sample
+ %exclude %{_libexecdir}/ganesha/*
+ %exclude %{_prefix}/lib/ocf/resource.d/heartbeat/*
++%if ( 0%{!?_without_server:1} )
++%{_sharedstatedir}/glusterd/hooks/1/start/post/S31ganesha-start.sh
++%endif
+ %endif
+ 
+ %exclude %{_datadir}/glusterfs/scripts/setup-thin-arbiter.sh
+@@ -1324,7 +1330,7 @@ exit 0
+ %exclude %{_datadir}/glusterfs/tests/vagrant
+ %endif
+ 
+-%if ( 0%{!?_without_server:1} )
++%if ( 0%{!?_without_server:1} && 0%{?rhel} > 6 )
+ %files ganesha
+ %dir %{_libexecdir}/ganesha
+ %{_sysconfdir}/ganesha/ganesha-ha.conf.sample
+@@ -1936,6 +1942,9 @@ fi
+ %endif
+ 
+ %changelog
++* Tue Jun 18  2019 Jiffin Tony Thottan <jthottan@redhat.com>
++- build glusterfs-ganesha for rhel 7 and above (#1720551)
++
+ * Fri Jun 14 2019 Atin Mukherjee <amukherj@redhat.com>
+ - Ensure gluster-cli package is part of client build (#1720079)
+ 
+-- 
+1.8.3.1
+

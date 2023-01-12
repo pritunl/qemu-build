@@ -1,0 +1,123 @@
+From 36b0bd86321436a951f225fcf2e921390ed8dc33 Mon Sep 17 00:00:00 2001
+From: Michael Adam <obnox@samba.org>
+Date: Thu, 20 Jun 2019 13:09:37 +0200
+Subject: [PATCH 223/255] change get_real_filename implementation to use
+ ENOATTR instead of ENOENT
+
+get_real_filename is implemented as a virtual extended attribute to help
+Samba implement the case-insensitive but case preserving SMB protocol
+more efficiently. It is implemented as a getxattr call on the parent directory
+with the virtual key of "get_real_filename:<entryname>" by looking for a
+spelling with different case for the provided file/dir name (<entryname>)
+and returning this correct spelling as a result if the entry is found.
+Originally (05aaec645a6262d431486eb5ac7cd702646cfcfb), the
+implementation used the ENOENT errno to return the authoritative answer
+that <entryname> does not exist in any case folding.
+
+Now this implementation is actually a violation or misuse of the defined
+API for the getxattr call which returns ENOENT for the case that the dir
+that the call is made against does not exist and ENOATTR (or the synonym
+ENODATA) for the case that the xattr does not exist.
+
+This was not a problem until the gluster fuse-bridge was changed
+to do map ENOENT to ESTALE in 59629f1da9dca670d5dcc6425f7f89b3e96b46bf,
+after which we the getxattr call for get_real_filename returned an
+ESTALE instead of ENOENT breaking the expectation in Samba.
+
+It is an independent problem that ESTALE should not leak out to user
+space but is intended to trigger retries between fuse and gluster.
+But nevertheless, the semantics seem to be incorrect here and should
+be changed.
+
+This patch changes the implementation of the get_real_filename virtual
+xattr to correctly return ENOATTR instead of ENOENT if the file/directory
+being looked up is not found.
+
+The Samba glusterfs_fuse vfs module which takes advantage of the
+get_real_filename over a fuse mount will receive a corresponding change
+to map ENOATTR to ENOENT. Without this change, it will still work
+correctly, but the performance optimization for nonexisting files is
+lost. On the other hand side, this change removes the distinction
+between the old not-implemented case and the implemented case.
+So Samba changed to treat ENOATTR like ENOENT will not work correctly
+any more against old servers that don't implement get_real_filename.
+I.e. existing files will be reported as non-existing
+
+Backport of https://review.gluster.org/c/glusterfs/+/22925
+
+Change-Id: I971b427ab8410636d5d201157d9af70e0d075b67
+fixes: bz#1724089
+Signed-off-by: Michael Adam <obnox@samba.org>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/175012
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/cluster/dht/src/dht-common.c           | 8 ++++----
+ xlators/storage/posix/src/posix-inode-fd-ops.c | 4 ++--
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/xlators/cluster/dht/src/dht-common.c b/xlators/cluster/dht/src/dht-common.c
+index 9a6ea5b..219b072 100644
+--- a/xlators/cluster/dht/src/dht-common.c
++++ b/xlators/cluster/dht/src/dht-common.c
+@@ -4618,7 +4618,7 @@ dht_getxattr_get_real_filename_cbk(call_frame_t *frame, void *cookie,
+ 
+     LOCK(&frame->lock);
+     {
+-        if (local->op_errno == ENODATA || local->op_errno == EOPNOTSUPP) {
++        if (local->op_errno == EOPNOTSUPP) {
+             /* Nothing to do here, we have already found
+              * a subvol which does not have the get_real_filename
+              * optimization. If condition is for simple logic.
+@@ -4627,7 +4627,7 @@ dht_getxattr_get_real_filename_cbk(call_frame_t *frame, void *cookie,
+         }
+ 
+         if (op_ret == -1) {
+-            if (op_errno == ENODATA || op_errno == EOPNOTSUPP) {
++            if (op_errno == EOPNOTSUPP) {
+                 /* This subvol does not have the optimization.
+                  * Better let the user know we don't support it.
+                  * Remove previous results if any.
+@@ -4655,7 +4655,7 @@ dht_getxattr_get_real_filename_cbk(call_frame_t *frame, void *cookie,
+                 goto post_unlock;
+             }
+ 
+-            if (op_errno == ENOENT) {
++            if (op_errno == ENOATTR) {
+                 /* Do nothing, our defaults are set to this.
+                  */
+                 goto unlock;
+@@ -4723,7 +4723,7 @@ dht_getxattr_get_real_filename(call_frame_t *frame, xlator_t *this, loc_t *loc,
+     cnt = local->call_cnt = layout->cnt;
+ 
+     local->op_ret = -1;
+-    local->op_errno = ENOENT;
++    local->op_errno = ENOATTR;
+ 
+     for (i = 0; i < cnt; i++) {
+         subvol = layout->list[i].xlator;
+diff --git a/xlators/storage/posix/src/posix-inode-fd-ops.c b/xlators/storage/posix/src/posix-inode-fd-ops.c
+index c949f68..ea3b69c 100644
+--- a/xlators/storage/posix/src/posix-inode-fd-ops.c
++++ b/xlators/storage/posix/src/posix-inode-fd-ops.c
+@@ -2954,7 +2954,7 @@ posix_xattr_get_real_filename(call_frame_t *frame, xlator_t *this, loc_t *loc,
+     (void)sys_closedir(fd);
+ 
+     if (!found)
+-        return -ENOENT;
++        return -ENOATTR;
+ 
+     ret = dict_set_dynstr(dict, (char *)key, found);
+     if (ret) {
+@@ -3422,7 +3422,7 @@ posix_getxattr(call_frame_t *frame, xlator_t *this, loc_t *loc,
+         if (ret < 0) {
+             op_ret = -1;
+             op_errno = -ret;
+-            if (op_errno == ENOENT) {
++            if (op_errno == ENOATTR) {
+                 gf_msg_debug(this->name, 0,
+                              "Failed to get "
+                              "real filename (%s, %s)",
+-- 
+1.8.3.1
+

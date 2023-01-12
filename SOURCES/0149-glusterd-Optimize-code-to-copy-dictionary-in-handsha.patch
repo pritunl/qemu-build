@@ -1,0 +1,452 @@
+From 86eee7e829bb33cac9b611da511ecbd2f03fab25 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Fri, 17 May 2019 19:26:48 +0530
+Subject: [PATCH 149/169] glusterd: Optimize code to copy dictionary in
+ handshake code path
+
+Problem: While high no. of volumes are configured around 2000
+         glusterd has bottleneck during handshake at the time
+         of copying dictionary
+
+Solution: To avoid the bottleneck serialize a dictionary instead
+          of copying key-value pair one by one
+
+> Change-Id: I9fb332f432e4f915bc3af8dcab38bed26bda2b9a
+> fixes: bz#1711297
+> Cherry picked from commit f8f09178bb890924a8050b466cc2e7a0a30e35a7
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/22742/)
+
+BUG: 1711296
+Change-Id: I9fb332f432e4f915bc3af8dcab38bed26bda2b9a
+Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172255
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ libglusterfs/src/dict.c                      |   6 +-
+ libglusterfs/src/glusterfs/dict.h            |   6 +
+ libglusterfs/src/libglusterfs.sym            |   1 +
+ xlators/mgmt/glusterd/src/glusterd-rpc-ops.c |  27 ++--
+ xlators/mgmt/glusterd/src/glusterd-utils.c   | 187 +++++++++++++++++++++++----
+ xlators/mgmt/glusterd/src/glusterd-utils.h   |   3 +-
+ xlators/mgmt/glusterd/src/glusterd.h         |   5 +
+ 7 files changed, 194 insertions(+), 41 deletions(-)
+
+diff --git a/libglusterfs/src/dict.c b/libglusterfs/src/dict.c
+index 4cd1fcf..6917df9 100644
+--- a/libglusterfs/src/dict.c
++++ b/libglusterfs/src/dict.c
+@@ -2799,10 +2799,6 @@ dict_rename_key(dict_t *this, char *key, char *replace_key)
+  *     4        4         4       <key len>   <value len>
+  */
+ 
+-#define DICT_HDR_LEN 4
+-#define DICT_DATA_HDR_KEY_LEN 4
+-#define DICT_DATA_HDR_VAL_LEN 4
+-
+ /**
+  * dict_serialized_length_lk - return the length of serialized dict. This
+  *                             procedure has to be called with this->lock held.
+@@ -2812,7 +2808,7 @@ dict_rename_key(dict_t *this, char *key, char *replace_key)
+  *        : failure: -errno
+  */
+ 
+-static int
++int
+ dict_serialized_length_lk(dict_t *this)
+ {
+     int ret = -EINVAL;
+diff --git a/libglusterfs/src/glusterfs/dict.h b/libglusterfs/src/glusterfs/dict.h
+index 52b833f..022f564 100644
+--- a/libglusterfs/src/glusterfs/dict.h
++++ b/libglusterfs/src/glusterfs/dict.h
+@@ -91,6 +91,9 @@ typedef struct _data_pair data_pair_t;
+ #define DICT_MAX_FLAGS 256
+ #define DICT_FLAG_SET 1
+ #define DICT_FLAG_CLEAR 0
++#define DICT_HDR_LEN 4
++#define DICT_DATA_HDR_KEY_LEN 4
++#define DICT_DATA_HDR_VAL_LEN 4
+ 
+ struct _data {
+     char *data;
+@@ -412,4 +415,7 @@ are_dicts_equal(dict_t *one, dict_t *two,
+                 gf_boolean_t (*value_ignore)(char *k));
+ int
+ dict_has_key_from_array(dict_t *dict, char **strings, gf_boolean_t *result);
++
++int
++dict_serialized_length_lk(dict_t *this);
+ #endif
+diff --git a/libglusterfs/src/libglusterfs.sym b/libglusterfs/src/libglusterfs.sym
+index cf5757c..ec474e7 100644
+--- a/libglusterfs/src/libglusterfs.sym
++++ b/libglusterfs/src/libglusterfs.sym
+@@ -405,6 +405,7 @@ dict_rename_key
+ dict_reset
+ dict_serialize
+ dict_serialized_length
++dict_serialized_length_lk
+ dict_serialize_value_with_delim
+ dict_set
+ dict_setn
+diff --git a/xlators/mgmt/glusterd/src/glusterd-rpc-ops.c b/xlators/mgmt/glusterd/src/glusterd-rpc-ops.c
+index 4ec9700..45f8f17 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-rpc-ops.c
++++ b/xlators/mgmt/glusterd/src/glusterd-rpc-ops.c
+@@ -1528,11 +1528,9 @@ glusterd_rpc_friend_add(call_frame_t *frame, xlator_t *this, void *data)
+ 
+     RCU_READ_UNLOCK;
+ 
+-    ret = glusterd_add_volumes_to_export_dict(&peer_data);
+-    if (ret) {
+-        gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_DICT_SET_FAILED,
+-               "Unable to add list of volumes "
+-               "in the peer_data dict for handshake");
++    peer_data = dict_new();
++    if (!peer_data) {
++        errno = ENOMEM;
+         goto out;
+     }
+ 
+@@ -1563,10 +1561,23 @@ glusterd_rpc_friend_add(call_frame_t *frame, xlator_t *this, void *data)
+         }
+     }
+ 
+-    ret = dict_allocate_and_serialize(peer_data, &req.vols.vols_val,
+-                                      &req.vols.vols_len);
+-    if (ret)
++    /* Don't add any key-value in peer_data dictionary after call this function
++     */
++    ret = glusterd_add_volumes_to_export_dict(peer_data, &req.vols.vols_val,
++                                              &req.vols.vols_len);
++    if (ret) {
++        gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_DICT_SET_FAILED,
++               "Unable to add list of volumes "
++               "in the peer_data dict for handshake");
+         goto out;
++    }
++
++    if (!req.vols.vols_len) {
++        ret = dict_allocate_and_serialize(peer_data, &req.vols.vols_val,
++                                          &req.vols.vols_len);
++        if (ret)
++            goto out;
++    }
+ 
+     ret = glusterd_submit_request(
+         peerinfo->rpc, &req, frame, peerinfo->peer, GLUSTERD_FRIEND_ADD, NULL,
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index 8f1525e..2bc4836 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -3466,11 +3466,118 @@ out:
+     return NULL;
+ }
+ 
++int
++glusterd_dict_searialize(dict_t *dict_arr[], int count, int totcount, char *buf)
++{
++    int i = 0;
++    int32_t keylen = 0;
++    int64_t netword = 0;
++    data_pair_t *pair = NULL;
++    int dict_count = 0;
++    int ret = 0;
++
++    netword = hton32(totcount);
++    memcpy(buf, &netword, sizeof(netword));
++    buf += DICT_HDR_LEN;
++
++    for (i = 0; i < count; i++) {
++        if (dict_arr[i]) {
++            dict_count = dict_arr[i]->count;
++            pair = dict_arr[i]->members_list;
++            while (dict_count) {
++                if (!pair) {
++                    gf_msg("glusterd", GF_LOG_ERROR, 0,
++                           LG_MSG_PAIRS_LESS_THAN_COUNT,
++                           "less than count data pairs found!");
++                    ret = -1;
++                    goto out;
++                }
++
++                if (!pair->key) {
++                    gf_msg("glusterd", GF_LOG_ERROR, 0, LG_MSG_NULL_PTR,
++                           "pair->key is null!");
++                    ret = -1;
++                    goto out;
++                }
++
++                keylen = strlen(pair->key);
++                netword = hton32(keylen);
++                memcpy(buf, &netword, sizeof(netword));
++                buf += DICT_DATA_HDR_KEY_LEN;
++                if (!pair->value) {
++                    gf_msg("glusterd", GF_LOG_ERROR, 0, LG_MSG_NULL_PTR,
++                           "pair->value is null!");
++                    ret = -1;
++                    goto out;
++                }
++
++                netword = hton32(pair->value->len);
++                memcpy(buf, &netword, sizeof(netword));
++                buf += DICT_DATA_HDR_VAL_LEN;
++
++                memcpy(buf, pair->key, keylen);
++                buf += keylen;
++                *buf++ = '\0';
++
++                if (pair->value->data) {
++                    memcpy(buf, pair->value->data, pair->value->len);
++                    buf += pair->value->len;
++                }
++
++                pair = pair->next;
++                dict_count--;
++            }
++        }
++    }
++
++out:
++    for (i = 0; i < count; i++) {
++        if (dict_arr[i])
++            dict_unref(dict_arr[i]);
++    }
++    return ret;
++}
++
++int
++glusterd_dict_arr_serialize(dict_t *dict_arr[], int count, char **buf,
++                            u_int *length)
++{
++    ssize_t len = 0;
++    int i = 0;
++    int totcount = 0;
++    int ret = 0;
++
++    for (i = 0; i < count; i++) {
++        if (dict_arr[i]) {
++            len += dict_serialized_length_lk(dict_arr[i]);
++            totcount += dict_arr[i]->count;
++        }
++    }
++
++    // Subtract HDR_LEN except one dictionary
++    len = len - ((count - 1) * DICT_HDR_LEN);
++
++    *buf = GF_MALLOC(len, gf_common_mt_char);
++    if (*buf == NULL) {
++        ret = -ENOMEM;
++        goto out;
++    }
++
++    if (length != NULL) {
++        *length = len;
++    }
++
++    ret = glusterd_dict_searialize(dict_arr, count, totcount, *buf);
++
++out:
++    return ret;
++}
++
+ int32_t
+-glusterd_add_volumes_to_export_dict(dict_t **peer_data)
++glusterd_add_volumes_to_export_dict(dict_t *peer_data, char **buf,
++                                    u_int *length)
+ {
+     int32_t ret = -1;
+-    dict_t *dict = NULL;
+     dict_t *dict_arr[128] = {
+         0,
+     };
+@@ -3496,10 +3603,6 @@ glusterd_add_volumes_to_export_dict(dict_t **peer_data)
+     priv = this->private;
+     GF_ASSERT(priv);
+ 
+-    dict = dict_new();
+-    if (!dict)
+-        goto out;
+-
+     /* Count the total number of volumes */
+     cds_list_for_each_entry(volinfo, &priv->volumes, vol_list) volcnt++;
+ 
+@@ -3520,14 +3623,15 @@ glusterd_add_volumes_to_export_dict(dict_t **peer_data)
+         cds_list_for_each_entry(volinfo, &priv->volumes, vol_list)
+         {
+             count++;
+-            ret = glusterd_add_volume_to_dict(volinfo, dict, count, "volume");
++            ret = glusterd_add_volume_to_dict(volinfo, peer_data, count,
++                                              "volume");
+             if (ret)
+                 goto out;
+ 
+             if (!dict_get_sizen(volinfo->dict, VKEY_FEATURES_QUOTA))
+                 continue;
+ 
+-            ret = glusterd_vol_add_quota_conf_to_dict(volinfo, dict, count,
++            ret = glusterd_vol_add_quota_conf_to_dict(volinfo, peer_data, count,
+                                                       "volume");
+             if (ret)
+                 goto out;
+@@ -3569,34 +3673,34 @@ glusterd_add_volumes_to_export_dict(dict_t **peer_data)
+ 
+         gf_log(this->name, GF_LOG_INFO,
+                "Finished dictionary popluation in all threads");
+-        for (i = 0; i < totthread; i++) {
+-            dict_copy_with_ref(dict_arr[i], dict);
+-            dict_unref(dict_arr[i]);
+-        }
+-        gf_log(this->name, GF_LOG_INFO,
+-               "Finished merger of all dictionraies into single one");
+     }
+ 
+-    ret = dict_set_int32n(dict, "count", SLEN("count"), volcnt);
++    ret = dict_set_int32n(peer_data, "count", SLEN("count"), volcnt);
+     if (ret)
+         goto out;
+ 
+-    ctx.dict = dict;
++    ctx.dict = peer_data;
+     ctx.prefix = "global";
+     ctx.opt_count = 1;
+     ctx.key_name = "key";
+     ctx.val_name = "val";
+     dict_foreach(priv->opts, _add_dict_to_prdict, &ctx);
+     ctx.opt_count--;
+-    ret = dict_set_int32n(dict, "global-opt-count", SLEN("global-opt-count"),
+-                          ctx.opt_count);
++    ret = dict_set_int32n(peer_data, "global-opt-count",
++                          SLEN("global-opt-count"), ctx.opt_count);
+     if (ret)
+         goto out;
+ 
+-    *peer_data = dict;
++    if (totthread) {
++        gf_log(this->name, GF_LOG_INFO,
++               "Finished merger of all dictionraies into single one");
++        dict_arr[totthread++] = peer_data;
++        ret = glusterd_dict_arr_serialize(dict_arr, totthread, buf, length);
++        gf_log(this->name, GF_LOG_INFO,
++               "Serialize dictionary data return is %d", ret);
++    }
++
+ out:
+-    if (ret)
+-        dict_unref(dict);
+ 
+     gf_msg_trace(this->name, 0, "Returning %d", ret);
+     return ret;
+@@ -4940,6 +5044,7 @@ glusterd_import_friend_volumes_synctask(void *opaque)
+     xlator_t *this = NULL;
+     glusterd_conf_t *conf = NULL;
+     dict_t *peer_data = NULL;
++    glusterd_friend_synctask_args_t *arg = NULL;
+ 
+     this = THIS;
+     GF_ASSERT(this);
+@@ -4947,8 +5052,20 @@ glusterd_import_friend_volumes_synctask(void *opaque)
+     conf = this->private;
+     GF_ASSERT(conf);
+ 
+-    peer_data = (dict_t *)opaque;
+-    GF_ASSERT(peer_data);
++    arg = opaque;
++    if (!arg)
++        goto out;
++
++    peer_data = dict_new();
++    if (!peer_data) {
++        goto out;
++    }
++
++    ret = dict_unserialize(arg->dict_buf, arg->dictlen, &peer_data);
++    if (ret) {
++        errno = ENOMEM;
++        goto out;
++    }
+ 
+     ret = dict_get_int32n(peer_data, "count", SLEN("count"), &count);
+     if (ret)
+@@ -4980,6 +5097,11 @@ glusterd_import_friend_volumes_synctask(void *opaque)
+ out:
+     if (peer_data)
+         dict_unref(peer_data);
++    if (arg) {
++        if (arg->dict_buf)
++            GF_FREE(arg->dict_buf);
++        GF_FREE(arg);
++    }
+ 
+     gf_msg_debug("glusterd", 0, "Returning with %d", ret);
+     return ret;
+@@ -5146,7 +5268,7 @@ glusterd_compare_friend_data(dict_t *peer_data, int32_t *status, char *hostname)
+     gf_boolean_t update = _gf_false;
+     xlator_t *this = NULL;
+     glusterd_conf_t *priv = NULL;
+-    dict_t *peer_data_copy = NULL;
++    glusterd_friend_synctask_args_t *arg = NULL;
+ 
+     this = THIS;
+     GF_ASSERT(this);
+@@ -5188,12 +5310,23 @@ glusterd_compare_friend_data(dict_t *peer_data, int32_t *status, char *hostname)
+          * first brick to come up before attaching the subsequent bricks
+          * in case brick multiplexing is enabled
+          */
+-        peer_data_copy = dict_copy_with_ref(peer_data, NULL);
+-        glusterd_launch_synctask(glusterd_import_friend_volumes_synctask,
+-                                 peer_data_copy);
++        arg = GF_CALLOC(1, sizeof(*arg), gf_common_mt_char);
++        ret = dict_allocate_and_serialize(peer_data, &arg->dict_buf,
++                                          &arg->dictlen);
++        if (ret < 0) {
++            gf_log(this->name, GF_LOG_ERROR,
++                   "dict_serialize failed while handling "
++                   " import friend volume request");
++            goto out;
++        }
++
++        glusterd_launch_synctask(glusterd_import_friend_volumes_synctask, arg);
+     }
+ 
+ out:
++    if (ret && arg) {
++        GF_FREE(arg);
++    }
+     gf_msg_debug(this->name, 0, "Returning with ret: %d, status: %d", ret,
+                  *status);
+     return ret;
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.h b/xlators/mgmt/glusterd/src/glusterd-utils.h
+index 3647c34..6ad8062 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.h
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.h
+@@ -227,7 +227,8 @@ glusterd_volume_brickinfo_get_by_brick(char *brick, glusterd_volinfo_t *volinfo,
+                                        gf_boolean_t construct_real_path);
+ 
+ int32_t
+-glusterd_add_volumes_to_export_dict(dict_t **peer_data);
++glusterd_add_volumes_to_export_dict(dict_t *peer_data, char **buf,
++                                    u_int *length);
+ 
+ int32_t
+ glusterd_compare_friend_data(dict_t *peer_data, int32_t *status,
+diff --git a/xlators/mgmt/glusterd/src/glusterd.h b/xlators/mgmt/glusterd/src/glusterd.h
+index 2ea8560..f96bca3 100644
+--- a/xlators/mgmt/glusterd/src/glusterd.h
++++ b/xlators/mgmt/glusterd/src/glusterd.h
+@@ -240,6 +240,11 @@ typedef struct glusterd_add_dict_args {
+     int end;
+ } glusterd_add_dict_args_t;
+ 
++typedef struct glusterd_friend_synctask_args {
++    char *dict_buf;
++    u_int dictlen;
++} glusterd_friend_synctask_args_t;
++
+ typedef enum gf_brick_status {
+     GF_BRICK_STOPPED,
+     GF_BRICK_STARTED,
+-- 
+1.8.3.1
+

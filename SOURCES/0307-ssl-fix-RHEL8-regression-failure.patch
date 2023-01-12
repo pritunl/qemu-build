@@ -1,0 +1,42 @@
+From be9695391f39fe6eb1d157f6bfd018116d1ee42b Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Mon, 30 Sep 2019 13:14:06 +0530
+Subject: [PATCH 307/307] ssl: fix RHEL8 regression failure
+
+This tests is failing with
+"SSL routines:SSL_CTX_use_certificate:ee key too small"
+in RHEL8. This change is made according to
+https://access.redhat.com/solutions/4157431
+
+> updates: bz#1756900
+> Change-Id: Ib436372c3bd94bcf7324976337add7da4088b3d5
+> Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+
+upstream patch: https://review.gluster.org/#/c/glusterfs/+/23501/
+
+BUG: 1704562
+Change-Id: Ib436372c3bd94bcf7324976337add7da4088b3d5
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/183148
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/cli/bug-1320388.t | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tests/bugs/cli/bug-1320388.t b/tests/bugs/cli/bug-1320388.t
+index f5ffcbe..8e5d77b 100755
+--- a/tests/bugs/cli/bug-1320388.t
++++ b/tests/bugs/cli/bug-1320388.t
+@@ -21,7 +21,7 @@ cleanup;
+ rm -f $SSL_BASE/glusterfs.*
+ touch "$GLUSTERD_WORKDIR"/secure-access
+ 
+-TEST openssl genrsa -out $SSL_KEY 1024
++TEST openssl genrsa -out $SSL_KEY 3072
+ TEST openssl req -new -x509 -key $SSL_KEY -subj /CN=Anyone -out $SSL_CERT
+ ln $SSL_CERT $SSL_CA
+ 
+-- 
+1.8.3.1
+

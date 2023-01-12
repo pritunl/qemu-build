@@ -1,0 +1,120 @@
+From d79660ccc65f163e0d9cf91cc13a199bec04d5f1 Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez Juan <xhernandez@redhat.com>
+Date: Wed, 20 May 2020 12:55:43 +0000
+Subject: [PATCH 378/379] Revert "open-behind: fix missing fd reference"
+
+This reverts commit 30cbdf8c06145a0c290da42ecc0a7eae928200b7.
+
+The patch is not complete because there have been some crash reports
+upstream recently after the patch was released. A new patch that should
+cover all corner cases is under review (), but it's a big change and it
+could be risky to backport it without enough testing.
+
+Since there exists a workaround to avoid the problem (disable
+open-behind), for now we revert the patch.
+
+Change-Id: I9cfc55623c33758cf5530b18f03c0d795b0f650b
+BUG: 1830713
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/200952
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/performance/open-behind/src/open-behind.c | 27 +++++++++--------------
+ 1 file changed, 11 insertions(+), 16 deletions(-)
+
+diff --git a/xlators/performance/open-behind/src/open-behind.c b/xlators/performance/open-behind/src/open-behind.c
+index 14ebc12..268c717 100644
+--- a/xlators/performance/open-behind/src/open-behind.c
++++ b/xlators/performance/open-behind/src/open-behind.c
+@@ -206,13 +206,8 @@ ob_fd_free(ob_fd_t *ob_fd)
+     if (ob_fd->xdata)
+         dict_unref(ob_fd->xdata);
+ 
+-    if (ob_fd->open_frame) {
+-        /* If we sill have a frame it means that background open has never
+-         * been triggered. We need to release the pending reference. */
+-        fd_unref(ob_fd->fd);
+-
++    if (ob_fd->open_frame)
+         STACK_DESTROY(ob_fd->open_frame->root);
+-    }
+ 
+     GF_FREE(ob_fd);
+ }
+@@ -302,7 +297,6 @@ ob_wake_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int op_ret,
+             call_resume(stub);
+     }
+ 
+-    /* The background open is completed. We can release the 'fd' reference. */
+     fd_unref(fd);
+ 
+     STACK_DESTROY(frame->root);
+@@ -337,9 +331,7 @@ ob_fd_wake(xlator_t *this, fd_t *fd, ob_fd_t *ob_fd)
+     }
+ 
+     if (frame) {
+-        /* We don't need to take a reference here. We already have a reference
+-         * while the open is pending. */
+-        frame->local = fd;
++        frame->local = fd_ref(fd);
+ 
+         STACK_WIND(frame, ob_wake_cbk, FIRST_CHILD(this),
+                    FIRST_CHILD(this)->fops->open, &ob_fd->loc, ob_fd->flags, fd,
+@@ -353,12 +345,15 @@ void
+ ob_inode_wake(xlator_t *this, struct list_head *ob_fds)
+ {
+     ob_fd_t *ob_fd = NULL, *tmp = NULL;
++    fd_t *fd = NULL;
+ 
+     if (!list_empty(ob_fds)) {
+         list_for_each_entry_safe(ob_fd, tmp, ob_fds, ob_fds_on_inode)
+         {
+             ob_fd_wake(this, ob_fd->fd, ob_fd);
++            fd = ob_fd->fd;
+             ob_fd_free(ob_fd);
++            fd_unref(fd);
+         }
+     }
+ }
+@@ -370,7 +365,7 @@ ob_fd_copy(ob_fd_t *src, ob_fd_t *dst)
+     if (!src || !dst)
+         goto out;
+ 
+-    dst->fd = src->fd;
++    dst->fd = __fd_ref(src->fd);
+     dst->loc.inode = inode_ref(src->loc.inode);
+     gf_uuid_copy(dst->loc.gfid, src->loc.gfid);
+     dst->flags = src->flags;
+@@ -514,6 +509,7 @@ ob_open_behind(call_frame_t *frame, xlator_t *this, loc_t *loc, int flags,
+ 
+     ob_fd->ob_inode = ob_inode;
+ 
++    /* don't do fd_ref, it'll cause leaks */
+     ob_fd->fd = fd;
+ 
+     ob_fd->open_frame = copy_frame(frame);
+@@ -543,16 +539,15 @@ ob_open_behind(call_frame_t *frame, xlator_t *this, loc_t *loc, int flags,
+     }
+     UNLOCK(&fd->inode->lock);
+ 
+-    /* We take a reference while the background open is pending or being
+-     * processed. If we finally wind the request in the foreground, then
+-     * ob_fd_free() will take care of this additional reference. */
+-    fd_ref(fd);
+-
+     if (!open_in_progress && !unlinked) {
++        fd_ref(fd);
++
+         STACK_UNWIND_STRICT(open, frame, 0, 0, fd, xdata);
+ 
+         if (!conf->lazy_open)
+             ob_fd_wake(this, fd, NULL);
++
++        fd_unref(fd);
+     } else {
+         ob_fd_free(ob_fd);
+         STACK_WIND(frame, default_open_cbk, FIRST_CHILD(this),
+-- 
+1.8.3.1
+

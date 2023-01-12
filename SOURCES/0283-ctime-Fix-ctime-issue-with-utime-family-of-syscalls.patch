@@ -1,0 +1,285 @@
+From 55eb2e7642e3428eaa1b2d833c0daa1d34b98324 Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Thu, 8 Aug 2019 10:05:12 +0530
+Subject: [PATCH 283/284] ctime: Fix ctime issue with utime family of syscalls
+
+When atime|mtime is updated via utime family of syscalls,
+ctime is not updated. This patch fixes the same.
+
+Backport of:
+ > Patch: https://review.gluster.org/23177
+ > Change-Id: I7f86d8f8a1e06a332c3449b5bbdbf128c9690f25
+ > fixes: bz#1738786
+ > Signed-off-by: Kotresh HR <khiremat@redhat.com>
+
+Change-Id: I7f86d8f8a1e06a332c3449b5bbdbf128c9690f25
+BUG: 1743627
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/179184
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/features/utime/src/utime-gen-fops-c.py | 13 +++-
+ xlators/storage/posix/src/posix-inode-fd-ops.c |  8 +--
+ xlators/storage/posix/src/posix-metadata.c     | 96 ++++++++++++++------------
+ xlators/storage/posix/src/posix-metadata.h     |  3 +-
+ 4 files changed, 68 insertions(+), 52 deletions(-)
+
+diff --git a/xlators/features/utime/src/utime-gen-fops-c.py b/xlators/features/utime/src/utime-gen-fops-c.py
+index a8637ff..8730a51 100755
+--- a/xlators/features/utime/src/utime-gen-fops-c.py
++++ b/xlators/features/utime/src/utime-gen-fops-c.py
+@@ -82,7 +82,18 @@ gf_utime_@NAME@ (call_frame_t *frame, xlator_t *this,
+              @LONG_ARGS@)
+ {
+         gl_timespec_get(&frame->root->ctime);
+-        frame->root->flags |= MDATA_CTIME;
++
++        if (!valid) {
++                frame->root->flags |= MDATA_CTIME;
++        }
++
++        if (valid & (GF_SET_ATTR_UID | GF_SET_ATTR_GID)) {
++                frame->root->flags |= MDATA_CTIME;
++        }
++
++        if (valid & GF_SET_ATTR_MODE) {
++                frame->root->flags |= MDATA_CTIME;
++        }
+ 
+         STACK_WIND (frame, gf_utime_@NAME@_cbk, FIRST_CHILD(this),
+                     FIRST_CHILD(this)->fops->@NAME@, @SHORT_ARGS@);
+diff --git a/xlators/storage/posix/src/posix-inode-fd-ops.c b/xlators/storage/posix/src/posix-inode-fd-ops.c
+index d22bbc2..e0ea85b 100644
+--- a/xlators/storage/posix/src/posix-inode-fd-ops.c
++++ b/xlators/storage/posix/src/posix-inode-fd-ops.c
+@@ -425,8 +425,8 @@ posix_setattr(call_frame_t *frame, xlator_t *this, loc_t *loc,
+                    real_path);
+             goto out;
+         }
+-        posix_update_utime_in_mdata(this, real_path, -1, loc->inode, stbuf,
+-                                    valid);
++        posix_update_utime_in_mdata(this, real_path, -1, loc->inode,
++                                    &frame->root->ctime, stbuf, valid);
+     }
+ 
+     if (valid & GF_SET_ATTR_CTIME && !priv->ctime) {
+@@ -652,8 +652,8 @@ posix_fsetattr(call_frame_t *frame, xlator_t *this, fd_t *fd,
+                    fd);
+             goto out;
+         }
+-        posix_update_utime_in_mdata(this, NULL, pfd->fd, fd->inode, stbuf,
+-                                    valid);
++        posix_update_utime_in_mdata(this, NULL, pfd->fd, fd->inode,
++                                    &frame->root->ctime, stbuf, valid);
+     }
+ 
+     if (!valid) {
+diff --git a/xlators/storage/posix/src/posix-metadata.c b/xlators/storage/posix/src/posix-metadata.c
+index 5cbdc98..532daa2 100644
+--- a/xlators/storage/posix/src/posix-metadata.c
++++ b/xlators/storage/posix/src/posix-metadata.c
+@@ -432,8 +432,10 @@ out:
+  */
+ static int
+ posix_set_mdata_xattr(xlator_t *this, const char *real_path, int fd,
+-                      inode_t *inode, struct timespec *time, struct iatt *stbuf,
+-                      posix_mdata_flag_t *flag, gf_boolean_t update_utime)
++                      inode_t *inode, struct timespec *time,
++                      struct timespec *u_atime, struct timespec *u_mtime,
++                      struct iatt *stbuf, posix_mdata_flag_t *flag,
++                      gf_boolean_t update_utime)
+ {
+     posix_mdata_t *mdata = NULL;
+     int ret = -1;
+@@ -443,6 +445,10 @@ posix_set_mdata_xattr(xlator_t *this, const char *real_path, int fd,
+     GF_VALIDATE_OR_GOTO(this->name, inode, out);
+     GF_VALIDATE_OR_GOTO(this->name, time, out);
+ 
++    if (update_utime && (!u_atime || !u_mtime)) {
++        goto out;
++    }
++
+     LOCK(&inode->lock);
+     {
+         ret = __inode_ctx_get1(inode, this, (uint64_t *)&mdata);
+@@ -506,32 +512,30 @@ posix_set_mdata_xattr(xlator_t *this, const char *real_path, int fd,
+             }
+         }
+ 
+-        /* Earlier, mdata was updated only if the existing time is less
+-         * than the time to be updated. This would fail the scenarios
+-         * where mtime can be set to any time using the syscall. Hence
+-         * just updating without comparison. But the ctime is not
+-         * allowed to changed to older date.
+-         */
+-
+-        if (flag->ctime && posix_compare_timespec(time, &mdata->ctime) > 0) {
+-            mdata->ctime = *time;
+-        }
+-
+         /* In distributed systems, there could be races with fops
+          * updating mtime/atime which could result in different
+          * mtime/atime for same file. So this makes sure, only the
+          * highest time is retained. If the mtime/atime update comes
+          * from the explicit utime syscall, it is allowed to set to
+-         * previous time
++         * previous or future time but the ctime is always set to
++         * current time.
+          */
+         if (update_utime) {
++            if (flag->ctime &&
++                posix_compare_timespec(time, &mdata->ctime) > 0) {
++                mdata->ctime = *time;
++            }
+             if (flag->mtime) {
+-                mdata->mtime = *time;
++                mdata->mtime = *u_mtime;
+             }
+             if (flag->atime) {
+-                mdata->atime = *time;
++                mdata->atime = *u_atime;
+             }
+         } else {
++            if (flag->ctime &&
++                posix_compare_timespec(time, &mdata->ctime) > 0) {
++                mdata->ctime = *time;
++            }
+             if (flag->mtime &&
+                 posix_compare_timespec(time, &mdata->mtime) > 0) {
+                 mdata->mtime = *time;
+@@ -584,15 +588,22 @@ out:
+  */
+ void
+ posix_update_utime_in_mdata(xlator_t *this, const char *real_path, int fd,
+-                            inode_t *inode, struct iatt *stbuf, int valid)
++                            inode_t *inode, struct timespec *ctime,
++                            struct iatt *stbuf, int valid)
+ {
+     int32_t ret = 0;
+ #if defined(HAVE_UTIMENSAT)
+-    struct timespec tv = {
++    struct timespec tv_atime = {
++        0,
++    };
++    struct timespec tv_mtime = {
+         0,
+     };
+ #else
+-    struct timeval tv = {
++    struct timeval tv_atime = {
++        0,
++    };
++    struct timeval tv_mtime = {
+         0,
+     };
+ #endif
+@@ -611,35 +622,28 @@ posix_update_utime_in_mdata(xlator_t *this, const char *real_path, int fd,
+      */
+     if (inode && priv->ctime) {
+         if ((valid & GF_SET_ATTR_ATIME) == GF_SET_ATTR_ATIME) {
+-            tv.tv_sec = stbuf->ia_atime;
+-            SET_TIMESPEC_NSEC_OR_TIMEVAL_USEC(tv, stbuf->ia_atime_nsec);
++            tv_atime.tv_sec = stbuf->ia_atime;
++            SET_TIMESPEC_NSEC_OR_TIMEVAL_USEC(tv_atime, stbuf->ia_atime_nsec);
+ 
+-            flag.ctime = 0;
+-            flag.mtime = 0;
++            flag.ctime = 1;
+             flag.atime = 1;
+-            ret = posix_set_mdata_xattr(this, real_path, -1, inode, &tv, NULL,
+-                                        &flag, _gf_true);
+-            if (ret) {
+-                gf_msg(this->name, GF_LOG_WARNING, errno, P_MSG_SETMDATA_FAILED,
+-                       "posix set mdata atime failed on file:"
+-                       " %s gfid:%s",
+-                       real_path, uuid_utoa(inode->gfid));
+-            }
+         }
+ 
+         if ((valid & GF_SET_ATTR_MTIME) == GF_SET_ATTR_MTIME) {
+-            tv.tv_sec = stbuf->ia_mtime;
+-            SET_TIMESPEC_NSEC_OR_TIMEVAL_USEC(tv, stbuf->ia_mtime_nsec);
++            tv_mtime.tv_sec = stbuf->ia_mtime;
++            SET_TIMESPEC_NSEC_OR_TIMEVAL_USEC(tv_mtime, stbuf->ia_mtime_nsec);
+ 
+-            flag.ctime = 0;
++            flag.ctime = 1;
+             flag.mtime = 1;
+-            flag.atime = 0;
++        }
+ 
+-            ret = posix_set_mdata_xattr(this, real_path, -1, inode, &tv, NULL,
+-                                        &flag, _gf_true);
++        if (flag.mtime || flag.atime) {
++            ret = posix_set_mdata_xattr(this, real_path, -1, inode, ctime,
++                                        &tv_atime, &tv_mtime, NULL, &flag,
++                                        _gf_true);
+             if (ret) {
+                 gf_msg(this->name, GF_LOG_WARNING, errno, P_MSG_SETMDATA_FAILED,
+-                       "posix set mdata mtime failed on file:"
++                       "posix set mdata atime failed on file:"
+                        " %s gfid:%s",
+                        real_path, uuid_utoa(inode->gfid));
+             }
+@@ -702,8 +706,8 @@ posix_set_ctime(call_frame_t *frame, xlator_t *this, const char *real_path,
+             goto out;
+         }
+         ret = posix_set_mdata_xattr(this, real_path, fd, inode,
+-                                    &frame->root->ctime, stbuf, &flag,
+-                                    _gf_false);
++                                    &frame->root->ctime, NULL, NULL, stbuf,
++                                    &flag, _gf_false);
+         if (ret) {
+             gf_msg(this->name, GF_LOG_WARNING, errno, P_MSG_SETMDATA_FAILED,
+                    "posix set mdata failed on file: %s gfid:%s", real_path,
+@@ -733,8 +737,8 @@ posix_set_parent_ctime(call_frame_t *frame, xlator_t *this,
+             goto out;
+         }
+         ret = posix_set_mdata_xattr(this, real_path, fd, inode,
+-                                    &frame->root->ctime, stbuf, &flag,
+-                                    _gf_false);
++                                    &frame->root->ctime, NULL, NULL, stbuf,
++                                    &flag, _gf_false);
+         if (ret) {
+             gf_msg(this->name, GF_LOG_WARNING, errno, P_MSG_SETMDATA_FAILED,
+                    "posix set mdata failed on file: %s gfid:%s", real_path,
+@@ -792,8 +796,8 @@ posix_set_ctime_cfr(call_frame_t *frame, xlator_t *this,
+             flag_dup.atime = 0;
+ 
+         ret = posix_set_mdata_xattr(this, real_path_out, fd_out, inode_out,
+-                                    &frame->root->ctime, stbuf_out, &flag_dup,
+-                                    _gf_false);
++                                    &frame->root->ctime, NULL, NULL, stbuf_out,
++                                    &flag_dup, _gf_false);
+         if (ret) {
+             gf_msg(this->name, GF_LOG_WARNING, errno, P_MSG_SETMDATA_FAILED,
+                    "posix set mdata failed on file: %s gfid:%s", real_path_out,
+@@ -811,8 +815,8 @@ posix_set_ctime_cfr(call_frame_t *frame, xlator_t *this,
+         flag_dup.ctime = 0;
+ 
+         ret = posix_set_mdata_xattr(this, real_path_in, fd_out, inode_out,
+-                                    &frame->root->ctime, stbuf_out, &flag_dup,
+-                                    _gf_false);
++                                    &frame->root->ctime, NULL, NULL, stbuf_out,
++                                    &flag_dup, _gf_false);
+         if (ret) {
+             gf_msg(this->name, GF_LOG_WARNING, errno, P_MSG_SETMDATA_FAILED,
+                    "posix set mdata failed on file: %s gfid:%s", real_path_in,
+diff --git a/xlators/storage/posix/src/posix-metadata.h b/xlators/storage/posix/src/posix-metadata.h
+index dc25e59..c176699 100644
+--- a/xlators/storage/posix/src/posix-metadata.h
++++ b/xlators/storage/posix/src/posix-metadata.h
+@@ -40,7 +40,8 @@ __posix_get_mdata_xattr(xlator_t *this, const char *real_path, int _fd,
+                         inode_t *inode, struct iatt *stbuf);
+ void
+ posix_update_utime_in_mdata(xlator_t *this, const char *real_path, int fd,
+-                            inode_t *inode, struct iatt *stbuf, int valid);
++                            inode_t *inode, struct timespec *ctime,
++                            struct iatt *stbuf, int valid);
+ void
+ posix_set_ctime(call_frame_t *frame, xlator_t *this, const char *real_path,
+                 int fd, inode_t *inode, struct iatt *stbuf);
+-- 
+1.8.3.1
+

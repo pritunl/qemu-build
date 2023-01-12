@@ -1,0 +1,146 @@
+From 8cc721ee43ac8038eecb712278378710ad0745ed Mon Sep 17 00:00:00 2001
+From: root <root@localhost.localdomain>
+Date: Sun, 7 Apr 2019 19:31:17 +0530
+Subject: [PATCH 146/169] dht: Custom xattrs are not healed in case of
+ add-brick
+
+Problem: If any custom xattrs are set on the directory before
+         add a brick, xattrs are not healed on the directory
+         after adding a brick.
+
+Solution: xattr are not healed because dht_selfheal_dir_mkdir_lookup_cbk
+          checks the value of MDS and if MDS value is not negative
+          selfheal code path does not take reference of MDS xattrs.Change the
+          condition to take reference of MDS xattr so that custom xattrs are
+          populated on newly added brick
+
+> Updates: bz#1702299
+> Change-Id: Id14beedb98cce6928055f294e1594b22132e811c
+> Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+> (Cherry pick from commit aa52259de7b50625b754ce9fb5c0f38e22d79dd6)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/22520/)
+
+BUG: 1702298
+Change-Id: Id14beedb98cce6928055f294e1594b22132e811c
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/171591
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/bug-1702299.t               | 67 ++++++++++++++++++++++++++++++++++
+ xlators/cluster/dht/src/dht-selfheal.c |  9 +----
+ 2 files changed, 68 insertions(+), 8 deletions(-)
+ create mode 100644 tests/bugs/bug-1702299.t
+
+diff --git a/tests/bugs/bug-1702299.t b/tests/bugs/bug-1702299.t
+new file mode 100644
+index 0000000..1cff2ed
+--- /dev/null
++++ b/tests/bugs/bug-1702299.t
+@@ -0,0 +1,67 @@
++#!/bin/bash
++. $(dirname $0)/../include.rc
++. $(dirname $0)/../volume.rc
++. $(dirname $0)/../dht.rc
++cleanup;
++
++function get_getfattr {
++        local path=$1
++        echo `getfattr -n user.foo $path` | cut -f2 -d"=" | sed -e 's/^"//'  -e 's/"$//'
++}
++
++function set_fattr {
++        for i in `seq 1 10`
++        do
++                setfattr -n user.foo -v "newabc" ./tmp${i}
++                if [ "$?" = "0" ]
++                 then
++                    succ=$((succ+1))
++                else
++                    fail=$((fail+1))
++                fi
++        done
++}
++
++
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 $H0:$B0/${V0}{0,1,2,3}
++TEST $CLI volume start $V0
++
++TEST glusterfs --volfile-id=$V0 --volfile-server=$H0 --entry-timeout=0 --attribute-timeout=0 $M0;
++
++cd $M0
++TEST mkdir tmp{1..10}
++
++succ=fail=0
++## set user.foo xattr with value newabc after kill one brick
++set_fattr
++count=10
++EXPECT "$succ" echo $count
++count=0
++EXPECT "$fail" echo $count
++
++cd -
++
++# Add-brick
++TEST $CLI volume add-brick $V0 $H0:$B0/${V0}{4,5}
++
++cd $M0
++## At this point dht code will heal xattr on down brick only for those dirs
++## hashed subvol was up at the time of update xattr
++TEST stat ./tmp{1..10}
++
++
++## Count the user.foo xattr value with newabc on brick and compare with succ value
++count=`getfattr -n user.foo $B0/${V0}4/tmp{1..10} | grep "user.foo" | grep -iw "newabc" | wc -l`
++EXPECT "$succ" echo $count
++
++## Count the user.foo xattr value with newabc on brick and compare with succ value
++count=`getfattr -n user.foo $B0/${V0}5/tmp{1..10} | grep "user.foo" | grep -iw "newabc" | wc -l`
++EXPECT "$succ" echo $count
++
++
++cd -
++TEST umount $M0
++cleanup
+diff --git a/xlators/cluster/dht/src/dht-selfheal.c b/xlators/cluster/dht/src/dht-selfheal.c
+index 5420fca..f5dfff9 100644
+--- a/xlators/cluster/dht/src/dht-selfheal.c
++++ b/xlators/cluster/dht/src/dht-selfheal.c
+@@ -1310,12 +1310,8 @@ dht_selfheal_dir_mkdir_lookup_cbk(call_frame_t *frame, void *cookie,
+     int this_call_cnt = 0;
+     int missing_dirs = 0;
+     dht_layout_t *layout = NULL;
+-    dht_conf_t *conf = 0;
+     xlator_t *prev = 0;
+     loc_t *loc = NULL;
+-    int check_mds = 0;
+-    int errst = 0;
+-    int32_t mds_xattr_val[1] = {0};
+     char gfid_local[GF_UUID_BUF_SIZE] = {0};
+     int index = -1;
+ 
+@@ -1324,7 +1320,6 @@ dht_selfheal_dir_mkdir_lookup_cbk(call_frame_t *frame, void *cookie,
+     local = frame->local;
+     layout = local->layout;
+     loc = &local->loc;
+-    conf = this->private;
+     prev = cookie;
+ 
+     if (!gf_uuid_is_null(local->gfid))
+@@ -1347,9 +1342,7 @@ dht_selfheal_dir_mkdir_lookup_cbk(call_frame_t *frame, void *cookie,
+ 
+         if (!op_ret) {
+             dht_iatt_merge(this, &local->stbuf, stbuf);
+-            check_mds = dht_dict_get_array(xattr, conf->mds_xattr_key,
+-                                           mds_xattr_val, 1, &errst);
+-            if (dict_get(xattr, conf->mds_xattr_key) && check_mds && !errst) {
++            if (prev == local->mds_subvol) {
+                 dict_unref(local->xattr);
+                 local->xattr = dict_ref(xattr);
+             }
+-- 
+1.8.3.1
+

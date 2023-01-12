@@ -1,0 +1,47 @@
+From 96072cea4da1c2ba5bd87307f20b3ee2cbe6f63d Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Thu, 11 Jul 2019 12:46:10 +0530
+Subject: [PATCH 238/255] Revert "xlator/log: Add more logging in
+ xlator_is_cleanup_starting"
+
+This reverts commit 9b94397a5a735910fab2a29670146a1feb6d890e.
+
+BUG: 1471742
+Change-Id: Icc3f0c8741ed780e265202adbb009063f657c7f7
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/175947
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/xlator.c | 12 +++---------
+ 1 file changed, 3 insertions(+), 9 deletions(-)
+
+diff --git a/libglusterfs/src/xlator.c b/libglusterfs/src/xlator.c
+index 71e1ed4..fbfbbe2 100644
+--- a/libglusterfs/src/xlator.c
++++ b/libglusterfs/src/xlator.c
+@@ -1494,18 +1494,12 @@ xlator_is_cleanup_starting(xlator_t *this)
+     glusterfs_graph_t *graph = NULL;
+     xlator_t *xl = NULL;
+ 
+-    if (!this) {
+-        gf_msg("xlator", GF_LOG_WARNING, EINVAL, LG_MSG_INVALID_ARG,
+-               "xlator object is null, returning false");
++    if (!this)
+         goto out;
+-    }
+-
+     graph = this->graph;
+-    if (!graph) {
+-        gf_msg("xlator", GF_LOG_WARNING, EINVAL, LG_MSG_INVALID_ARG,
+-               "Graph is not set for xlator %s", this->name);
++
++    if (!graph)
+         goto out;
+-    }
+ 
+     xl = graph->first;
+     if (xl && xl->cleanup_starting)
+-- 
+1.8.3.1
+

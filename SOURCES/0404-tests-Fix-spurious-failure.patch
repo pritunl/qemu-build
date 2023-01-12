@@ -1,0 +1,38 @@
+From b65ca1045910bc18c601681788eb322dbb8ec2fa Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Mon, 14 Oct 2019 10:29:31 +0530
+Subject: [PATCH 404/449] tests: Fix spurious failure
+
+> Upstream patch:https://review.gluster.org/23546
+> fixes: bz#1759002
+> Change-Id: I4d49e1c2ca9b3c1d74b9dd5a30f1c66983a76529
+> Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+
+BUG: 1764091
+Change-Id: I8b66f08cce7a87788867c6373aed71d6fc65155f
+Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202370
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/replicate/bug-1744548-heal-timeout.t | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tests/bugs/replicate/bug-1744548-heal-timeout.t b/tests/bugs/replicate/bug-1744548-heal-timeout.t
+index 0aaa3ea..c208112 100644
+--- a/tests/bugs/replicate/bug-1744548-heal-timeout.t
++++ b/tests/bugs/replicate/bug-1744548-heal-timeout.t
+@@ -5,8 +5,8 @@
+ . $(dirname $0)/../../afr.rc
+ 
+ function get_cumulative_opendir_count {
+-#sed 'n:d' prints odd-numbered lines
+-    $CLI volume profile $V0 info |grep OPENDIR|sed 'n;d' | awk '{print $8}'|tr -d '\n'
++#sed command prints content between Cumulative and Interval, this keeps content from Cumulative stats
++    $CLI volume profile $V0 info |sed -n '/^Cumulative/,/^Interval/p'|grep OPENDIR| awk '{print $8}'|tr -d '\n'
+ }
+ 
+ cleanup;
+-- 
+1.8.3.1
+

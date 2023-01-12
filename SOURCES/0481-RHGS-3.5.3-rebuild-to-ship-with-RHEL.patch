@@ -1,0 +1,33 @@
+From 346aa7cbc34b9bbbaca45180215a4d9ffd5055df Mon Sep 17 00:00:00 2001
+From: Rinku Kothiya <rkothiya@redhat.com>
+Date: Fri, 19 Feb 2021 06:19:07 +0000
+Subject: [PATCH 481/481] RHGS-3.5.3 rebuild to ship with RHEL.
+
+Label: DOWNSTREAM ONLY
+BUG: 1930561
+
+Change-Id: I9c7f30cc6bc616344b27072bfde056c7bba1e143
+Signed-off-by: Rinku Kothiya <rkothiya@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/228413
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfs.spec.in | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 30d7162..52f9b40 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -1983,6 +1983,8 @@ fi
+ %endif
+ 
+ %changelog
++* Fri Feb 19 2021 Rinku Kothiya <rkothiya@redhat.com>
++- Build RGHS clients for RHEL (#1930561)
+ 
+ * Mon May 11 2020 Sunny Kumar <sunkumar@redhat.com>
+ - added requires policycoreutils-python-utils on rhel8 for geo-replication
+-- 
+1.8.3.1
+

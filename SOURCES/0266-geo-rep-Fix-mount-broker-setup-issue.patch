@@ -1,0 +1,63 @@
+From cb9d0fa4bd2664556f0564406037f9fb7fb781a6 Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Wed, 31 Jul 2019 15:40:55 +0530
+Subject: [PATCH 266/276] geo-rep: Fix mount broker setup issue
+
+Even the use builtin 'type' command as in patch [1]
+causes issues if argument in question is not part of PATH
+environment variable for that user. This patch fixes the
+same by doing source /etc/profile. This was already being
+used in another part of script.
+
+[1] https://review.gluster.org/23089
+
+Backport of:
+ > Patch: https://review.gluster.org/23136
+ > Change-Id: Iceb78835967ec6a4350983eec9af28398410c002
+ > fixes: bz#1734738
+ > Signed-off-by: Kotresh HR <khiremat@redhat.com>
+
+Change-Id: Iceb78835967ec6a4350983eec9af28398410c002
+BUG: 1734734
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/177867
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ geo-replication/src/gverify.sh | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/geo-replication/src/gverify.sh b/geo-replication/src/gverify.sh
+index 692c1d6..f5f70d2 100755
+--- a/geo-replication/src/gverify.sh
++++ b/geo-replication/src/gverify.sh
+@@ -180,6 +180,8 @@ function main()
+     > $log_file
+ 
+     inet6=$7
++    local cmd_line
++    local ver
+ 
+     # Use FORCE_BLOCKER flag in the error message to differentiate
+     # between the errors which the force command should bypass
+@@ -206,13 +208,14 @@ function main()
+         exit 1;
+     fi;
+ 
++    cmd_line=$(cmd_slave);
+     if [[ -z "${GR_SSH_IDENTITY_KEY}" ]]; then
+-        ssh -p ${SSH_PORT} -oNumberOfPasswordPrompts=0 -oStrictHostKeyChecking=no $2@$3 "type -p gluster"
++        ver=$(ssh -p ${SSH_PORT} -oNumberOfPasswordPrompts=0 -oStrictHostKeyChecking=no $2@$3 bash -c "'$cmd_line'")
+     else
+-        ssh -p ${SSH_PORT} -i ${GR_SSH_IDENTITY_KEY} -oNumberOfPasswordPrompts=0 -oStrictHostKeyChecking=no $2@$3 "type -p gluster"
++        ver=$(ssh -p ${SSH_PORT} -i ${GR_SSH_IDENTITY_KEY} -oNumberOfPasswordPrompts=0 -oStrictHostKeyChecking=no $2@$3 bash -c "'$cmd_line'")
+     fi
+ 
+-    if [ $? -ne 0 ]; then
++    if [ -z "$ver" ]; then
+         echo "FORCE_BLOCKER|gluster command not found on $3 for user $2." > $log_file
+         exit 1;
+     fi;
+-- 
+1.8.3.1
+

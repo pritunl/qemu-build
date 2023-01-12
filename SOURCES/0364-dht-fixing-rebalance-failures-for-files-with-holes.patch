@@ -1,0 +1,97 @@
+From 5b1bfebacac649e6f5051316e4075309caf93901 Mon Sep 17 00:00:00 2001
+From: Barak Sason Rofman <bsasonro@redhat.com>
+Date: Tue, 21 Apr 2020 19:13:41 +0300
+Subject: [PATCH 364/367] dht - fixing rebalance failures for files with holes
+
+Rebalance process handling of files which contains holes casued
+rebalance to fail with "No space left on device" errors.
+This patch modifies the code-flow in such a way that files with holes
+will be rebalanced correctly.
+
+backport of https://review.gluster.org/#/c/glusterfs/+/24357/
+>fixes: #1187
+>Change-Id: I89bc3d4ea7f074db7213d759c49307f379543932
+>Signed-off-by: Barak Sason Rofman <bsasonro@redhat.com>
+
+BUG: 1823703
+Change-Id: I89bc3d4ea7f074db7213d759c49307f379543932
+Signed-off-by: Barak Sason Rofman <bsasonro@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/198579
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/dht/src/dht-rebalance.c | 21 ++++++++++-----------
+ 1 file changed, 10 insertions(+), 11 deletions(-)
+
+diff --git a/xlators/cluster/dht/src/dht-rebalance.c b/xlators/cluster/dht/src/dht-rebalance.c
+index f4c62b8..7d9df02 100644
+--- a/xlators/cluster/dht/src/dht-rebalance.c
++++ b/xlators/cluster/dht/src/dht-rebalance.c
+@@ -650,7 +650,7 @@ out:
+ static int
+ __dht_rebalance_create_dst_file(xlator_t *this, xlator_t *to, xlator_t *from,
+                                 loc_t *loc, struct iatt *stbuf, fd_t **dst_fd,
+-                                int *fop_errno)
++                                int *fop_errno, int file_has_holes)
+ {
+     int ret = -1;
+     int ret2 = -1;
+@@ -819,7 +819,7 @@ __dht_rebalance_create_dst_file(xlator_t *this, xlator_t *to, xlator_t *from,
+ 
+     /* No need to bother about 0 byte size files */
+     if (stbuf->ia_size > 0) {
+-        if (conf->use_fallocate) {
++        if (conf->use_fallocate && !file_has_holes) {
+             ret = syncop_fallocate(to, fd, 0, 0, stbuf->ia_size, NULL, NULL);
+             if (ret < 0) {
+                 if (ret == -EOPNOTSUPP || ret == -EINVAL || ret == -ENOSYS) {
+@@ -846,9 +846,7 @@ __dht_rebalance_create_dst_file(xlator_t *this, xlator_t *to, xlator_t *from,
+                     goto out;
+                 }
+             }
+-        }
+-
+-        if (!conf->use_fallocate) {
++        } else {
+             ret = syncop_ftruncate(to, fd, stbuf->ia_size, NULL, NULL, NULL,
+                                    NULL);
+             if (ret < 0) {
+@@ -1728,9 +1726,13 @@ dht_migrate_file(xlator_t *this, loc_t *loc, xlator_t *from, xlator_t *to,
+         goto out;
+     }
+ 
++    /* Try to preserve 'holes' while migrating data */
++    if (stbuf.ia_size > (stbuf.ia_blocks * GF_DISK_SECTOR_SIZE))
++        file_has_holes = 1;
++
+     /* create the destination, with required modes/xattr */
+     ret = __dht_rebalance_create_dst_file(this, to, from, loc, &stbuf, &dst_fd,
+-                                          fop_errno);
++                                          fop_errno, file_has_holes);
+     if (ret) {
+         gf_msg(this->name, GF_LOG_ERROR, 0, 0,
+                "Create dst failed"
+@@ -1774,8 +1776,8 @@ dht_migrate_file(xlator_t *this, loc_t *loc, xlator_t *from, xlator_t *to,
+          * destination. We need to do update this only post migration
+          * as in case of failure the linkto needs to point to the source
+          * subvol */
+-        ret = __dht_rebalance_create_dst_file(this, to, from, loc, &stbuf,
+-                                              &dst_fd, fop_errno);
++        ret = __dht_rebalance_create_dst_file(
++            this, to, from, loc, &stbuf, &dst_fd, fop_errno, file_has_holes);
+         if (ret) {
+             gf_log(this->name, GF_LOG_ERROR,
+                    "Create dst failed"
+@@ -1862,9 +1864,6 @@ dht_migrate_file(xlator_t *this, loc_t *loc, xlator_t *from, xlator_t *to,
+             ret = 0;
+         goto out;
+     }
+-    /* Try to preserve 'holes' while migrating data */
+-    if (stbuf.ia_size > (stbuf.ia_blocks * GF_DISK_SECTOR_SIZE))
+-        file_has_holes = 1;
+ 
+     ret = __dht_rebalance_migrate_data(this, defrag, from, to, src_fd, dst_fd,
+                                        stbuf.ia_size, file_has_holes,
+-- 
+1.8.3.1
+

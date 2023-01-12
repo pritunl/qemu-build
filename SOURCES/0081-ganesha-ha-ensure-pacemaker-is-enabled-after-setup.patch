@@ -1,0 +1,50 @@
+From 3cb9ed7e20f59eec036908eed4cfdbc61e990ee2 Mon Sep 17 00:00:00 2001
+From: "Kaleb S. KEITHLEY" <kkeithle@redhat.com>
+Date: Tue, 11 Dec 2018 10:09:42 -0500
+Subject: [PATCH 081/124] ganesha-ha: ensure pacemaker is enabled after setup
+
+There appears to be a race between `pcs cluster setup ...` early
+in the setup and the `systemctl enable pacemaker` at the end. The
+`pcs cluster setup ...` disables pacemaker and corosync. (Now, in
+pacemaker-1.1.18. Was it always the case?)
+
+I am not able to reproduce this on my devel system. I speculate that
+on a busy system that the `pcs cluster setup ...` disable may, under
+the right conditions, not run until after the setup script enables
+it. It must require the right alignment of the Sun, Moon, and all
+the planets.
+
+Regardless, we'll use the --enable option to `pcs cluster setup ...`
+to ensure that the cluster (re)starts pacemaker.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I771ff62c37426438b80e61651a8b4ecaf2d549c3
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167166
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/ganesha/scripts/ganesha-ha.sh | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/extras/ganesha/scripts/ganesha-ha.sh b/extras/ganesha/scripts/ganesha-ha.sh
+index 4a98f32..32af1ca 100644
+--- a/extras/ganesha/scripts/ganesha-ha.sh
++++ b/extras/ganesha/scripts/ganesha-ha.sh
+@@ -195,9 +195,9 @@ setup_cluster()
+ 
+     pcs cluster auth ${servers}
+     # pcs cluster setup --name ${name} ${servers}
+-    pcs cluster setup ${RHEL6_PCS_CNAME_OPTION} ${name} --transport udpu ${servers}
++    pcs cluster setup ${RHEL6_PCS_CNAME_OPTION} ${name} --enable --transport udpu ${servers}
+     if [ $? -ne 0 ]; then
+-        logger "pcs cluster setup ${RHEL6_PCS_CNAME_OPTION} ${name} ${servers} failed"
++        logger "pcs cluster setup ${RHEL6_PCS_CNAME_OPTION} ${name} --enable --transport udpu ${servers} failed"
+         #set up failed stop all ganesha process and clean up symlinks in cluster
+         stop_ganesha_all "${servers}"
+         exit 1;
+-- 
+1.8.3.1
+

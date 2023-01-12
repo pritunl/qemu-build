@@ -1,0 +1,66 @@
+From 662c94f3b3173bf78465644e2e42e03efd9ea493 Mon Sep 17 00:00:00 2001
+From: "Kaleb S. KEITHLEY" <kkeithle@redhat.com>
+Date: Mon, 17 Jul 2017 11:07:40 -0400
+Subject: [PATCH 071/124] common-ha: enable and disable selinux
+ gluster_use_execmem
+
+Starting in Fedora 26 and RHEL 7.4 there are new targeted policies in
+selinux which include a tuneable to allow glusterd->ganesha-ha.sh->pcs
+to access the pcs config, i.e. gluster-use-execmem.
+
+Note. rpm doesn't have a way to distinguish between RHEL 7.3 or 7.4
+or between 3.13.1-X and 3.13.1-Y so it can't be enabled for RHEL at
+this time.
+
+/usr/sbin/semanage is in policycoreutils-python in RHEL (versus
+policycoreutils-python-utils in Fedora.)
+
+Requires selinux-policy >= 3.13.1-160 in RHEL7. The corresponding
+version in Fedora 26 seems to be selinux-policy-3.13.1-259 or so. (Maybe
+earlier versions, but that's what was in F26 when I checked.)
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Ic474b3f7739ff5be1e99d94d00b55caae4ceb5a0
+Signed-off-by: Kaleb S. KEITHLEY <kkeithle@redhat.com>
+Reviewed-on: https://review.gluster.org/17806
+Smoke: Gluster Build System <jenkins@build.gluster.org>
+CentOS-regression: Gluster Build System <jenkins@build.gluster.org>
+Reviewed-by: soumya k <skoduri@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167156
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/ganesha/scripts/ganesha-ha.sh | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/extras/ganesha/scripts/ganesha-ha.sh b/extras/ganesha/scripts/ganesha-ha.sh
+index 537c965..f4400af 100644
+--- a/extras/ganesha/scripts/ganesha-ha.sh
++++ b/extras/ganesha/scripts/ganesha-ha.sh
+@@ -984,6 +984,9 @@ main()
+         usage
+         exit 0
+     fi
++
++    semanage boolean -m gluster_use_execmem --on
++
+     HA_CONFDIR=${1%/}; shift
+     local ha_conf=${HA_CONFDIR}/ganesha-ha.conf
+     local node=""
+@@ -1129,6 +1132,9 @@ $HA_CONFDIR/ganesha-ha.conf
+         ;;
+ 
+     esac
++
++    semanage boolean -m gluster_use_execmem --off
++
+ }
+ 
+ main $*
+-- 
+1.8.3.1
+

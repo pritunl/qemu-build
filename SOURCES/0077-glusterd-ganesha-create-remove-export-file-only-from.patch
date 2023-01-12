@@ -1,0 +1,73 @@
+From 1e619b95e3f03e226fef135bfaeeca9b069eb978 Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Wed, 14 Mar 2018 12:01:30 +0530
+Subject: [PATCH 077/124] glusterd/ganesha : create/remove export file only
+ from the node which performs ganesha.enable
+
+As part of volume set ganesha.enable on the ganesha export configuration file will be created/removed
+using "create-export-ganesha.sh". This performed from the nodes which are part of ganesha cluster.
+But it is not need since the file is saved in shared storage and consumed by the nodes in the ganesha cluster.
+
+Label: DOWNSTREAM ONLY
+
+Upstream Reference :
+>patch link : https://review.gluster.org/#/c/19716/
+>Change-Id: I2583899972b47d451a90711940293004a3af4690
+>BUG: 1555195
+>Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+
+Change-Id: I2583899972b47d451a90711940293004a3af4690
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167162
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-ganesha.c    | 2 +-
+ xlators/mgmt/glusterd/src/glusterd-op-sm.c      | 3 ++-
+ xlators/mgmt/glusterd/src/glusterd-volume-ops.c | 2 +-
+ 3 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-ganesha.c b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+index fe0bffc..ff36476 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-ganesha.c
++++ b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+@@ -530,7 +530,7 @@ ganesha_manage_export(dict_t *dict, char *value,
+      * Create the export file from the node where ganesha.enable "on"
+      * is executed
+      * */
+-    if (option) {
++    if (option && is_origin_glusterd(dict)) {
+         ret = manage_export_config(volname, "on", op_errstr);
+         if (ret) {
+             gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_EXPORT_FILE_CREATE_FAIL,
+diff --git a/xlators/mgmt/glusterd/src/glusterd-op-sm.c b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+index 52809a8..10e2d48 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-op-sm.c
++++ b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+@@ -2415,7 +2415,8 @@ glusterd_op_reset_volume(dict_t *dict, char **op_rspstr)
+     }
+ 
+     if (!strcmp(key, "ganesha.enable") || !strcmp(key, "all")) {
+-        if (glusterd_check_ganesha_export(volinfo)) {
++        if (glusterd_check_ganesha_export(volinfo) &&
++            is_origin_glusterd(dict)) {
+             ret = manage_export_config(volname, "off", op_rspstr);
+             if (ret)
+                 gf_msg(this->name, GF_LOG_WARNING, 0, GD_MSG_NFS_GNS_RESET_FAIL,
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-ops.c b/xlators/mgmt/glusterd/src/glusterd-volume-ops.c
+index de4eccb..1ea8ba6 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-ops.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-ops.c
+@@ -2936,7 +2936,7 @@ glusterd_op_delete_volume(dict_t *dict)
+         goto out;
+     }
+ 
+-    if (glusterd_check_ganesha_export(volinfo)) {
++    if (glusterd_check_ganesha_export(volinfo) && is_origin_glusterd(dict)) {
+         ret = manage_export_config(volname, "off", NULL);
+         if (ret)
+             gf_msg(this->name, GF_LOG_WARNING, 0, 0,
+-- 
+1.8.3.1
+

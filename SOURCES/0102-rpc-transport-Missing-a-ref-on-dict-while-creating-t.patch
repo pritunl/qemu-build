@@ -1,0 +1,737 @@
+From df6523ed3c5267624197b52edcb553fc2d8a08f2 Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Tue, 26 Feb 2019 18:04:18 +0530
+Subject: [PATCH 102/124] rpc/transport: Missing a ref on dict while creating
+ transport object
+
+while creating rpc_tranpsort object, we store a dictionary without
+taking a ref on dict but it does an unref during the cleaning of the
+transport object.
+
+So the rpc layer expect the caller to take a ref on the dictionary
+before passing dict to rpc layer. This leads to a lot of confusion
+across the code base and leads to ref leaks.
+
+Semantically, this is not correct. It is the rpc layer responsibility
+to take a ref when storing it, and free during the cleanup.
+
+I'm listing down the total issues or leaks across the code base because
+of this confusion. These issues are currently present in the upstream
+master.
+
+1) changelog_rpc_client_init
+
+2) quota_enforcer_init
+
+3) rpcsvc_create_listeners : when there are two transport, like tcp,rdma.
+
+4) quotad_aggregator_init
+
+5) glusterd: init
+
+6) nfs3_init_state
+
+7) server: init
+
+8) client:init
+
+This patch does the cleanup according to the semantics.
+
+Backport of : https://review.gluster.org/#/c/glusterfs/+/22266/
+
+>Change-Id: I46373af9630373eb375ee6de0e6f2bbe2a677425
+>updates: bz#1659708
+>Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+
+Change-Id: Iff978497e11592fbebfa4b683fdc56698b782859
+BUG: 1471742
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167847
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ api/src/glfs-mgmt.c                                | 10 ++++--
+ cli/src/cli.c                                      | 20 +++++++-----
+ glusterfsd/src/glusterfsd-mgmt.c                   | 18 ++++++++--
+ rpc/rpc-lib/src/rpc-clnt.c                         |  2 --
+ rpc/rpc-lib/src/rpc-transport.c                    | 38 +++++++---------------
+ rpc/rpc-lib/src/rpc-transport.h                    |  4 +--
+ rpc/rpc-lib/src/rpcsvc.c                           | 13 ++------
+ rpc/rpc-lib/src/rpcsvc.h                           |  2 +-
+ .../features/changelog/src/changelog-rpc-common.c  |  9 +++--
+ .../snapview-server/src/snapview-server-mgmt.c     |  8 ++++-
+ xlators/mgmt/glusterd/src/glusterd-conn-mgmt.c     |  8 ++++-
+ xlators/mgmt/glusterd/src/glusterd-handler.c       | 18 ++++++----
+ xlators/mgmt/glusterd/src/glusterd-rebalance.c     |  8 ++++-
+ xlators/mgmt/glusterd/src/glusterd-utils.c         |  9 +++--
+ xlators/mgmt/glusterd/src/glusterd.c               |  6 +++-
+ xlators/nfs/server/src/acl3.c                      |  5 +++
+ xlators/nfs/server/src/mount3.c                    |  5 +++
+ xlators/nfs/server/src/nlm4.c                      |  7 ++++
+ 18 files changed, 119 insertions(+), 71 deletions(-)
+
+diff --git a/api/src/glfs-mgmt.c b/api/src/glfs-mgmt.c
+index d502b4f..7476d5b 100644
+--- a/api/src/glfs-mgmt.c
++++ b/api/src/glfs-mgmt.c
+@@ -1015,6 +1015,10 @@ glfs_mgmt_init(struct glfs *fs)
+     if (ctx->mgmt)
+         return 0;
+ 
++    options = dict_new();
++    if (!options)
++        goto out;
++
+     if (cmd_args->volfile_server_port)
+         port = cmd_args->volfile_server_port;
+ 
+@@ -1029,11 +1033,11 @@ glfs_mgmt_init(struct glfs *fs)
+ 
+     if (cmd_args->volfile_server_transport &&
+         !strcmp(cmd_args->volfile_server_transport, "unix")) {
+-        ret = rpc_transport_unix_options_build(&options, host, 0);
++        ret = rpc_transport_unix_options_build(options, host, 0);
+     } else {
+         xlator_cmdline_option_t *opt = find_xlator_option_in_cmd_args_t(
+             "address-family", cmd_args);
+-        ret = rpc_transport_inet_options_build(&options, host, port,
++        ret = rpc_transport_inet_options_build(options, host, port,
+                                                (opt ? opt->value : NULL));
+     }
+ 
+@@ -1075,5 +1079,7 @@ glfs_mgmt_init(struct glfs *fs)
+ 
+     ret = rpc_clnt_start(rpc);
+ out:
++    if (options)
++        dict_unref(options);
+     return ret;
+ }
+diff --git a/cli/src/cli.c b/cli/src/cli.c
+index c33d152..ff39a98 100644
+--- a/cli/src/cli.c
++++ b/cli/src/cli.c
+@@ -661,9 +661,8 @@ cli_quotad_clnt_rpc_init(void)
+ 
+     global_quotad_rpc = rpc;
+ out:
+-    if (ret) {
+-        if (rpc_opts)
+-            dict_unref(rpc_opts);
++    if (rpc_opts) {
++        dict_unref(rpc_opts);
+     }
+     return rpc;
+ }
+@@ -685,6 +684,10 @@ cli_rpc_init(struct cli_state *state)
+     this = THIS;
+     cli_rpc_prog = &cli_prog;
+ 
++    options = dict_new();
++    if (!options)
++        goto out;
++
+     /* If address family specified in CLI */
+     if (state->address_family) {
+         addr_family = state->address_family;
+@@ -699,7 +702,7 @@ cli_rpc_init(struct cli_state *state)
+                "Connecting to glusterd using "
+                "sockfile %s",
+                state->glusterd_sock);
+-        ret = rpc_transport_unix_options_build(&options, state->glusterd_sock,
++        ret = rpc_transport_unix_options_build(options, state->glusterd_sock,
+                                                0);
+         if (ret)
+             goto out;
+@@ -709,10 +712,6 @@ cli_rpc_init(struct cli_state *state)
+                "%s",
+                state->remote_host);
+ 
+-        options = dict_new();
+-        if (!options)
+-            goto out;
+-
+         ret = dict_set_str(options, "remote-host", state->remote_host);
+         if (ret)
+             goto out;
+@@ -731,7 +730,7 @@ cli_rpc_init(struct cli_state *state)
+         gf_log("cli", GF_LOG_DEBUG,
+                "Connecting to glusterd using "
+                "default socket");
+-        ret = rpc_transport_unix_options_build(&options,
++        ret = rpc_transport_unix_options_build(options,
+                                                DEFAULT_GLUSTERD_SOCKFILE, 0);
+         if (ret)
+             goto out;
+@@ -749,6 +748,9 @@ cli_rpc_init(struct cli_state *state)
+ 
+     ret = rpc_clnt_start(rpc);
+ out:
++    if (options)
++        dict_unref(options);
++
+     if (ret) {
+         if (rpc)
+             rpc_clnt_unref(rpc);
+diff --git a/glusterfsd/src/glusterfsd-mgmt.c b/glusterfsd/src/glusterfsd-mgmt.c
+index a89c980..1d2cd1a 100644
+--- a/glusterfsd/src/glusterfsd-mgmt.c
++++ b/glusterfsd/src/glusterfsd-mgmt.c
+@@ -2781,7 +2781,11 @@ glusterfs_listener_init(glusterfs_ctx_t *ctx)
+     if (!cmd_args->sock_file)
+         return 0;
+ 
+-    ret = rpcsvc_transport_unix_options_build(&options, cmd_args->sock_file);
++    options = dict_new();
++    if (!options)
++        goto out;
++
++    ret = rpcsvc_transport_unix_options_build(options, cmd_args->sock_file);
+     if (ret)
+         goto out;
+ 
+@@ -2808,6 +2812,8 @@ glusterfs_listener_init(glusterfs_ctx_t *ctx)
+     ctx->listener = rpc;
+ 
+ out:
++    if (options)
++        dict_unref(options);
+     return ret;
+ }
+ 
+@@ -2889,6 +2895,10 @@ glusterfs_mgmt_init(glusterfs_ctx_t *ctx)
+     if (ctx->mgmt)
+         return 0;
+ 
++    options = dict_new();
++    if (!options)
++        goto out;
++
+     LOCK_INIT(&ctx->volfile_lock);
+ 
+     if (cmd_args->volfile_server_port)
+@@ -2898,10 +2908,10 @@ glusterfs_mgmt_init(glusterfs_ctx_t *ctx)
+ 
+     if (cmd_args->volfile_server_transport &&
+         !strcmp(cmd_args->volfile_server_transport, "unix")) {
+-        ret = rpc_transport_unix_options_build(&options, host, 0);
++        ret = rpc_transport_unix_options_build(options, host, 0);
+     } else {
+         opt = find_xlator_option_in_cmd_args_t("address-family", cmd_args);
+-        ret = rpc_transport_inet_options_build(&options, host, port,
++        ret = rpc_transport_inet_options_build(options, host, port,
+                                                (opt ? opt->value : NULL));
+     }
+     if (ret)
+@@ -2950,6 +2960,8 @@ glusterfs_mgmt_init(glusterfs_ctx_t *ctx)
+ 
+     ret = rpc_clnt_start(rpc);
+ out:
++    if (options)
++        dict_unref(options);
+     return ret;
+ }
+ 
+diff --git a/rpc/rpc-lib/src/rpc-clnt.c b/rpc/rpc-lib/src/rpc-clnt.c
+index 6f47515..b04eaed 100644
+--- a/rpc/rpc-lib/src/rpc-clnt.c
++++ b/rpc/rpc-lib/src/rpc-clnt.c
+@@ -1125,8 +1125,6 @@ rpc_clnt_new(dict_t *options, xlator_t *owner, char *name,
+         mem_pool_destroy(rpc->saved_frames_pool);
+         GF_FREE(rpc);
+         rpc = NULL;
+-        if (options)
+-            dict_unref(options);
+         goto out;
+     }
+ 
+diff --git a/rpc/rpc-lib/src/rpc-transport.c b/rpc/rpc-lib/src/rpc-transport.c
+index 4beaaf9..bed1f8c 100644
+--- a/rpc/rpc-lib/src/rpc-transport.c
++++ b/rpc/rpc-lib/src/rpc-transport.c
+@@ -168,6 +168,11 @@ rpc_transport_cleanup(rpc_transport_t *trans)
+     if (trans->fini)
+         trans->fini(trans);
+ 
++    if (trans->options) {
++        dict_unref(trans->options);
++        trans->options = NULL;
++    }
++
+     GF_FREE(trans->name);
+ 
+     if (trans->xl)
+@@ -352,7 +357,7 @@ rpc_transport_load(glusterfs_ctx_t *ctx, dict_t *options, char *trans_name)
+         }
+     }
+ 
+-    trans->options = options;
++    trans->options = dict_ref(options);
+ 
+     pthread_mutex_init(&trans->lock, NULL);
+     trans->xl = this;
+@@ -591,19 +596,14 @@ out:
+ }
+ 
+ int
+-rpc_transport_unix_options_build(dict_t **options, char *filepath,
++rpc_transport_unix_options_build(dict_t *dict, char *filepath,
+                                  int frame_timeout)
+ {
+-    dict_t *dict = NULL;
+     char *fpath = NULL;
+     int ret = -1;
+ 
+     GF_ASSERT(filepath);
+-    GF_ASSERT(options);
+-
+-    dict = dict_new();
+-    if (!dict)
+-        goto out;
++    GF_VALIDATE_OR_GOTO("rpc-transport", dict, out);
+ 
+     fpath = gf_strdup(filepath);
+     if (!fpath) {
+@@ -638,20 +638,14 @@ rpc_transport_unix_options_build(dict_t **options, char *filepath,
+         if (ret)
+             goto out;
+     }
+-
+-    *options = dict;
+ out:
+-    if (ret && dict) {
+-        dict_unref(dict);
+-    }
+     return ret;
+ }
+ 
+ int
+-rpc_transport_inet_options_build(dict_t **options, const char *hostname,
+-                                 int port, char *af)
++rpc_transport_inet_options_build(dict_t *dict, const char *hostname, int port,
++                                 char *af)
+ {
+-    dict_t *dict = NULL;
+     char *host = NULL;
+     int ret = -1;
+ #ifdef IPV6_DEFAULT
+@@ -660,13 +654,9 @@ rpc_transport_inet_options_build(dict_t **options, const char *hostname,
+     char *addr_family = "inet";
+ #endif
+ 
+-    GF_ASSERT(options);
+     GF_ASSERT(hostname);
+     GF_ASSERT(port >= 1024);
+-
+-    dict = dict_new();
+-    if (!dict)
+-        goto out;
++    GF_VALIDATE_OR_GOTO("rpc-transport", dict, out);
+ 
+     host = gf_strdup((char *)hostname);
+     if (!host) {
+@@ -702,12 +692,6 @@ rpc_transport_inet_options_build(dict_t **options, const char *hostname,
+                "failed to set trans-type with socket");
+         goto out;
+     }
+-
+-    *options = dict;
+ out:
+-    if (ret && dict) {
+-        dict_unref(dict);
+-    }
+-
+     return ret;
+ }
+diff --git a/rpc/rpc-lib/src/rpc-transport.h b/rpc/rpc-lib/src/rpc-transport.h
+index 9e75d1a..64b7e9b 100644
+--- a/rpc/rpc-lib/src/rpc-transport.h
++++ b/rpc/rpc-lib/src/rpc-transport.h
+@@ -303,11 +303,11 @@ rpc_transport_keepalive_options_set(dict_t *options, int32_t interval,
+                                     int32_t time, int32_t timeout);
+ 
+ int
+-rpc_transport_unix_options_build(dict_t **options, char *filepath,
++rpc_transport_unix_options_build(dict_t *options, char *filepath,
+                                  int frame_timeout);
+ 
+ int
+-rpc_transport_inet_options_build(dict_t **options, const char *hostname,
++rpc_transport_inet_options_build(dict_t *options, const char *hostname,
+                                  int port, char *af);
+ 
+ void
+diff --git a/rpc/rpc-lib/src/rpcsvc.c b/rpc/rpc-lib/src/rpcsvc.c
+index 74373c4..5a35139 100644
+--- a/rpc/rpc-lib/src/rpcsvc.c
++++ b/rpc/rpc-lib/src/rpcsvc.c
+@@ -2615,18 +2615,13 @@ rpcsvc_reconfigure_options(rpcsvc_t *svc, dict_t *options)
+ }
+ 
+ int
+-rpcsvc_transport_unix_options_build(dict_t **options, char *filepath)
++rpcsvc_transport_unix_options_build(dict_t *dict, char *filepath)
+ {
+-    dict_t *dict = NULL;
+     char *fpath = NULL;
+     int ret = -1;
+ 
+     GF_ASSERT(filepath);
+-    GF_ASSERT(options);
+-
+-    dict = dict_new();
+-    if (!dict)
+-        goto out;
++    GF_VALIDATE_OR_GOTO("rpcsvc", dict, out);
+ 
+     fpath = gf_strdup(filepath);
+     if (!fpath) {
+@@ -2649,13 +2644,9 @@ rpcsvc_transport_unix_options_build(dict_t **options, char *filepath)
+     ret = dict_set_str(dict, "transport-type", "socket");
+     if (ret)
+         goto out;
+-
+-    *options = dict;
+ out:
+     if (ret) {
+         GF_FREE(fpath);
+-        if (dict)
+-            dict_unref(dict);
+     }
+     return ret;
+ }
+diff --git a/rpc/rpc-lib/src/rpcsvc.h b/rpc/rpc-lib/src/rpcsvc.h
+index 34045ce..a51edc7 100644
+--- a/rpc/rpc-lib/src/rpcsvc.h
++++ b/rpc/rpc-lib/src/rpcsvc.h
+@@ -665,7 +665,7 @@ rpcsvc_actor_t *
+ rpcsvc_program_actor(rpcsvc_request_t *req);
+ 
+ int
+-rpcsvc_transport_unix_options_build(dict_t **options, char *filepath);
++rpcsvc_transport_unix_options_build(dict_t *options, char *filepath);
+ int
+ rpcsvc_set_allow_insecure(rpcsvc_t *svc, dict_t *options);
+ int
+diff --git a/xlators/features/changelog/src/changelog-rpc-common.c b/xlators/features/changelog/src/changelog-rpc-common.c
+index cf35175..dcdcfb1 100644
+--- a/xlators/features/changelog/src/changelog-rpc-common.c
++++ b/xlators/features/changelog/src/changelog-rpc-common.c
+@@ -47,7 +47,7 @@ changelog_rpc_client_init(xlator_t *this, void *cbkdata, char *sockfile,
+     if (!options)
+         goto error_return;
+ 
+-    ret = rpc_transport_unix_options_build(&options, sockfile, 0);
++    ret = rpc_transport_unix_options_build(options, sockfile, 0);
+     if (ret) {
+         gf_msg(this->name, GF_LOG_ERROR, 0, CHANGELOG_MSG_RPC_BUILD_ERROR,
+                "failed to build rpc options");
+@@ -73,6 +73,7 @@ changelog_rpc_client_init(xlator_t *this, void *cbkdata, char *sockfile,
+         goto dealloc_rpc_clnt;
+     }
+ 
++    dict_unref(options);
+     return rpc;
+ 
+ dealloc_rpc_clnt:
+@@ -303,7 +304,11 @@ changelog_rpc_server_init(xlator_t *this, char *sockfile, void *cbkdata,
+     if (!cbkdata)
+         cbkdata = this;
+ 
+-    ret = rpcsvc_transport_unix_options_build(&options, sockfile);
++    options = dict_new();
++    if (!options)
++        return NULL;
++
++    ret = rpcsvc_transport_unix_options_build(options, sockfile);
+     if (ret)
+         goto dealloc_dict;
+ 
+diff --git a/xlators/features/snapview-server/src/snapview-server-mgmt.c b/xlators/features/snapview-server/src/snapview-server-mgmt.c
+index b608cdf..bc415ef 100644
+--- a/xlators/features/snapview-server/src/snapview-server-mgmt.c
++++ b/xlators/features/snapview-server/src/snapview-server-mgmt.c
+@@ -101,8 +101,12 @@ svs_mgmt_init(xlator_t *this)
+     if (cmd_args->volfile_server)
+         host = cmd_args->volfile_server;
+ 
++    options = dict_new();
++    if (!options)
++        goto out;
++
+     opt = find_xlator_option_in_cmd_args_t("address-family", cmd_args);
+-    ret = rpc_transport_inet_options_build(&options, host, port,
++    ret = rpc_transport_inet_options_build(options, host, port,
+                                            (opt != NULL ? opt->value : NULL));
+     if (ret) {
+         gf_msg(this->name, GF_LOG_ERROR, 0, SVS_MSG_BUILD_TRNSPRT_OPT_FAILED,
+@@ -145,6 +149,8 @@ svs_mgmt_init(xlator_t *this)
+     gf_msg_debug(this->name, 0, "svs mgmt init successful");
+ 
+ out:
++    if (options)
++        dict_unref(options);
+     if (ret)
+         if (priv) {
+             rpc_clnt_connection_cleanup(&priv->rpc->conn);
+diff --git a/xlators/mgmt/glusterd/src/glusterd-conn-mgmt.c b/xlators/mgmt/glusterd/src/glusterd-conn-mgmt.c
+index 052438c..16eefa1 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-conn-mgmt.c
++++ b/xlators/mgmt/glusterd/src/glusterd-conn-mgmt.c
+@@ -29,6 +29,10 @@ glusterd_conn_init(glusterd_conn_t *conn, char *sockpath, int frame_timeout,
+     if (!this)
+         goto out;
+ 
++    options = dict_new();
++    if (!options)
++        goto out;
++
+     svc = glusterd_conn_get_svc_object(conn);
+     if (!svc) {
+         gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_SVC_GET_FAIL,
+@@ -36,7 +40,7 @@ glusterd_conn_init(glusterd_conn_t *conn, char *sockpath, int frame_timeout,
+         goto out;
+     }
+ 
+-    ret = rpc_transport_unix_options_build(&options, sockpath, frame_timeout);
++    ret = rpc_transport_unix_options_build(options, sockpath, frame_timeout);
+     if (ret)
+         goto out;
+ 
+@@ -66,6 +70,8 @@ glusterd_conn_init(glusterd_conn_t *conn, char *sockpath, int frame_timeout,
+     conn->rpc = rpc;
+     conn->notify = notify;
+ out:
++    if (options)
++        dict_unref(options);
+     if (ret) {
+         if (rpc) {
+             rpc_clnt_unref(rpc);
+diff --git a/xlators/mgmt/glusterd/src/glusterd-handler.c b/xlators/mgmt/glusterd/src/glusterd-handler.c
+index 1cb9013..6147995 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-handler.c
++++ b/xlators/mgmt/glusterd/src/glusterd-handler.c
+@@ -3493,11 +3493,10 @@ out:
+ }
+ 
+ int
+-glusterd_transport_inet_options_build(dict_t **options, const char *hostname,
++glusterd_transport_inet_options_build(dict_t *dict, const char *hostname,
+                                       int port, char *af)
+ {
+     xlator_t *this = NULL;
+-    dict_t *dict = NULL;
+     int32_t interval = -1;
+     int32_t time = -1;
+     int32_t timeout = -1;
+@@ -3505,14 +3504,14 @@ glusterd_transport_inet_options_build(dict_t **options, const char *hostname,
+ 
+     this = THIS;
+     GF_ASSERT(this);
+-    GF_ASSERT(options);
++    GF_ASSERT(dict);
+     GF_ASSERT(hostname);
+ 
+     if (!port)
+         port = GLUSTERD_DEFAULT_PORT;
+ 
+     /* Build default transport options */
+-    ret = rpc_transport_inet_options_build(&dict, hostname, port, af);
++    ret = rpc_transport_inet_options_build(dict, hostname, port, af);
+     if (ret)
+         goto out;
+ 
+@@ -3552,7 +3551,6 @@ glusterd_transport_inet_options_build(dict_t **options, const char *hostname,
+     if ((interval > 0) || (time > 0))
+         ret = rpc_transport_keepalive_options_set(dict, interval, time,
+                                                   timeout);
+-    *options = dict;
+ out:
+     gf_msg_debug("glusterd", 0, "Returning %d", ret);
+     return ret;
+@@ -3572,6 +3570,10 @@ glusterd_friend_rpc_create(xlator_t *this, glusterd_peerinfo_t *peerinfo,
+     if (!peerctx)
+         goto out;
+ 
++    options = dict_new();
++    if (!options)
++        goto out;
++
+     if (args)
+         peerctx->args = *args;
+ 
+@@ -3586,7 +3588,7 @@ glusterd_friend_rpc_create(xlator_t *this, glusterd_peerinfo_t *peerinfo,
+     if (ret)
+         gf_log(this->name, GF_LOG_TRACE,
+                "option transport.address-family is not set in xlator options");
+-    ret = glusterd_transport_inet_options_build(&options, peerinfo->hostname,
++    ret = glusterd_transport_inet_options_build(options, peerinfo->hostname,
+                                                 peerinfo->port, af);
+     if (ret)
+         goto out;
+@@ -3596,6 +3598,7 @@ glusterd_friend_rpc_create(xlator_t *this, glusterd_peerinfo_t *peerinfo,
+      * create our RPC endpoint with the same address that the peer would
+      * use to reach us.
+      */
++
+     if (this->options) {
+         data = dict_getn(this->options, "transport.socket.bind-address",
+                          SLEN("transport.socket.bind-address"));
+@@ -3637,6 +3640,9 @@ glusterd_friend_rpc_create(xlator_t *this, glusterd_peerinfo_t *peerinfo,
+     peerctx = NULL;
+     ret = 0;
+ out:
++    if (options)
++        dict_unref(options);
++
+     GF_FREE(peerctx);
+     return ret;
+ }
+diff --git a/xlators/mgmt/glusterd/src/glusterd-rebalance.c b/xlators/mgmt/glusterd/src/glusterd-rebalance.c
+index ed5ded5..cbed9a9 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-rebalance.c
++++ b/xlators/mgmt/glusterd/src/glusterd-rebalance.c
+@@ -391,6 +391,10 @@ glusterd_rebalance_rpc_create(glusterd_volinfo_t *volinfo)
+     if (!defrag)
+         goto out;
+ 
++    options = dict_new();
++    if (!options)
++        goto out;
++
+     GLUSTERD_GET_DEFRAG_SOCK_FILE(sockfile, volinfo);
+     /* Check if defrag sockfile exists in the new location
+      * in /var/run/ , if it does not try the old location
+@@ -420,7 +424,7 @@ glusterd_rebalance_rpc_create(glusterd_volinfo_t *volinfo)
+      * default timeout of 30mins used for unreliable network connections is
+      * too long for unix domain socket connections.
+      */
+-    ret = rpc_transport_unix_options_build(&options, sockfile, 600);
++    ret = rpc_transport_unix_options_build(options, sockfile, 600);
+     if (ret) {
+         gf_msg(THIS->name, GF_LOG_ERROR, 0, GD_MSG_UNIX_OP_BUILD_FAIL,
+                "Unix options build failed");
+@@ -437,6 +441,8 @@ glusterd_rebalance_rpc_create(glusterd_volinfo_t *volinfo)
+     }
+     ret = 0;
+ out:
++    if (options)
++        dict_unref(options);
+     return ret;
+ }
+ 
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index ef664c2..2dd5f91 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -1980,7 +1980,11 @@ glusterd_brick_connect(glusterd_volinfo_t *volinfo,
+          * The default timeout of 30mins used for unreliable network
+          * connections is too long for unix domain socket connections.
+          */
+-        ret = rpc_transport_unix_options_build(&options, socketpath, 600);
++        options = dict_new();
++        if (!options)
++            goto out;
++
++        ret = rpc_transport_unix_options_build(options, socketpath, 600);
+         if (ret)
+             goto out;
+ 
+@@ -1999,7 +2003,8 @@ glusterd_brick_connect(glusterd_volinfo_t *volinfo,
+         brickinfo->rpc = rpc;
+     }
+ out:
+-
++    if (options)
++        dict_unref(options);
+     gf_msg_debug("glusterd", 0, "Returning %d", ret);
+     return ret;
+ }
+diff --git a/xlators/mgmt/glusterd/src/glusterd.c b/xlators/mgmt/glusterd/src/glusterd.c
+index 89afb9c..d4ab630 100644
+--- a/xlators/mgmt/glusterd/src/glusterd.c
++++ b/xlators/mgmt/glusterd/src/glusterd.c
+@@ -1111,11 +1111,15 @@ glusterd_init_uds_listener(xlator_t *this)
+ 
+     GF_ASSERT(this);
+ 
++    options = dict_new();
++    if (!options)
++        goto out;
++
+     sock_data = dict_get(this->options, "glusterd-sockfile");
+     (void)snprintf(sockfile, sizeof(sockfile), "%s",
+                    sock_data ? sock_data->data : DEFAULT_GLUSTERD_SOCKFILE);
+ 
+-    ret = rpcsvc_transport_unix_options_build(&options, sockfile);
++    ret = rpcsvc_transport_unix_options_build(options, sockfile);
+     if (ret)
+         goto out;
+ 
+diff --git a/xlators/nfs/server/src/acl3.c b/xlators/nfs/server/src/acl3.c
+index 0eca45d..2ede24b 100644
+--- a/xlators/nfs/server/src/acl3.c
++++ b/xlators/nfs/server/src/acl3.c
+@@ -787,9 +787,14 @@ acl3svc_init(xlator_t *nfsx)
+         goto err;
+     }
+ 
++    if (options)
++        dict_unref(options);
++
+     acl3_inited = _gf_true;
+     return &acl3prog;
+ err:
++    if (options)
++        dict_unref(options);
+     return NULL;
+ }
+ 
+diff --git a/xlators/nfs/server/src/mount3.c b/xlators/nfs/server/src/mount3.c
+index 726dc29..396809c 100644
+--- a/xlators/nfs/server/src/mount3.c
++++ b/xlators/nfs/server/src/mount3.c
+@@ -4102,8 +4102,13 @@ mnt3svc_init(xlator_t *nfsx)
+             gf_msg_debug(GF_MNT, GF_LOG_DEBUG, "Thread creation failed");
+         }
+     }
++    if (options)
++        dict_unref(options);
++
+     return &mnt3prog;
+ err:
++    if (options)
++        dict_unref(options);
+     return NULL;
+ }
+ 
+diff --git a/xlators/nfs/server/src/nlm4.c b/xlators/nfs/server/src/nlm4.c
+index a341ebd..c3c1453 100644
+--- a/xlators/nfs/server/src/nlm4.c
++++ b/xlators/nfs/server/src/nlm4.c
+@@ -1121,6 +1121,8 @@ nlm4_establish_callback(nfs3_call_state_t *cs, call_frame_t *cbk_frame)
+         ret = 0;
+ 
+ err:
++    if (options)
++        dict_unref(options);
+     if (ret == -1) {
+         if (rpc_clnt)
+             rpc_clnt_unref(rpc_clnt);
+@@ -2708,8 +2710,13 @@ nlm4svc_init(xlator_t *nfsx)
+ 
+     gf_timer_call_after(nfsx->ctx, timeout, nlm_grace_period_over, NULL);
+     nlm4_inited = _gf_true;
++
++    if (options)
++        dict_unref(options);
+     return &nlm4prog;
+ err:
++    if (options)
++        dict_unref(options);
+     return NULL;
+ }
+ 
+-- 
+1.8.3.1
+

@@ -1,0 +1,104 @@
+From b9b479de2a7fd1c5eefa7aa1142e0a39e0c96ca9 Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez <xhernandez@redhat.com>
+Date: Sun, 1 Mar 2020 19:49:04 +0100
+Subject: [PATCH 419/449] cluster/afr: fix race when bricks come up
+
+The was a problem when self-heal was sending lookups at the same time
+that one of the bricks was coming up. In this case there was a chance
+that the number of 'up' bricks changes in the middle of sending the
+requests to subvolumes which caused a discrepancy in the expected
+number of replies and the actual number of sent requests.
+
+This discrepancy caused that AFR continued executing requests before
+all requests were complete. Eventually, the frame of the pending
+request was destroyed when the operation terminated, causing a use-
+after-free issue when the answer was finally received.
+
+In theory the same thing could happen in the reverse way, i.e. AFR
+tries to wait for more replies than sent requests, causing a hang.
+
+Backport of:
+> Upstream-patch-link: https://review.gluster.org/24191
+> Change-Id: I7ed6108554ca379d532efb1a29b2de8085410b70
+> Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+> Fixes: bz#1808875
+
+BUG: 1794663
+Change-Id: I7ed6108554ca379d532efb1a29b2de8085410b70
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202489
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/afr/src/afr-self-heal-common.c | 6 +++---
+ xlators/cluster/afr/src/afr-self-heal-name.c   | 4 +++-
+ xlators/cluster/afr/src/afr-self-heal.h        | 7 +++++--
+ 3 files changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/xlators/cluster/afr/src/afr-self-heal-common.c b/xlators/cluster/afr/src/afr-self-heal-common.c
+index ce1ea50..d942ccf 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-common.c
++++ b/xlators/cluster/afr/src/afr-self-heal-common.c
+@@ -1869,12 +1869,12 @@ int
+ afr_selfheal_unlocked_discover(call_frame_t *frame, inode_t *inode, uuid_t gfid,
+                                struct afr_reply *replies)
+ {
+-    afr_private_t *priv = NULL;
++    afr_local_t *local = NULL;
+ 
+-    priv = frame->this->private;
++    local = frame->local;
+ 
+     return afr_selfheal_unlocked_discover_on(frame, inode, gfid, replies,
+-                                             priv->child_up);
++                                             local->child_up);
+ }
+ 
+ unsigned int
+diff --git a/xlators/cluster/afr/src/afr-self-heal-name.c b/xlators/cluster/afr/src/afr-self-heal-name.c
+index 7d4f208..dace071 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-name.c
++++ b/xlators/cluster/afr/src/afr-self-heal-name.c
+@@ -560,13 +560,15 @@ afr_selfheal_name_unlocked_inspect(call_frame_t *frame, xlator_t *this,
+     struct afr_reply *replies = NULL;
+     inode_t *inode = NULL;
+     int first_idx = -1;
++    afr_local_t *local = NULL;
+ 
+     priv = this->private;
++    local = frame->local;
+ 
+     replies = alloca0(sizeof(*replies) * priv->child_count);
+ 
+     inode = afr_selfheal_unlocked_lookup_on(frame, parent, bname, replies,
+-                                            priv->child_up, NULL);
++                                            local->child_up, NULL);
+     if (!inode)
+         return -ENOMEM;
+ 
+diff --git a/xlators/cluster/afr/src/afr-self-heal.h b/xlators/cluster/afr/src/afr-self-heal.h
+index 8234cec..f7ecf5d 100644
+--- a/xlators/cluster/afr/src/afr-self-heal.h
++++ b/xlators/cluster/afr/src/afr-self-heal.h
+@@ -46,13 +46,16 @@
+         afr_local_t *__local = frame->local;                                   \
+         afr_private_t *__priv = frame->this->private;                          \
+         int __i = 0;                                                           \
+-        int __count = AFR_COUNT(list, __priv->child_count);                    \
++        int __count = 0;                                                       \
++        unsigned char *__list = alloca(__priv->child_count);                   \
+                                                                                \
++        memcpy(__list, list, sizeof(*__list) * __priv->child_count);           \
++        __count = AFR_COUNT(__list, __priv->child_count);                      \
+         __local->barrier.waitfor = __count;                                    \
+         afr_local_replies_wipe(__local, __priv);                               \
+                                                                                \
+         for (__i = 0; __i < __priv->child_count; __i++) {                      \
+-            if (!list[__i])                                                    \
++            if (!__list[__i])                                                  \
+                 continue;                                                      \
+             STACK_WIND_COOKIE(frame, rfn, (void *)(long)__i,                   \
+                               __priv->children[__i],                           \
+-- 
+1.8.3.1
+

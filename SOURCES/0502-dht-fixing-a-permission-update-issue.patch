@@ -1,0 +1,225 @@
+From 3f1eee125a35c33ecb078e5d3bfd80d80e63881d Mon Sep 17 00:00:00 2001
+From: Barak Sason Rofman <bsasonro@redhat.com>
+Date: Wed, 15 Jan 2020 12:02:05 +0200
+Subject: [PATCH 502/511] dht - fixing a permission update issue
+
+When bringing back a downed brick and performing lookup from the client
+side, the permission on said brick aren't updated on the first lookup,
+but only on the second.
+
+This patch modifies permission update logic so the first lookup will
+trigger a permission update on the downed brick.
+
+LIMITATIONS OF THE PATCH:
+As the choice of source depends on whether the directory has layout or not.
+Even the directories on the newly added brick will have layout xattr[zeroed], but the same is not true for a root directory.
+Hence, in case in the entire cluster only the newly added bricks are up [and others are down], then any change in permission during this time will be overwritten by the older permissions when the cluster is restarted.
+
+Upstream:
+> Reviewed-on: https://review.gluster.org/#/c/glusterfs/+/24020/
+> fixes: #999
+> Change-Id: Ieb70246d41e59f9cae9f70bc203627a433dfbd33
+> Signed-off-by: Barak Sason Rofman <bsasonro@redhat.com>
+
+BUG: 1663821
+Change-Id: Ieb70246d41e59f9cae9f70bc203627a433dfbd33
+Signed-off-by: Barak Sason Rofman <bsasonro@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/221116
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/bug-1064147.t                 | 71 ++++++++++++++++++++++++++++++++
+ xlators/cluster/dht/src/dht-common.c     | 28 ++++++++++---
+ xlators/cluster/dht/src/dht-selfheal.c   | 15 +++++--
+ xlators/storage/posix/src/posix-common.c | 16 +++----
+ 4 files changed, 111 insertions(+), 19 deletions(-)
+ create mode 100755 tests/bugs/bug-1064147.t
+
+diff --git a/tests/bugs/bug-1064147.t b/tests/bugs/bug-1064147.t
+new file mode 100755
+index 0000000..617a1aa
+--- /dev/null
++++ b/tests/bugs/bug-1064147.t
+@@ -0,0 +1,71 @@
++#!/bin/bash
++
++. $(dirname $0)/../include.rc
++. $(dirname $0)/../volume.rc
++
++# Initialize
++#------------------------------------------------------------
++cleanup;
++
++# Start glusterd
++TEST glusterd;
++TEST pidof glusterd;
++TEST $CLI volume info;
++
++# Create a volume
++TEST $CLI volume create $V0 $H0:/${V0}{1,2};
++
++# Verify volume creation
++ EXPECT "$V0" volinfo_field $V0 'Volume Name';
++ EXPECT 'Created' volinfo_field $V0 'Status';
++
++# Start volume and verify successful start
++ TEST $CLI volume start $V0;
++ EXPECT 'Started' volinfo_field $V0 'Status';
++ TEST glusterfs -s $H0 --volfile-id=$V0 $M0
++#------------------------------------------------------------
++
++# Test case 1 - Subvolume down + Healing
++#------------------------------------------------------------
++# Kill 2nd brick process
++TEST kill -9  `ps aux | grep glusterfsd | grep ${V0}2 | grep -v grep | awk '{print $2}'`;
++
++# Change root permissions
++TEST chmod 444 $M0
++
++# Store permission for comparision
++TEST permission_new=`stat -c "%A" $M0`
++
++# Bring up the killed brick process
++TEST $CLI volume start $V0 force
++
++# Perform lookup
++sleep 5
++TEST ls $M0
++
++# Check brick permissions
++TEST brick_perm=`stat -c "%A" /${V0}2`
++TEST [ ${brick_perm} = ${permission_new} ]
++#------------------------------------------------------------
++
++# Test case 2 - Add-brick + Healing
++#------------------------------------------------------------
++# Change root permissions
++TEST chmod 777 $M0
++
++# Store permission for comparision
++TEST permission_new_2=`stat -c "%A" $M0`
++
++# Add a 3rd brick
++TEST $CLI volume add-brick $V0 $H0:/${V0}3
++
++# Perform lookup
++sleep 5
++TEST ls $M0
++
++# Check permissions on the new brick
++TEST brick_perm2=`stat -c "%A" /${V0}3`
++
++TEST [ ${brick_perm2} = ${permission_new_2} ]
++
++cleanup;
+diff --git a/xlators/cluster/dht/src/dht-common.c b/xlators/cluster/dht/src/dht-common.c
+index 4db89df..fe1d0ee 100644
+--- a/xlators/cluster/dht/src/dht-common.c
++++ b/xlators/cluster/dht/src/dht-common.c
+@@ -1363,13 +1363,29 @@ dht_lookup_dir_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+             dht_aggregate_xattr(local->xattr, xattr);
+         }
+ 
++        if (__is_root_gfid(stbuf->ia_gfid)) {
++            ret = dht_dir_has_layout(xattr, conf->xattr_name);
++            if (ret >= 0) {
++                if (is_greater_time(local->prebuf.ia_ctime,
++                                    local->prebuf.ia_ctime_nsec,
++                                    stbuf->ia_ctime, stbuf->ia_ctime_nsec)) {
++                    /* Choose source */
++                    local->prebuf.ia_gid = stbuf->ia_gid;
++                    local->prebuf.ia_uid = stbuf->ia_uid;
++
++                    local->prebuf.ia_ctime = stbuf->ia_ctime;
++                    local->prebuf.ia_ctime_nsec = stbuf->ia_ctime_nsec;
++                    local->prebuf.ia_prot = stbuf->ia_prot;
++                }
++            }
++        }
++
+         if (local->stbuf.ia_type != IA_INVAL) {
+             /* This is not the first subvol to respond */
+-            if (!__is_root_gfid(stbuf->ia_gfid) &&
+-                ((local->stbuf.ia_gid != stbuf->ia_gid) ||
+-                 (local->stbuf.ia_uid != stbuf->ia_uid) ||
+-                 (is_permission_different(&local->stbuf.ia_prot,
+-                                          &stbuf->ia_prot)))) {
++            if ((local->stbuf.ia_gid != stbuf->ia_gid) ||
++                (local->stbuf.ia_uid != stbuf->ia_uid) ||
++                (is_permission_different(&local->stbuf.ia_prot,
++                                         &stbuf->ia_prot))) {
+                 local->need_attrheal = 1;
+             }
+         }
+@@ -10969,7 +10985,7 @@ dht_notify(xlator_t *this, int event, void *data, ...)
+                 if ((cmd == GF_DEFRAG_CMD_STATUS) ||
+                     (cmd == GF_DEFRAG_CMD_STATUS_TIER) ||
+                     (cmd == GF_DEFRAG_CMD_DETACH_STATUS))
+-                	gf_defrag_status_get(conf, output, _gf_false);
++                    gf_defrag_status_get(conf, output, _gf_false);
+                 else if (cmd == GF_DEFRAG_CMD_START_DETACH_TIER)
+                     gf_defrag_start_detach_tier(defrag);
+                 else if (cmd == GF_DEFRAG_CMD_DETACH_START)
+diff --git a/xlators/cluster/dht/src/dht-selfheal.c b/xlators/cluster/dht/src/dht-selfheal.c
+index f5dfff9..f4e17d1 100644
+--- a/xlators/cluster/dht/src/dht-selfheal.c
++++ b/xlators/cluster/dht/src/dht-selfheal.c
+@@ -2097,9 +2097,18 @@ dht_selfheal_directory(call_frame_t *frame, dht_selfheal_dir_cbk_t dir_cbk,
+     local->selfheal.dir_cbk = dir_cbk;
+     local->selfheal.layout = dht_layout_ref(this, layout);
+ 
+-    if (local->need_attrheal && !IA_ISINVAL(local->mds_stbuf.ia_type)) {
+-        /*Use the one in the mds_stbuf*/
+-        local->stbuf = local->mds_stbuf;
++    if (local->need_attrheal) {
++        if (__is_root_gfid(local->stbuf.ia_gfid)) {
++            local->stbuf.ia_gid = local->prebuf.ia_gid;
++            local->stbuf.ia_uid = local->prebuf.ia_uid;
++
++            local->stbuf.ia_ctime = local->prebuf.ia_ctime;
++            local->stbuf.ia_ctime_nsec = local->prebuf.ia_ctime_nsec;
++            local->stbuf.ia_prot = local->prebuf.ia_prot;
++
++        } else if (!IA_ISINVAL(local->mds_stbuf.ia_type)) {
++            local->stbuf = local->mds_stbuf;
++        }
+     }
+ 
+     if (!__is_root_gfid(local->stbuf.ia_gfid)) {
+diff --git a/xlators/storage/posix/src/posix-common.c b/xlators/storage/posix/src/posix-common.c
+index c5a43a1..e5c6e62 100644
+--- a/xlators/storage/posix/src/posix-common.c
++++ b/xlators/storage/posix/src/posix-common.c
+@@ -598,6 +598,7 @@ posix_init(xlator_t *this)
+     int force_directory = -1;
+     int create_mask = -1;
+     int create_directory_mask = -1;
++    char value;
+ 
+     dir_data = dict_get(this->options, "directory");
+ 
+@@ -654,16 +655,11 @@ posix_init(xlator_t *this)
+     }
+ 
+     /* Check for Extended attribute support, if not present, log it */
+-    op_ret = sys_lsetxattr(dir_data->data, "trusted.glusterfs.test", "working",
+-                           8, 0);
+-    if (op_ret != -1) {
+-        ret = sys_lremovexattr(dir_data->data, "trusted.glusterfs.test");
+-        if (ret) {
+-            gf_msg(this->name, GF_LOG_DEBUG, errno, P_MSG_INVALID_OPTION,
+-                   "failed to remove xattr: "
+-                   "trusted.glusterfs.test");
+-        }
+-    } else {
++    size = sys_lgetxattr(dir_data->data, "user.x", &value, sizeof(value));
++
++    if ((size == -1) && (errno == EOPNOTSUPP)) {
++        gf_msg(this->name, GF_LOG_DEBUG, 0, P_MSG_XDATA_GETXATTR,
++               "getxattr returned %zd", size);
+         tmp_data = dict_get(this->options, "mandate-attribute");
+         if (tmp_data) {
+             if (gf_string2boolean(tmp_data->data, &tmp_bool) == -1) {
+-- 
+1.8.3.1
+

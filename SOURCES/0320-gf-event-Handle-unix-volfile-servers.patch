@@ -1,0 +1,58 @@
+From 7e5d8dcb4f557eaca259e8d81cf34d651907396c Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Thu, 24 Oct 2019 12:24:35 +0530
+Subject: [PATCH 320/335] gf-event: Handle unix volfile-servers
+
+Problem:
+glfsheal program uses unix-socket-based volfile server.
+volfile server will be the path to socket in this case.
+gf_event expects this to be hostname in all cases. So getaddrinfo
+will fail on the unix-socket path, events won't be sent in this case.
+
+Fix:
+In case of unix sockets, default to localhost
+
+upstream-patch: https://review.gluster.org/c/glusterfs/+/23606
+BUG: 1758923
+Change-Id: I60d27608792c29d83fb82beb5fde5ef4754bece8
+Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/185851
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/events.c | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/libglusterfs/src/events.c b/libglusterfs/src/events.c
+index 9d33783..4e2f8f9 100644
+--- a/libglusterfs/src/events.c
++++ b/libglusterfs/src/events.c
+@@ -43,6 +43,7 @@ _gf_event(eventtypes_t event, const char *fmt, ...)
+     struct addrinfo *result = NULL;
+     xlator_t *this = THIS;
+     int sin_family = AF_INET;
++    char *volfile_server_transport = NULL;
+ 
+     /* Global context */
+     ctx = THIS->ctx;
+@@ -62,8 +63,16 @@ _gf_event(eventtypes_t event, const char *fmt, ...)
+     memset(&hints, 0, sizeof(hints));
+     hints.ai_family = AF_UNSPEC;
+ 
++    if (ctx) {
++        volfile_server_transport = ctx->cmd_args.volfile_server_transport;
++    }
++
++    if (!volfile_server_transport) {
++        volfile_server_transport = "tcp";
++    }
+     /* Get Host name to send message */
+-    if (ctx && ctx->cmd_args.volfile_server) {
++    if (ctx && ctx->cmd_args.volfile_server &&
++        (strcmp(volfile_server_transport, "unix"))) {
+         /* If it is client code then volfile_server is set
+            use that information to push the events. */
+         if ((getaddrinfo(ctx->cmd_args.volfile_server, NULL, &hints,
+-- 
+1.8.3.1
+

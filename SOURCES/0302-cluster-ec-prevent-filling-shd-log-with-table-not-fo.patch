@@ -1,0 +1,67 @@
+From fb1d503791c874296afab0cd7be59b6865340d72 Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez <jahernan@redhat.com>
+Date: Wed, 25 Sep 2019 11:56:35 +0200
+Subject: [PATCH 302/302] cluster/ec: prevent filling shd log with "table not
+ found" messages
+
+When self-heal daemon receives an inodelk contention notification, it tries
+to locate the related inode using inode_find() and the inode table owned by
+top-most xlator, which in this case doesn't have any inode table. This causes
+many messages to be logged by inode_find() function because the inode table
+passed is NULL.
+
+This patch prevents this by making sure the inode table is not NULL before
+calling inode_find().
+
+Upstream patch:
+> Change-Id: I8d001bd180aaaf1521ba40a536b097fcf70c991f
+> Upstream patch link: https://review.gluster.org/c/glusterfs/+/23481
+> Fixes: bz#1755344
+> Signed-off-by: Xavi Hernandez <jahernan@redhat.com>
+
+Change-Id: I8d001bd180aaaf1521ba40a536b097fcf70c991f
+BUG: 1754790
+Signed-off-by: Xavi Hernandez <jahernan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/182207
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/ec/src/ec.c | 15 +++++++++++++--
+ 1 file changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/cluster/ec/src/ec.c b/xlators/cluster/ec/src/ec.c
+index 19094c4..3f31c74 100644
+--- a/xlators/cluster/ec/src/ec.c
++++ b/xlators/cluster/ec/src/ec.c
+@@ -463,6 +463,7 @@ ec_upcall(ec_t *ec, struct gf_upcall *upcall)
+     struct gf_upcall_cache_invalidation *ci = NULL;
+     struct gf_upcall_inodelk_contention *lc = NULL;
+     inode_t *inode;
++    inode_table_t *table;
+ 
+     switch (upcall->event_type) {
+         case GF_UPCALL_CACHE_INVALIDATION:
+@@ -476,8 +477,18 @@ ec_upcall(ec_t *ec, struct gf_upcall *upcall)
+                 /* The lock is not owned by EC, ignore it. */
+                 return _gf_true;
+             }
+-            inode = inode_find(((xlator_t *)ec->xl->graph->top)->itable,
+-                               upcall->gfid);
++            table = ((xlator_t *)ec->xl->graph->top)->itable;
++            if (table == NULL) {
++                /* Self-heal daemon doesn't have an inode table on the top
++                 * xlator because it doesn't need it. In this case we should
++                 * use the inode table managed by EC itself where all inodes
++                 * being healed should be present. However self-heal doesn't
++                 * use eager-locking and inodelk's are already released as
++                 * soon as possible. In this case we can safely ignore these
++                 * notifications. */
++                return _gf_false;
++            }
++            inode = inode_find(table, upcall->gfid);
+             /* If inode is not found, it means that it's already released,
+              * so we can ignore it. Probably it has been released and
+              * destroyed while the contention notification was being sent.
+-- 
+1.8.3.1
+

@@ -1,0 +1,187 @@
+From 179213798496448316547506da65dbd9fd741dfa Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Wed, 24 Apr 2019 22:02:51 +0530
+Subject: [PATCH 436/449] glusterd: coverity fixes
+
+Addresses the following:
+
+* CID 1124776:  Resource leaks  (RESOURCE_LEAK) - Variable "aa" going out
+of scope leaks the storage it points to in glusterd-volgen.c
+
+* Bunch of CHECKED_RETURN defects in the callers of synctask_barrier_init
+
+* CID 1400742:  Program hangs  (LOCK) - adding annotation to fix this
+false positive
+
+> upstream patch link: https://review.gluster.org/#/c/glusterfs/+/22615
+> Updates: bz#789278
+> Change-Id: I02f16e7eeb8c5cf72f7d0b29d00df4f03b3718b3
+> Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+
+BUG: 1787310
+Change-Id: I02f16e7eeb8c5cf72f7d0b29d00df4f03b3718b3
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202626
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-handler.c |  6 ++++++
+ xlators/mgmt/glusterd/src/glusterd-mgmt.c    | 24 +++++++++++++++++++-----
+ xlators/mgmt/glusterd/src/glusterd-syncop.c  | 22 ++++++++++++++++++----
+ xlators/mgmt/glusterd/src/glusterd-volgen.c  |  5 +++--
+ 4 files changed, 46 insertions(+), 11 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-handler.c b/xlators/mgmt/glusterd/src/glusterd-handler.c
+index 1f31e72..b8799ab 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-handler.c
++++ b/xlators/mgmt/glusterd/src/glusterd-handler.c
+@@ -3458,6 +3458,12 @@ glusterd_friend_remove(uuid_t uuid, char *hostname)
+     ret = glusterd_peerinfo_cleanup(peerinfo);
+ out:
+     gf_msg_debug(THIS->name, 0, "returning %d", ret);
++    /* We don't need to do a mutex unlock of peerinfo->delete_lock as the same
++     * will be anyway destroyed within glusterd_peerinfo_cleanup, coverity
++     * though cries about it
++     */
++    /* coverity[LOCK] */
++
+     return ret;
+ }
+ 
+diff --git a/xlators/mgmt/glusterd/src/glusterd-mgmt.c b/xlators/mgmt/glusterd/src/glusterd-mgmt.c
+index a4915f3..1e185d7 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-mgmt.c
++++ b/xlators/mgmt/glusterd/src/glusterd-mgmt.c
+@@ -757,7 +757,10 @@ glusterd_mgmt_v3_initiate_lockdown(glusterd_op_t op, dict_t *dict,
+ 
+     /* Sending mgmt_v3 lock req to other nodes in the cluster */
+     gd_syncargs_init(&args, NULL);
+-    synctask_barrier_init((&args));
++    ret = synctask_barrier_init((&args));
++    if (ret)
++        goto out;
++
+     peer_cnt = 0;
+ 
+     RCU_READ_LOCK;
+@@ -1108,7 +1111,10 @@ glusterd_mgmt_v3_pre_validate(glusterd_op_t op, dict_t *req_dict,
+ 
+     /* Sending Pre Validation req to other nodes in the cluster */
+     gd_syncargs_init(&args, req_dict);
+-    synctask_barrier_init((&args));
++    ret = synctask_barrier_init((&args));
++    if (ret)
++        goto out;
++
+     peer_cnt = 0;
+ 
+     RCU_READ_LOCK;
+@@ -1458,7 +1464,10 @@ glusterd_mgmt_v3_brick_op(glusterd_op_t op, dict_t *op_ctx, dict_t *req_dict,
+ 
+     /* Sending brick op req to other nodes in the cluster */
+     gd_syncargs_init(&args, op_ctx);
+-    synctask_barrier_init((&args));
++    ret = synctask_barrier_init((&args));
++    if (ret)
++        goto out;
++
+     peer_cnt = 0;
+ 
+     RCU_READ_LOCK;
+@@ -1722,7 +1731,9 @@ glusterd_mgmt_v3_commit(glusterd_op_t op, dict_t *op_ctx, dict_t *req_dict,
+ 
+     /* Sending commit req to other nodes in the cluster */
+     gd_syncargs_init(&args, op_ctx);
+-    synctask_barrier_init((&args));
++    ret = synctask_barrier_init((&args));
++    if (ret)
++        goto out;
+     peer_cnt = 0;
+ 
+     RCU_READ_LOCK;
+@@ -1963,7 +1974,10 @@ glusterd_mgmt_v3_post_validate(glusterd_op_t op, int32_t op_ret, dict_t *dict,
+ 
+     /* Sending Post Validation req to other nodes in the cluster */
+     gd_syncargs_init(&args, req_dict);
+-    synctask_barrier_init((&args));
++    ret = synctask_barrier_init((&args));
++    if (ret)
++        goto out;
++
+     peer_cnt = 0;
+ 
+     RCU_READ_LOCK;
+diff --git a/xlators/mgmt/glusterd/src/glusterd-syncop.c b/xlators/mgmt/glusterd/src/glusterd-syncop.c
+index 9e47d14..c78983a 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-syncop.c
++++ b/xlators/mgmt/glusterd/src/glusterd-syncop.c
+@@ -1191,7 +1191,12 @@ gd_lock_op_phase(glusterd_conf_t *conf, glusterd_op_t op, dict_t *op_ctx,
+     struct syncargs args = {0};
+ 
+     this = THIS;
+-    synctask_barrier_init((&args));
++    GF_VALIDATE_OR_GOTO("glusterd", this, out);
++
++    ret = synctask_barrier_init((&args));
++    if (ret)
++        goto out;
++
+     peer_cnt = 0;
+ 
+     RCU_READ_LOCK;
+@@ -1321,7 +1326,10 @@ stage_done:
+     }
+ 
+     gd_syncargs_init(&args, aggr_dict);
+-    synctask_barrier_init((&args));
++    ret = synctask_barrier_init((&args));
++    if (ret)
++        goto out;
++
+     peer_cnt = 0;
+ 
+     RCU_READ_LOCK;
+@@ -1449,7 +1457,10 @@ commit_done:
+     }
+ 
+     gd_syncargs_init(&args, op_ctx);
+-    synctask_barrier_init((&args));
++    ret = synctask_barrier_init((&args));
++    if (ret)
++        goto out;
++
+     peer_cnt = 0;
+     origin_glusterd = is_origin_glusterd(req_dict);
+ 
+@@ -1541,7 +1552,10 @@ gd_unlock_op_phase(glusterd_conf_t *conf, glusterd_op_t op, int *op_ret,
+         goto out;
+     }
+ 
+-    synctask_barrier_init((&args));
++    ret = synctask_barrier_init((&args));
++    if (ret)
++        goto out;
++
+     peer_cnt = 0;
+ 
+     if (cluster_lock) {
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volgen.c b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+index 6852f8e..16346e7 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volgen.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+@@ -4808,9 +4808,10 @@ nfs_option_handler(volgen_graph_t *graph, struct volopt_map_entry *vme,
+ 
+         if (ret != -1) {
+             ret = gf_canonicalize_path(vme->value);
+-            if (ret)
++            if (ret) {
++                GF_FREE(aa);
+                 return -1;
+-
++            }
+             ret = xlator_set_option(xl, aa, ret, vme->value);
+             GF_FREE(aa);
+         }
+-- 
+1.8.3.1
+

@@ -1,0 +1,38 @@
+From 95a0cfac8a1c8eff50f05e65df945da3bb501fc9 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Julien=20Rop=C3=A9?= <jrope@redhat.com>
+Date: Thu, 3 Dec 2020 09:33:48 +0100
+Subject: [PATCH] With OpenSSL 1.0.2 and earlier: disable client-side
+ renegotiation.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Fixed issue #49
+Fixes BZ#1904459
+
+Signed-off-by: Julien Ropé <jrope@redhat.com>
+Reported-by: BlackKD
+Acked-by: Frediano Ziglio <fziglio@redhat.com>
+---
+ server/red-stream.cpp | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/server/red-stream.cpp b/server/red-stream.cpp
+index 420433bd..c1f0f00c 100644
+--- a/server/red-stream.c
++++ b/server/red-stream.c
+@@ -523,6 +523,11 @@ RedStreamSslStatus red_stream_ssl_accept(RedStream *stream)
+         return RED_STREAM_SSL_STATUS_OK;
+     }
+ 
++#ifndef SSL_OP_NO_RENEGOTIATION
++    // With OpenSSL 1.0.2 and earlier: disable client-side renogotiation
++    stream->priv->ssl->s3->flags |= SSL3_FLAGS_NO_RENEGOTIATE_CIPHERS;
++#endif
++
+     ssl_error = SSL_get_error(stream->priv->ssl, return_code);
+     if (return_code == -1 && (ssl_error == SSL_ERROR_WANT_READ ||
+                               ssl_error == SSL_ERROR_WANT_WRITE)) {
+-- 
+2.29.2
+

@@ -1,0 +1,70 @@
+From a3fd2c9d85bbd23131c985599d9c9d74f66f32d2 Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Thu, 10 Oct 2019 10:50:59 +0530
+Subject: [PATCH 520/526] performance/open-behind: seek fop should
+ open_and_resume
+
+Upstream patch:
+> Upstream-patch-link: https://review.gluster.org/#/c/glusterfs/+/23530
+> fixes: bz#1760187
+> Change-Id: I4c6ad13194d4fc5c7705e35bf9a27fce504b51f9
+> Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+
+BUG: 1830713
+Change-Id: I4c6ad13194d4fc5c7705e35bf9a27fce504b51f9
+Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/224484
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/performance/open-behind/src/open-behind.c | 27 +++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/xlators/performance/open-behind/src/open-behind.c b/xlators/performance/open-behind/src/open-behind.c
+index 268c717..3ee3c40 100644
+--- a/xlators/performance/open-behind/src/open-behind.c
++++ b/xlators/performance/open-behind/src/open-behind.c
+@@ -711,6 +711,32 @@ err:
+ }
+ 
+ int
++ob_seek(call_frame_t *frame, xlator_t *this, fd_t *fd, off_t offset,
++        gf_seek_what_t what, dict_t *xdata)
++{
++    call_stub_t *stub = NULL;
++    fd_t *wind_fd = NULL;
++
++    wind_fd = ob_get_wind_fd(this, fd, NULL);
++
++    stub = fop_seek_stub(frame, default_seek_resume, wind_fd, offset, what,
++                         xdata);
++
++    fd_unref(wind_fd);
++
++    if (!stub)
++        goto err;
++
++    open_and_resume(this, wind_fd, stub);
++
++    return 0;
++err:
++    STACK_UNWIND_STRICT(fstat, frame, -1, ENOMEM, 0, 0);
++
++    return 0;
++}
++
++int
+ ob_flush(call_frame_t *frame, xlator_t *this, fd_t *fd, dict_t *xdata)
+ {
+     call_stub_t *stub = NULL;
+@@ -1276,6 +1302,7 @@ struct xlator_fops fops = {
+     .flush = ob_flush,
+     .fsync = ob_fsync,
+     .fstat = ob_fstat,
++    .seek = ob_seek,
+     .ftruncate = ob_ftruncate,
+     .fsetxattr = ob_fsetxattr,
+     .setxattr = ob_setxattr,
+-- 
+1.8.3.1
+

@@ -1,0 +1,42 @@
+From 1d2d29396ee25f09c7d379a992ac9bd244e89c39 Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Thu, 13 Dec 2018 14:28:57 +0530
+Subject: [PATCH 30/52] selinux/glusterd : add "features.selinux" to
+ glusterd-volume-set.c
+
+updates: #593
+Change-Id: I38675ba4d47c8ba7f94cfb4734692683ddb3dcfd
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c | 8 +++-----
+ 1 file changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index 4bf89a6..11265bf 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -1203,10 +1203,9 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+      .voltype = "performance/io-threads",
+      .option = "pass-through",
+      .op_version = GD_OP_VERSION_4_1_0},
+-    {.key         = "performance.least-rate-limit",
+-     .voltype     = "performance/io-threads",
+-     .op_version  = 1
+-    },
++    {.key = "performance.least-rate-limit",
++     .voltype = "performance/io-threads",
++     .op_version = 1},
+ 
+     /* Other perf xlators' options */
+     {.key = "performance.io-cache-pass-through",
+@@ -2849,7 +2848,6 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+                     "trusted.gluster.selinux on the bricks. Recommended "
+                     "to have enabled when clients and/or bricks support "
+                     "SELinux."},
+-    {.key = GLUSTERD_LOCALTIME_LOGGING_KEY,
+     /*{.key = GLUSTERD_LOCALTIME_LOGGING_KEY,
+      .voltype = "mgmt/glusterd",
+      .type = GLOBAL_DOC,
+-- 
+1.8.3.1
+

@@ -1,0 +1,455 @@
+From ddb0038de77a4269fa7eed1bb217bfb6bed1b7ba Mon Sep 17 00:00:00 2001
+From: N Balachandran <nbalacha@redhat.com>
+Date: Fri, 9 Aug 2019 14:34:22 +0530
+Subject: [PATCH 337/344] fuse: Set limit on invalidate queue size
+
+If the glusterfs fuse client process is unable to
+process the invalidate requests quickly enough, the
+number of such requests quickly grows large enough
+to use a significant amount of memory.
+We are now introducing another option to set an upper
+limit on these to prevent runaway memory usage.
+
+> Upstream https://review.gluster.org/23187
+> Change-Id: Iddfff1ee2de1466223e6717f7abd4b28ed947788
+> Fixes: bz#1732717
+> Signed-off-by: N Balachandran <nbalacha@redhat.com>
+
+BUG: 1763208
+Change-Id: I666cdf6c70999a0f0bc79969e8df0a9dde93b6e4
+Signed-off-by: Csaba Henk <csaba@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/187529
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ doc/mount.glusterfs.8                       |  5 +++
+ glusterfsd/src/glusterfsd.c                 | 21 ++++++++++
+ glusterfsd/src/glusterfsd.h                 |  3 +-
+ libglusterfs/src/glusterfs/glusterfs.h      |  1 +
+ libglusterfs/src/glusterfs/inode.h          |  1 +
+ libglusterfs/src/inode.c                    | 31 +++++++++++----
+ xlators/mount/fuse/src/fuse-bridge.c        | 60 ++++++++++++++++++++++-------
+ xlators/mount/fuse/src/fuse-bridge.h        |  3 +-
+ xlators/mount/fuse/utils/mount.glusterfs.in |  7 ++++
+ 9 files changed, 108 insertions(+), 24 deletions(-)
+
+diff --git a/doc/mount.glusterfs.8 b/doc/mount.glusterfs.8
+index 286631b..b35b362 100644
+--- a/doc/mount.glusterfs.8
++++ b/doc/mount.glusterfs.8
+@@ -126,6 +126,11 @@ Provide list of backup volfile servers in the following format [default: None]
+ Set fuse module's limit for number of inodes kept in LRU list to N [default: 131072]
+ .TP
+ .TP
++\fBinvalidate-limit=\fRN
++Suspend fuse invalidations implied by 'lru-limit' if  number of outstanding
++invalidations reaches N
++.TP
++.TP
+ \fBbackground-qlen=\fRN
+ Set fuse module's background queue length to N [default: 64]
+ .TP
+diff --git a/glusterfsd/src/glusterfsd.c b/glusterfsd/src/glusterfsd.c
+index 5b5e996..0856471 100644
+--- a/glusterfsd/src/glusterfsd.c
++++ b/glusterfsd/src/glusterfsd.c
+@@ -212,6 +212,9 @@ static struct argp_option gf_options[] = {
+     {"lru-limit", ARGP_FUSE_LRU_LIMIT_KEY, "N", 0,
+      "Set fuse module's limit for number of inodes kept in LRU list to N "
+      "[default: 131072]"},
++    {"invalidate-limit", ARGP_FUSE_INVALIDATE_LIMIT_KEY, "N", 0,
++     "Suspend inode invalidations implied by 'lru-limit' if the number of "
++     "outstanding invalidations reaches N"},
+     {"background-qlen", ARGP_FUSE_BACKGROUND_QLEN_KEY, "N", 0,
+      "Set fuse module's background queue length to N "
+      "[default: 64]"},
+@@ -504,6 +507,16 @@ set_fuse_mount_options(glusterfs_ctx_t *ctx, dict_t *options)
+         }
+     }
+ 
++    if (cmd_args->invalidate_limit >= 0) {
++        ret = dict_set_int32(options, "invalidate-limit",
++                             cmd_args->invalidate_limit);
++        if (ret < 0) {
++            gf_msg("glusterfsd", GF_LOG_ERROR, 0, glusterfsd_msg_4,
++                   "invalidate-limit");
++            goto err;
++        }
++    }
++
+     if (cmd_args->background_qlen) {
+         ret = dict_set_int32(options, "background-qlen",
+                              cmd_args->background_qlen);
+@@ -1283,6 +1296,14 @@ parse_opts(int key, char *arg, struct argp_state *state)
+             argp_failure(state, -1, 0, "unknown LRU limit option %s", arg);
+             break;
+ 
++        case ARGP_FUSE_INVALIDATE_LIMIT_KEY:
++            if (!gf_string2int32(arg, &cmd_args->invalidate_limit))
++                break;
++
++            argp_failure(state, -1, 0, "unknown invalidate limit option %s",
++                         arg);
++            break;
++
+         case ARGP_FUSE_BACKGROUND_QLEN_KEY:
+             if (!gf_string2int(arg, &cmd_args->background_qlen))
+                 break;
+diff --git a/glusterfsd/src/glusterfsd.h b/glusterfsd/src/glusterfsd.h
+index fa55789..ee655f0 100644
+--- a/glusterfsd/src/glusterfsd.h
++++ b/glusterfsd/src/glusterfsd.h
+@@ -111,7 +111,8 @@ enum argp_option_keys {
+     ARGP_FUSE_FLUSH_HANDLE_INTERRUPT_KEY = 189,
+     ARGP_FUSE_LRU_LIMIT_KEY = 190,
+     ARGP_FUSE_AUTO_INVAL_KEY = 191,
+-    ARGP_BRICK_MUX_KEY = 192
++    ARGP_BRICK_MUX_KEY = 192,
++    ARGP_FUSE_INVALIDATE_LIMIT_KEY = 195,
+ };
+ 
+ struct _gfd_vol_top_priv {
+diff --git a/libglusterfs/src/glusterfs/glusterfs.h b/libglusterfs/src/glusterfs/glusterfs.h
+index 79c93ae..3b594c0 100644
+--- a/libglusterfs/src/glusterfs/glusterfs.h
++++ b/libglusterfs/src/glusterfs/glusterfs.h
+@@ -541,6 +541,7 @@ struct _cmd_args {
+     int client_pid_set;
+     unsigned uid_map_root;
+     int32_t lru_limit;
++    int32_t invalidate_limit;
+     int background_qlen;
+     int congestion_threshold;
+     char *fuse_mountopts;
+diff --git a/libglusterfs/src/glusterfs/inode.h b/libglusterfs/src/glusterfs/inode.h
+index 52efdd8..4421c47 100644
+--- a/libglusterfs/src/glusterfs/inode.h
++++ b/libglusterfs/src/glusterfs/inode.h
+@@ -107,6 +107,7 @@ struct _inode {
+     struct list_head list;        /* active/lru/purge */
+ 
+     struct _inode_ctx *_ctx; /* replacement for dict_t *(inode->ctx) */
++    bool in_invalidate_list; /* Set if inode is in table invalidate list */
+     bool invalidate_sent;    /* Set it if invalidator_fn is called for inode */
+ };
+ 
+diff --git a/libglusterfs/src/inode.c b/libglusterfs/src/inode.c
+index 96ddea5..5331e93 100644
+--- a/libglusterfs/src/inode.c
++++ b/libglusterfs/src/inode.c
+@@ -558,8 +558,8 @@ __inode_unref(inode_t *inode, bool clear)
+ 
+     this = THIS;
+ 
+-    if (clear && inode->invalidate_sent) {
+-        inode->invalidate_sent = false;
++    if (clear && inode->in_invalidate_list) {
++        inode->in_invalidate_list = false;
+         inode->table->invalidate_size--;
+         __inode_activate(inode);
+     }
+@@ -573,7 +573,7 @@ __inode_unref(inode_t *inode, bool clear)
+         inode->_ctx[index].ref--;
+     }
+ 
+-    if (!inode->ref && !inode->invalidate_sent) {
++    if (!inode->ref && !inode->in_invalidate_list) {
+         inode->table->active_size--;
+ 
+         nlookup = GF_ATOMIC_GET(inode->nlookup);
+@@ -609,14 +609,14 @@ __inode_ref(inode_t *inode, bool is_invalidate)
+         return inode;
+ 
+     if (!inode->ref) {
+-        if (inode->invalidate_sent) {
+-            inode->invalidate_sent = false;
++        if (inode->in_invalidate_list) {
++            inode->in_invalidate_list = false;
+             inode->table->invalidate_size--;
+         } else {
+             inode->table->lru_size--;
+         }
+         if (is_invalidate) {
+-            inode->invalidate_sent = true;
++            inode->in_invalidate_list = true;
+             inode->table->invalidate_size++;
+             list_move_tail(&inode->list, &inode->table->invalidate);
+         } else {
+@@ -1609,6 +1609,7 @@ static int
+ inode_table_prune(inode_table_t *table)
+ {
+     int ret = 0;
++    int ret1 = 0;
+     struct list_head purge = {
+         0,
+     };
+@@ -1647,6 +1648,10 @@ inode_table_prune(inode_table_t *table)
+                 /* check for valid inode with 'nlookup' */
+                 nlookup = GF_ATOMIC_GET(entry->nlookup);
+                 if (nlookup) {
++                    if (entry->invalidate_sent) {
++                        list_move_tail(&entry->list, &table->lru);
++                        continue;
++                    }
+                     __inode_ref(entry, true);
+                     tmp = entry;
+                     break;
+@@ -1668,9 +1673,19 @@ inode_table_prune(inode_table_t *table)
+     if (tmp) {
+         xlator_t *old_THIS = THIS;
+         THIS = table->invalidator_xl;
+-        table->invalidator_fn(table->invalidator_xl, tmp);
++        ret1 = table->invalidator_fn(table->invalidator_xl, tmp);
+         THIS = old_THIS;
+-        inode_unref(tmp);
++        pthread_mutex_lock(&table->lock);
++        {
++            if (!ret1) {
++                tmp->invalidate_sent = true;
++                __inode_unref(tmp, false);
++            } else {
++                /* Move this back to the lru list*/
++                __inode_unref(tmp, true);
++            }
++        }
++        pthread_mutex_unlock(&table->lock);
+     }
+ 
+     /* Just so that if purge list is handled too, then clear it off */
+diff --git a/xlators/mount/fuse/src/fuse-bridge.c b/xlators/mount/fuse/src/fuse-bridge.c
+index 1c946a2..8b2e7f0 100644
+--- a/xlators/mount/fuse/src/fuse-bridge.c
++++ b/xlators/mount/fuse/src/fuse-bridge.c
+@@ -26,7 +26,7 @@ static int gf_fuse_xattr_enotsup_log;
+ void
+ fini(xlator_t *this_xl);
+ 
+-static void
++static int32_t
+ fuse_invalidate_inode(xlator_t *this, uint64_t fuse_ino);
+ 
+ /*
+@@ -312,7 +312,7 @@ send_fuse_data(xlator_t *this, fuse_in_header_t *finh, void *data, size_t size)
+ #define send_fuse_obj(this, finh, obj)                                         \
+     send_fuse_data(this, finh, obj, sizeof(*(obj)))
+ 
+-static void
++static int32_t
+ fuse_invalidate_entry(xlator_t *this, uint64_t fuse_ino)
+ {
+ #if FUSE_KERNEL_MINOR_VERSION >= 11
+@@ -328,17 +328,22 @@ fuse_invalidate_entry(xlator_t *this, uint64_t fuse_ino)
+ 
+     priv = this->private;
+     if (!priv->reverse_fuse_thread_started)
+-        return;
++        return -1;
++
++    if (priv->invalidate_limit &&
++        (priv->invalidate_count >= priv->invalidate_limit)) {
++        return -1;
++    }
+ 
+     inode = (inode_t *)(unsigned long)fuse_ino;
+     if (inode == NULL)
+-        return;
++        return -1;
+ 
+     list_for_each_entry_safe(dentry, tmp, &inode->dentry_list, inode_list)
+     {
+         node = GF_CALLOC(1, sizeof(*node), gf_fuse_mt_invalidate_node_t);
+         if (node == NULL)
+-            break;
++            return -1;
+ 
+         INIT_LIST_HEAD(&node->next);
+ 
+@@ -375,20 +380,21 @@ fuse_invalidate_entry(xlator_t *this, uint64_t fuse_ino)
+         pthread_mutex_lock(&priv->invalidate_mutex);
+         {
+             list_add_tail(&node->next, &priv->invalidate_list);
++            priv->invalidate_count++;
+             pthread_cond_signal(&priv->invalidate_cond);
+         }
+         pthread_mutex_unlock(&priv->invalidate_mutex);
+     }
+ 
+ #endif
+-    return;
++    return 0;
+ }
+ 
+ /*
+  * Send an inval inode notification to fuse. This causes an invalidation of the
+  * entire page cache mapping on the inode.
+  */
+-static void
++static int32_t
+ fuse_invalidate_inode(xlator_t *this, uint64_t fuse_ino)
+ {
+ #if FUSE_KERNEL_MINOR_VERSION >= 11
+@@ -401,15 +407,20 @@ fuse_invalidate_inode(xlator_t *this, uint64_t fuse_ino)
+     priv = this->private;
+ 
+     if (!priv->reverse_fuse_thread_started)
+-        return;
++        return -1;
++
++    if (priv->invalidate_limit &&
++        (priv->invalidate_count >= priv->invalidate_limit)) {
++        return -1;
++    }
+ 
+     inode = (inode_t *)(unsigned long)fuse_ino;
+     if (inode == NULL)
+-        return;
++        return -1;
+ 
+     node = GF_CALLOC(1, sizeof(*node), gf_fuse_mt_invalidate_node_t);
+     if (node == NULL)
+-        return;
++        return -1;
+ 
+     INIT_LIST_HEAD(&node->next);
+ 
+@@ -435,6 +446,7 @@ fuse_invalidate_inode(xlator_t *this, uint64_t fuse_ino)
+     pthread_mutex_lock(&priv->invalidate_mutex);
+     {
+         list_add_tail(&node->next, &priv->invalidate_list);
++        priv->invalidate_count++;
+         pthread_cond_signal(&priv->invalidate_cond);
+     }
+     pthread_mutex_unlock(&priv->invalidate_mutex);
+@@ -443,7 +455,7 @@ fuse_invalidate_inode(xlator_t *this, uint64_t fuse_ino)
+     gf_log("glusterfs-fuse", GF_LOG_WARNING,
+            "fuse_invalidate_inode not implemented on this system");
+ #endif
+-    return;
++    return 0;
+ }
+ 
+ #if FUSE_KERNEL_MINOR_VERSION >= 11
+@@ -451,8 +463,9 @@ fuse_invalidate_inode(xlator_t *this, uint64_t fuse_ino)
+ static int32_t
+ fuse_inode_invalidate_fn(xlator_t *this, inode_t *inode)
+ {
+-    fuse_invalidate_entry(this, (uint64_t)(uintptr_t)inode);
+-    return 0;
++    int32_t ret = 0;
++    ret = fuse_invalidate_entry(this, (uint64_t)(uintptr_t)inode);
++    return ret;
+ }
+ #endif
+ 
+@@ -4003,7 +4016,9 @@ fuse_setxattr(xlator_t *this, fuse_in_header_t *finh, void *msg,
+         gf_log("fuse", GF_LOG_TRACE, "got request to invalidate %" PRIu64,
+                finh->nodeid);
+ #if FUSE_KERNEL_MINOR_VERSION >= 11
+-        fuse_invalidate_entry(this, finh->nodeid);
++        ret = fuse_invalidate_entry(this, finh->nodeid);
++        if (ret)
++            op_errno = EBUSY;
+ #endif
+         goto done;
+     }
+@@ -4812,6 +4827,7 @@ notify_kernel_loop(void *data)
+                               fuse_invalidate_node_t, next);
+ 
+             list_del_init(&node->next);
++            priv->invalidate_count--;
+         }
+         pthread_mutex_unlock(&priv->invalidate_mutex);
+ 
+@@ -4855,6 +4871,7 @@ notify_kernel_loop(void *data)
+             list_del_init(&node->next);
+             GF_FREE(node);
+         }
++        priv->invalidate_count = 0;
+     }
+     pthread_mutex_unlock(&priv->invalidate_mutex);
+ 
+@@ -6080,6 +6097,9 @@ fuse_priv_dump(xlator_t *this)
+                        (int)private->timed_response_fuse_thread_started);
+     gf_proc_dump_write("reverse_thread_started", "%d",
+                        (int)private->reverse_fuse_thread_started);
++    gf_proc_dump_write("invalidate_limit", "%u", private->invalidate_limit);
++    gf_proc_dump_write("invalidate_queue_length", "%" PRIu64,
++                       private->invalidate_count);
+     gf_proc_dump_write("use_readdirp", "%d", private->use_readdirp);
+ 
+     return 0;
+@@ -6619,6 +6639,9 @@ init(xlator_t *this_xl)
+ 
+     GF_OPTION_INIT("lru-limit", priv->lru_limit, uint32, cleanup_exit);
+ 
++    GF_OPTION_INIT("invalidate-limit", priv->invalidate_limit, uint32,
++                   cleanup_exit);
++
+     GF_OPTION_INIT("event-history", priv->event_history, bool, cleanup_exit);
+ 
+     GF_OPTION_INIT("thin-client", priv->thin_client, bool, cleanup_exit);
+@@ -6955,6 +6978,15 @@ struct volume_options options[] = {
+                        "reaching this limit (0 means 'unlimited')",
+     },
+     {
++        .key = {"invalidate-limit"},
++        .type = GF_OPTION_TYPE_INT,
++        .default_value = "0",
++        .min = 0,
++        .description = "suspend invalidations as of 'lru-limit' if the number "
++                       "of outstanding invalidations reaches this limit "
++                       "(0 means 'unlimited')",
++    },
++    {
+         .key = {"auto-invalidation"},
+         .type = GF_OPTION_TYPE_BOOL,
+         .default_value = "true",
+diff --git a/xlators/mount/fuse/src/fuse-bridge.h b/xlators/mount/fuse/src/fuse-bridge.h
+index 697bd88..2311582 100644
+--- a/xlators/mount/fuse/src/fuse-bridge.h
++++ b/xlators/mount/fuse/src/fuse-bridge.h
+@@ -139,7 +139,7 @@ struct fuse_private {
+     pthread_cond_t invalidate_cond;
+     pthread_mutex_t invalidate_mutex;
+     gf_boolean_t reverse_fuse_thread_started;
+-
++    uint64_t invalidate_count;
+     /* For communicating with separate mount thread. */
+     int status_pipe[2];
+ 
+@@ -191,6 +191,7 @@ struct fuse_private {
+ 
+     /* LRU Limit, if not set, default is 128k for now */
+     uint32_t lru_limit;
++    uint32_t invalidate_limit;
+ };
+ typedef struct fuse_private fuse_private_t;
+ 
+diff --git a/xlators/mount/fuse/utils/mount.glusterfs.in b/xlators/mount/fuse/utils/mount.glusterfs.in
+index cbde42d..61d7422 100755
+--- a/xlators/mount/fuse/utils/mount.glusterfs.in
++++ b/xlators/mount/fuse/utils/mount.glusterfs.in
+@@ -257,6 +257,10 @@ start_glusterfs ()
+         cmd_line=$(echo "$cmd_line --lru-limit=$lru_limit");
+     fi
+ 
++    if [ -n "$invalidate_limit" ]; then
++        cmd_line=$(echo "$cmd_line --invalidate-limit=$invalidate_limit");
++    fi
++
+     if [ -n "$bg_qlen" ]; then
+         cmd_line=$(echo "$cmd_line --background-qlen=$bg_qlen");
+     fi
+@@ -505,6 +509,9 @@ with_options()
+         "lru-limit")
+             lru_limit=$value
+             ;;
++        "invalidate-limit")
++            invalidate_limit=$value
++            ;;
+         "background-qlen")
+             bg_qlen=$value
+             ;;
+-- 
+1.8.3.1
+

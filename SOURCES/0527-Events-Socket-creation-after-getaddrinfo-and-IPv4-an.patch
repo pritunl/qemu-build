@@ -1,0 +1,200 @@
+From 4152c77defac24ace3b1b6b9cc81a4f614254e4f Mon Sep 17 00:00:00 2001
+From: srijan-sivakumar <ssivakum@redhat.com>
+Date: Sat, 18 Jul 2020 05:59:09 +0530
+Subject: [PATCH 527/532] Events: Socket creation after getaddrinfo and IPv4
+ and IPv6 packet capture
+
+Issue: Currently, the socket creation is done
+prior to getaddrinfo function being invoked. This
+can cause mismatch in the protocol and address
+families of the created socket and the result
+of the getaddrinfo api. Also, the glustereventsd
+UDP server by default only captures IPv4 packets
+hence IPv6 packets are not even captured.
+
+Code Changes:
+1. Modified the socket creation in such a way that
+the parameters taken in are dependent upon the
+result of the getaddrinfo function.
+2. Created a subclass for adding address family
+in glustereventsd.py for both AF_INET and AF_INET6.
+3. Modified addresses in the eventsapiconf.py.in
+
+Reasoning behind the approach:
+1. If we are using getaddrinfo function then
+socket creation should happen only after we
+check if we received back valid addresses.
+Hence socket creation should come after the call
+to getaddrinfo
+2. The listening server which pushes the events
+to the webhook has to listen for both IPv4
+and IPv6 messages as we would not be sure as to
+what address family is picked in _gf_event.
+
+>Fixes: #1377
+>Change-Id: I568dcd1a977c8832f0fef981e1f81cac7043c760
+>Signed-off-by: srijan-sivakumar <ssivakum@redhat.com>
+Upstream patch: https://review.gluster.org/c/glusterfs/+/24722
+
+BUG: 1814744
+Change-Id: I568dcd1a977c8832f0fef981e1f81cac7043c760
+Signed-off-by: srijan-sivakumar <ssivakum@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/225567
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Ravishankar Narayanankutty <ravishankar@redhat.com>
+---
+ events/src/eventsapiconf.py.in |  2 ++
+ events/src/glustereventsd.py   | 37 ++++++++++++++++++++++++++++++-------
+ libglusterfs/src/events.c      | 27 +++++++++++++++++++--------
+ 3 files changed, 51 insertions(+), 15 deletions(-)
+
+diff --git a/events/src/eventsapiconf.py.in b/events/src/eventsapiconf.py.in
+index 76b5954..700093b 100644
+--- a/events/src/eventsapiconf.py.in
++++ b/events/src/eventsapiconf.py.in
+@@ -28,6 +28,8 @@ def get_glusterd_workdir():
+     return glusterd_workdir
+ 
+ SERVER_ADDRESS = "0.0.0.0"
++SERVER_ADDRESSv4 = "0.0.0.0"
++SERVER_ADDRESSv6 = "::1"
+ DEFAULT_CONFIG_FILE = "@SYSCONF_DIR@/glusterfs/eventsconfig.json"
+ CUSTOM_CONFIG_FILE_TO_SYNC = "/events/config.json"
+ CUSTOM_CONFIG_FILE = get_glusterd_workdir() + CUSTOM_CONFIG_FILE_TO_SYNC
+diff --git a/events/src/glustereventsd.py b/events/src/glustereventsd.py
+index c4c7b65..341a3b6 100644
+--- a/events/src/glustereventsd.py
++++ b/events/src/glustereventsd.py
+@@ -13,6 +13,7 @@
+ from __future__ import print_function
+ import sys
+ import signal
++import threading
+ try:
+     import socketserver
+ except ImportError:
+@@ -23,10 +24,17 @@ from argparse import ArgumentParser, RawDescriptionHelpFormatter
+ from eventtypes import all_events
+ import handlers
+ import utils
+-from eventsapiconf import SERVER_ADDRESS, PID_FILE
++from eventsapiconf import SERVER_ADDRESSv4, SERVER_ADDRESSv6, PID_FILE
+ from eventsapiconf import AUTO_BOOL_ATTRIBUTES, AUTO_INT_ATTRIBUTES
+ from utils import logger, PidFile, PidFileLockFailed, boolify
+ 
++# Subclass so that specifically IPv4 packets are captured
++class UDPServerv4(socketserver.ThreadingUDPServer):
++    address_family = socket.AF_INET
++
++# Subclass so that specifically IPv6 packets are captured
++class UDPServerv6(socketserver.ThreadingUDPServer):
++    address_family = socket.AF_INET6
+ 
+ class GlusterEventsRequestHandler(socketserver.BaseRequestHandler):
+ 
+@@ -89,6 +97,10 @@ def signal_handler_sigusr2(sig, frame):
+     utils.restart_webhook_pool()
+ 
+ 
++def UDP_server_thread(sock):
++    sock.serve_forever()
++
++
+ def init_event_server():
+     utils.setup_logger()
+     utils.load_all()
+@@ -99,15 +111,26 @@ def init_event_server():
+         sys.stderr.write("Unable to get Port details from Config\n")
+         sys.exit(1)
+ 
+-    # Start the Eventing Server, UDP Server
++    # Creating the Eventing Server, UDP Server for IPv4 packets
++    try:
++        serverv4 = UDPServerv4((SERVER_ADDRESSv4, port),
++                   GlusterEventsRequestHandler)
++    except socket.error as e:
++        sys.stderr.write("Failed to start Eventsd for IPv4: {0}\n".format(e))
++        sys.exit(1)
++    # Creating the Eventing Server, UDP Server for IPv6 packets
+     try:
+-        server = socketserver.ThreadingUDPServer(
+-            (SERVER_ADDRESS, port),
+-            GlusterEventsRequestHandler)
++        serverv6 = UDPServerv6((SERVER_ADDRESSv6, port),
++                   GlusterEventsRequestHandler)
+     except socket.error as e:
+-        sys.stderr.write("Failed to start Eventsd: {0}\n".format(e))
++        sys.stderr.write("Failed to start Eventsd for IPv6: {0}\n".format(e))
+         sys.exit(1)
+-    server.serve_forever()
++    server_thread1 = threading.Thread(target=UDP_server_thread,
++                     args=(serverv4,))
++    server_thread2 = threading.Thread(target=UDP_server_thread,
++                     args=(serverv6,))
++    server_thread1.start()
++    server_thread2.start()
+ 
+ 
+ def get_args():
+diff --git a/libglusterfs/src/events.c b/libglusterfs/src/events.c
+index 6d1e383..4d720ca 100644
+--- a/libglusterfs/src/events.c
++++ b/libglusterfs/src/events.c
+@@ -40,6 +40,7 @@ _gf_event(eventtypes_t event, const char *fmt, ...)
+     char *host = NULL;
+     struct addrinfo hints;
+     struct addrinfo *result = NULL;
++    struct addrinfo *iter_result_ptr = NULL;
+     xlator_t *this = THIS;
+     char *volfile_server_transport = NULL;
+ 
+@@ -51,13 +52,6 @@ _gf_event(eventtypes_t event, const char *fmt, ...)
+         goto out;
+     }
+ 
+-    /* Initialize UDP socket */
+-    sock = socket(AF_INET, SOCK_DGRAM, 0);
+-    if (sock < 0) {
+-        ret = EVENT_ERROR_SOCKET;
+-        goto out;
+-    }
+-
+     if (ctx) {
+         volfile_server_transport = ctx->cmd_args.volfile_server_transport;
+     }
+@@ -66,7 +60,6 @@ _gf_event(eventtypes_t event, const char *fmt, ...)
+     }
+ 
+     /* host = NULL returns localhost */
+-    host = NULL;
+     if (ctx && ctx->cmd_args.volfile_server &&
+         (strcmp(volfile_server_transport, "unix"))) {
+         /* If it is client code then volfile_server is set
+@@ -84,6 +77,24 @@ _gf_event(eventtypes_t event, const char *fmt, ...)
+         goto out;
+     }
+ 
++    // iterate over the result and break when socket creation is success.
++    for (iter_result_ptr = result; iter_result_ptr != NULL;
++         iter_result_ptr = iter_result_ptr->ai_next) {
++        sock = socket(iter_result_ptr->ai_family, iter_result_ptr->ai_socktype,
++                      iter_result_ptr->ai_protocol);
++        if (sock != -1) {
++            break;
++        }
++    }
++    /*
++     * If none of the addrinfo structures lead to a successful socket
++     * creation, socket creation has failed.
++     */
++    if (sock < 0) {
++        ret = EVENT_ERROR_SOCKET;
++        goto out;
++    }
++
+     va_start(arguments, fmt);
+     ret = gf_vasprintf(&msg, fmt, arguments);
+     va_end(arguments);
+-- 
+1.8.3.1
+

@@ -1,0 +1,74 @@
+From bbcfd7e28b43845bac675dcc486bde09b0953f64 Mon Sep 17 00:00:00 2001
+From: Hari Gowtham <hgowtham@redhat.com>
+Date: Thu, 11 Apr 2019 14:40:11 +0530
+Subject: [PATCH 088/124] tier: fix failures noticed during tier start and tier
+ restart.
+
+Problem 1: when tier is started using the tier start command,
+the out put was skipped during a failure. failures don't have an
+transaction id. this id was checked and if its missing then
+it skips.
+
+fix: had to remove the unnecessary jump for that case.
+
+problem 2: When tier was restarted, the tierd doesn't come online.
+This was because, there were a certain values that were supposed
+to be stored in glusterd (gluster-store.c) which will be used
+during restart to come to the original state.
+These values were stored. as they were missing, tierd didn't come
+online.
+
+fix: store the value and make it available during the start.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I7df898fa4c3b72fe8ded4adbf573307a59a37e5e
+Signed-off-by: Hari Gowtham <hgowtham@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167653
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ cli/src/cli-rpc-ops.c                      |  1 -
+ xlators/mgmt/glusterd/src/glusterd-store.c | 13 +++++++++++++
+ 2 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/cli/src/cli-rpc-ops.c b/cli/src/cli-rpc-ops.c
+index 736cd18..b167e26 100644
+--- a/cli/src/cli-rpc-ops.c
++++ b/cli/src/cli-rpc-ops.c
+@@ -1973,7 +1973,6 @@ gf_cli_defrag_volume_cbk(struct rpc_req *req, struct iovec *iov, int count,
+         if (ret) {
+             gf_log("cli", GF_LOG_WARNING, "failed to get %s from dict",
+                    GF_REBALANCE_TID_KEY);
+-            goto out;
+         }
+         if (rsp.op_ret && strcmp(rsp.op_errstr, "")) {
+             snprintf(msg, sizeof(msg), "%s", rsp.op_errstr);
+diff --git a/xlators/mgmt/glusterd/src/glusterd-store.c b/xlators/mgmt/glusterd/src/glusterd-store.c
+index 351bd9e..4889217 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-store.c
++++ b/xlators/mgmt/glusterd/src/glusterd-store.c
+@@ -3336,6 +3336,19 @@ glusterd_store_update_volinfo(glusterd_volinfo_t *volinfo)
+                 break;
+ 
+             case GF_CLUSTER_TYPE_TIER:
++                if (volinfo->tier_info.cold_type ==
++                                GF_CLUSTER_TYPE_DISPERSE)
++                        volinfo->tier_info.cold_dist_leaf_count
++                                = volinfo->disperse_count;
++                else
++                        volinfo->tier_info.cold_dist_leaf_count
++                                = glusterd_calc_dist_leaf_count (
++                                                volinfo->tier_info.
++                                                cold_replica_count,
++                                                1);
++
++                break;
++
+             case GF_CLUSTER_TYPE_STRIPE:
+             case GF_CLUSTER_TYPE_STRIPE_REPLICATE:
+                 gf_msg(this->name, GF_LOG_CRITICAL, ENOTSUP,
+-- 
+1.8.3.1
+

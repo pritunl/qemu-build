@@ -1,0 +1,47 @@
+From d7c0dc7107a024d28196a4582bacf28ddcfbeb69 Mon Sep 17 00:00:00 2001
+From: "Kaleb S. KEITHLEY" <kkeithle@redhat.com>
+Date: Tue, 14 Apr 2020 07:59:22 -0400
+Subject: [PATCH 363/367] common-ha: cluster status shows "FAILOVER" when
+ actually HEALTHY
+
+pacemaker devs change the format of the ouput of `pcs status`
+
+Expected to find a line in the format:
+
+Online: ....
+
+but now it's
+
+  * Online: ...
+
+And the `grep -E "^Online:" no longer finds the list of nodes that
+are online.
+
+    https://review.gluster.org/#/c/glusterfs/+/24333/
+
+Change-Id: If2aa1e7b53c766c625d7b4cc222a83ea2c0bd72d
+BUG: 1823706
+Signed-off-by: Kaleb S. KEITHLEY <kkeithle@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/197367
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/ganesha/scripts/ganesha-ha.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/extras/ganesha/scripts/ganesha-ha.sh b/extras/ganesha/scripts/ganesha-ha.sh
+index 0b0050a..df333a1 100644
+--- a/extras/ganesha/scripts/ganesha-ha.sh
++++ b/extras/ganesha/scripts/ganesha-ha.sh
+@@ -935,7 +935,7 @@ status()
+     done
+ 
+     # print the nodes that are expected to be online
+-    grep -E "^Online:" ${scratch}
++    grep -E "Online:" ${scratch}
+ 
+     echo
+ 
+-- 
+1.8.3.1
+

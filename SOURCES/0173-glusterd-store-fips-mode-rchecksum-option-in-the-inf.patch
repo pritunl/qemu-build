@@ -1,0 +1,52 @@
+From c001b60047c73e07f42ee858dd8ae19136ecd61b Mon Sep 17 00:00:00 2001
+From: Ravishankar N <ravishankar@redhat.com>
+Date: Thu, 6 Jun 2019 13:19:29 +0530
+Subject: [PATCH 173/178] glusterd: store fips-mode-rchecksum option in the
+ info file
+
+commit 146e4b45d0ce906ae50fd6941a1efafd133897ea enabled
+storage.fips-mode-rchecksum option for all new volumes with op-version
+>=GD_OP_VERSION_7_0 but `gluster vol get $volname
+storage.fips-mode-rchecksum` was displaying it as 'off'. This patch fixes it.
+
+>upstream patch link : https://review.gluster.org/#/c/glusterfs/+/22830/
+
+>fixes: bz#1717782
+>Change-Id: Ie09f89838893c5776a3f60569dfe8d409d1494dd
+>Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+
+BUG: 1715407
+Change-Id: Ie09f89838893c5776a3f60569dfe8d409d1494dd
+Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172799
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-utils.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index 2bc4836..7768b8e 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -13124,6 +13124,17 @@ glusterd_enable_default_options(glusterd_volinfo_t *volinfo, char *option)
+             }
+         }
+     }
++    if (conf->op_version >= GD_OP_VERSION_7_0) {
++        ret = dict_set_dynstr_with_alloc(volinfo->dict,
++                                         "storage.fips-mode-rchecksum", "on");
++        if (ret) {
++            gf_msg(this->name, GF_LOG_ERROR, errno, GD_MSG_DICT_SET_FAILED,
++                   "Failed to set option 'storage.fips-mode-rchecksum' "
++                   "on volume %s",
++                   volinfo->volname);
++            goto out;
++        }
++    }
+ out:
+     return ret;
+ }
+-- 
+1.8.3.1
+

@@ -1,0 +1,29 @@
+From bfa7055c3901b34a49f7933ea9edcf6465843de1 Mon Sep 17 00:00:00 2001
+From: Milind Changire <mchangir@redhat.com>
+Date: Wed, 23 Jan 2019 14:22:00 +0530
+Subject: [PATCH 32/52] glusterd: update gd-op-version to 3_7_0
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Ia6456134cd7e544a415692d09cd1ccbb6e02dd82
+Signed-off-by: Milind Changire <mchangir@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-rebalance.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-rebalance.c b/xlators/mgmt/glusterd/src/glusterd-rebalance.c
+index 6365b6e..e20e3c4 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-rebalance.c
++++ b/xlators/mgmt/glusterd/src/glusterd-rebalance.c
+@@ -1174,7 +1174,7 @@ glusterd_op_stage_rebalance(dict_t *dict, char **op_errstr)
+              * 'force'
+              */
+             ret = glusterd_check_client_op_version_support(
+-                volname, GD_OP_VERSION_3_6_0, NULL);
++                volname, GD_OP_VERSION_3_7_0, NULL);
+             if (ret) {
+                 ret = gf_asprintf(op_errstr,
+                                   "Volume %s has one or "
+-- 
+1.8.3.1
+

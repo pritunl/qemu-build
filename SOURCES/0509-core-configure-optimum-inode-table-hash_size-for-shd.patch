@@ -1,0 +1,407 @@
+From a18f03cbf2b5652f8617cb4dd236bb4ca9838d96 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawa@redhat.com>
+Date: Tue, 6 Oct 2020 16:54:15 +0530
+Subject: [PATCH 509/511] core: configure optimum inode table hash_size for shd
+
+In brick_mux environment a shd process consume high memory.
+After print the statedump i have found it allocates 1M per afr xlator
+for all bricks.In case of configure 4k volumes it consumes almost total
+6G RSS size in which 4G consumes by inode_tables
+
+[cluster/replicate.test1-replicate-0 - usage-type gf_common_mt_list_head memusage]
+size=1273488
+num_allocs=2
+max_size=1273488
+max_num_allocs=2
+total_allocs=2
+
+inode_new_table function allocates memory(1M) for a list of inode and dentry hash.
+For shd lru_limit size is 1 so we don't need to create a big hash table so to reduce
+RSS size for shd process pass optimum bucket count at the time of creating inode_table.
+
+> Change-Id: I039716d42321a232fdee1ee8fd50295e638715bb
+> Fixes: #1538
+> Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+> (Cherry pick from commit ca6bbc486e76fdb9a8e07119bb10d7fa45b2e93b)
+> (Reviewed on upstream link https://github.com/gluster/glusterfs/issues/1538)
+
+Change-Id: I039716d42321a232fdee1ee8fd50295e638715bb
+BUG: 1898777
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/221191
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ api/src/glfs-master.c                          |  2 +-
+ libglusterfs/src/glusterfs/inode.h             | 17 +++++----
+ libglusterfs/src/inode.c                       | 53 +++++++++++++++++---------
+ xlators/cluster/afr/src/afr.c                  | 10 ++++-
+ xlators/cluster/dht/src/dht-rebalance.c        |  3 +-
+ xlators/cluster/ec/src/ec.c                    |  2 +-
+ xlators/features/bit-rot/src/bitd/bit-rot.c    |  2 +-
+ xlators/features/quota/src/quotad-helpers.c    |  2 +-
+ xlators/features/trash/src/trash.c             |  4 +-
+ xlators/mount/fuse/src/fuse-bridge.c           |  6 +--
+ xlators/nfs/server/src/nfs.c                   |  2 +-
+ xlators/protocol/server/src/server-handshake.c |  3 +-
+ 12 files changed, 66 insertions(+), 40 deletions(-)
+
+diff --git a/api/src/glfs-master.c b/api/src/glfs-master.c
+index b4473b1..9e604d3 100644
+--- a/api/src/glfs-master.c
++++ b/api/src/glfs-master.c
+@@ -45,7 +45,7 @@ graph_setup(struct glfs *fs, glusterfs_graph_t *graph)
+         }
+ 
+         if (!new_subvol->itable) {
+-            itable = inode_table_new(131072, new_subvol);
++            itable = inode_table_new(131072, new_subvol, 0, 0);
+             if (!itable) {
+                 errno = ENOMEM;
+                 ret = -1;
+diff --git a/libglusterfs/src/glusterfs/inode.h b/libglusterfs/src/glusterfs/inode.h
+index c875653..62c093d 100644
+--- a/libglusterfs/src/glusterfs/inode.h
++++ b/libglusterfs/src/glusterfs/inode.h
+@@ -35,11 +35,12 @@ typedef struct _dentry dentry_t;
+ 
+ struct _inode_table {
+     pthread_mutex_t lock;
+-    size_t hashsize;    /* bucket size of inode hash and dentry hash */
+-    char *name;         /* name of the inode table, just for gf_log() */
+-    inode_t *root;      /* root directory inode, with number 1 */
+-    xlator_t *xl;       /* xlator to be called to do purge */
+-    uint32_t lru_limit; /* maximum LRU cache size */
++    size_t dentry_hashsize; /* Number of buckets for dentry hash*/
++    size_t inode_hashsize;  /* Size of inode hash table */
++    char *name;             /* name of the inode table, just for gf_log() */
++    inode_t *root;          /* root directory inode, with number 1 */
++    xlator_t *xl;           /* xlator to be called to do purge */
++    uint32_t lru_limit;     /* maximum LRU cache size */
+     struct list_head *inode_hash; /* buckets for inode hash table */
+     struct list_head *name_hash;  /* buckets for dentry hash table */
+     struct list_head active; /* list of inodes currently active (in an fop) */
+@@ -116,12 +117,14 @@ struct _inode {
+ #define GFID_STR_PFX_LEN (sizeof(GFID_STR_PFX) - 1)
+ 
+ inode_table_t *
+-inode_table_new(uint32_t lru_limit, xlator_t *xl);
++inode_table_new(uint32_t lru_limit, xlator_t *xl, uint32_t dhash_size,
++                uint32_t inodehash_size);
+ 
+ inode_table_t *
+ inode_table_with_invalidator(uint32_t lru_limit, xlator_t *xl,
+                              int32_t (*invalidator_fn)(xlator_t *, inode_t *),
+-                             xlator_t *invalidator_xl);
++                             xlator_t *invalidator_xl, uint32_t dentry_hashsize,
++                             uint32_t inode_hashsize);
+ 
+ void
+ inode_table_destroy_all(glusterfs_ctx_t *ctx);
+diff --git a/libglusterfs/src/inode.c b/libglusterfs/src/inode.c
+index 71b2d2a..98f8ea6 100644
+--- a/libglusterfs/src/inode.c
++++ b/libglusterfs/src/inode.c
+@@ -763,7 +763,7 @@ inode_grep(inode_table_t *table, inode_t *parent, const char *name)
+         return NULL;
+     }
+ 
+-    int hash = hash_dentry(parent, name, table->hashsize);
++    int hash = hash_dentry(parent, name, table->dentry_hashsize);
+ 
+     pthread_mutex_lock(&table->lock);
+     {
+@@ -839,7 +839,7 @@ inode_grep_for_gfid(inode_table_t *table, inode_t *parent, const char *name,
+         return ret;
+     }
+ 
+-    int hash = hash_dentry(parent, name, table->hashsize);
++    int hash = hash_dentry(parent, name, table->dentry_hashsize);
+ 
+     pthread_mutex_lock(&table->lock);
+     {
+@@ -903,7 +903,7 @@ inode_find(inode_table_t *table, uuid_t gfid)
+         return NULL;
+     }
+ 
+-    int hash = hash_gfid(gfid, 65536);
++    int hash = hash_gfid(gfid, table->inode_hashsize);
+ 
+     pthread_mutex_lock(&table->lock);
+     {
+@@ -964,7 +964,7 @@ __inode_link(inode_t *inode, inode_t *parent, const char *name,
+             return NULL;
+         }
+ 
+-        int ihash = hash_gfid(iatt->ia_gfid, 65536);
++        int ihash = hash_gfid(iatt->ia_gfid, table->inode_hashsize);
+ 
+         old_inode = __inode_find(table, iatt->ia_gfid, ihash);
+ 
+@@ -1043,7 +1043,7 @@ inode_link(inode_t *inode, inode_t *parent, const char *name, struct iatt *iatt)
+     table = inode->table;
+ 
+     if (parent && name) {
+-        hash = hash_dentry(parent, name, table->hashsize);
++        hash = hash_dentry(parent, name, table->dentry_hashsize);
+     }
+ 
+     if (name && strchr(name, '/')) {
+@@ -1262,7 +1262,7 @@ inode_rename(inode_table_t *table, inode_t *srcdir, const char *srcname,
+     }
+ 
+     if (dstdir && dstname) {
+-        hash = hash_dentry(dstdir, dstname, table->hashsize);
++        hash = hash_dentry(dstdir, dstname, table->dentry_hashsize);
+     }
+ 
+     pthread_mutex_lock(&table->lock);
+@@ -1626,7 +1626,8 @@ __inode_table_init_root(inode_table_t *table)
+ inode_table_t *
+ inode_table_with_invalidator(uint32_t lru_limit, xlator_t *xl,
+                              int32_t (*invalidator_fn)(xlator_t *, inode_t *),
+-                             xlator_t *invalidator_xl)
++                             xlator_t *invalidator_xl, uint32_t dentry_hashsize,
++                             uint32_t inode_hashsize)
+ {
+     inode_table_t *new = NULL;
+     uint32_t mem_pool_size = lru_limit;
+@@ -1644,7 +1645,19 @@ inode_table_with_invalidator(uint32_t lru_limit, xlator_t *xl,
+     new->invalidator_fn = invalidator_fn;
+     new->invalidator_xl = invalidator_xl;
+ 
+-    new->hashsize = 14057; /* TODO: Random Number?? */
++    if (dentry_hashsize == 0) {
++        /* Prime number for uniform distribution */
++        new->dentry_hashsize = 14057;
++    } else {
++        new->dentry_hashsize = dentry_hashsize;
++    }
++
++    if (inode_hashsize == 0) {
++        /* The size of hash table always should be power of 2 */
++        new->inode_hashsize = 65536;
++    } else {
++        new->inode_hashsize = inode_hashsize;
++    }
+ 
+     /* In case FUSE is initing the inode table. */
+     if (!mem_pool_size || (mem_pool_size > DEFAULT_INODE_MEMPOOL_ENTRIES))
+@@ -1658,13 +1671,13 @@ inode_table_with_invalidator(uint32_t lru_limit, xlator_t *xl,
+     if (!new->dentry_pool)
+         goto out;
+ 
+-    new->inode_hash = (void *)GF_CALLOC(65536, sizeof(struct list_head),
+-                                        gf_common_mt_list_head);
++    new->inode_hash = (void *)GF_CALLOC(
++        new->inode_hashsize, sizeof(struct list_head), gf_common_mt_list_head);
+     if (!new->inode_hash)
+         goto out;
+ 
+-    new->name_hash = (void *)GF_CALLOC(new->hashsize, sizeof(struct list_head),
+-                                       gf_common_mt_list_head);
++    new->name_hash = (void *)GF_CALLOC(
++        new->dentry_hashsize, sizeof(struct list_head), gf_common_mt_list_head);
+     if (!new->name_hash)
+         goto out;
+ 
+@@ -1675,11 +1688,11 @@ inode_table_with_invalidator(uint32_t lru_limit, xlator_t *xl,
+     if (!new->fd_mem_pool)
+         goto out;
+ 
+-    for (i = 0; i < 65536; i++) {
++    for (i = 0; i < new->inode_hashsize; i++) {
+         INIT_LIST_HEAD(&new->inode_hash[i]);
+     }
+ 
+-    for (i = 0; i < new->hashsize; i++) {
++    for (i = 0; i < new->dentry_hashsize; i++) {
+         INIT_LIST_HEAD(&new->name_hash[i]);
+     }
+ 
+@@ -1717,10 +1730,12 @@ out:
+ }
+ 
+ inode_table_t *
+-inode_table_new(uint32_t lru_limit, xlator_t *xl)
++inode_table_new(uint32_t lru_limit, xlator_t *xl, uint32_t dentry_hashsize,
++                uint32_t inode_hashsize)
+ {
+     /* Only fuse for now requires the inode table with invalidator */
+-    return inode_table_with_invalidator(lru_limit, xl, NULL, NULL);
++    return inode_table_with_invalidator(lru_limit, xl, NULL, NULL,
++                                        dentry_hashsize, inode_hashsize);
+ }
+ 
+ int
+@@ -2439,8 +2454,10 @@ inode_table_dump(inode_table_t *itable, char *prefix)
+         return;
+     }
+ 
+-    gf_proc_dump_build_key(key, prefix, "hashsize");
+-    gf_proc_dump_write(key, "%" GF_PRI_SIZET, itable->hashsize);
++    gf_proc_dump_build_key(key, prefix, "dentry_hashsize");
++    gf_proc_dump_write(key, "%" GF_PRI_SIZET, itable->dentry_hashsize);
++    gf_proc_dump_build_key(key, prefix, "inode_hashsize");
++    gf_proc_dump_write(key, "%" GF_PRI_SIZET, itable->inode_hashsize);
+     gf_proc_dump_build_key(key, prefix, "name");
+     gf_proc_dump_write(key, "%s", itable->name);
+ 
+diff --git a/xlators/cluster/afr/src/afr.c b/xlators/cluster/afr/src/afr.c
+index 8f9e71f..bfa464f 100644
+--- a/xlators/cluster/afr/src/afr.c
++++ b/xlators/cluster/afr/src/afr.c
+@@ -594,7 +594,15 @@ init(xlator_t *this)
+         goto out;
+     }
+ 
+-    this->itable = inode_table_new(SHD_INODE_LRU_LIMIT, this);
++    if (priv->shd.iamshd) {
++        /* Number of hash bucket should be prime number so declare 131
++           total dentry hash buckets
++        */
++        this->itable = inode_table_new(SHD_INODE_LRU_LIMIT, this, 131, 128);
++    } else {
++        this->itable = inode_table_new(SHD_INODE_LRU_LIMIT, this, 0, 0);
++    }
++
+     if (!this->itable) {
+         ret = -ENOMEM;
+         goto out;
+diff --git a/xlators/cluster/dht/src/dht-rebalance.c b/xlators/cluster/dht/src/dht-rebalance.c
+index 16ac16c..072896d 100644
+--- a/xlators/cluster/dht/src/dht-rebalance.c
++++ b/xlators/cluster/dht/src/dht-rebalance.c
+@@ -1168,7 +1168,6 @@ __dht_rebalance_migrate_data(xlator_t *this, gf_defrag_info_t *defrag,
+             break;
+         }
+ 
+-
+         offset += ret;
+         total += ret;
+ 
+@@ -2467,7 +2466,7 @@ dht_build_root_inode(xlator_t *this, inode_t **inode)
+         0,
+     };
+ 
+-    itable = inode_table_new(0, this);
++    itable = inode_table_new(0, this, 0, 0);
+     if (!itable)
+         return;
+ 
+diff --git a/xlators/cluster/ec/src/ec.c b/xlators/cluster/ec/src/ec.c
+index 3f31c74..4118c3b 100644
+--- a/xlators/cluster/ec/src/ec.c
++++ b/xlators/cluster/ec/src/ec.c
+@@ -734,7 +734,7 @@ init(xlator_t *this)
+     GF_OPTION_INIT("stripe-cache", ec->stripe_cache, uint32, failed);
+     GF_OPTION_INIT("quorum-count", ec->quorum_count, uint32, failed);
+ 
+-    this->itable = inode_table_new(EC_SHD_INODE_LRU_LIMIT, this);
++    this->itable = inode_table_new(EC_SHD_INODE_LRU_LIMIT, this, 0, 0);
+     if (!this->itable)
+         goto failed;
+ 
+diff --git a/xlators/features/bit-rot/src/bitd/bit-rot.c b/xlators/features/bit-rot/src/bitd/bit-rot.c
+index 424c0d5..4e0e798 100644
+--- a/xlators/features/bit-rot/src/bitd/bit-rot.c
++++ b/xlators/features/bit-rot/src/bitd/bit-rot.c
+@@ -1658,7 +1658,7 @@ notify(xlator_t *this, int32_t event, void *data, ...)
+                 child->child_up = 1;
+                 child->xl = subvol;
+                 if (!child->table)
+-                    child->table = inode_table_new(4096, subvol);
++                    child->table = inode_table_new(4096, subvol, 0, 0);
+ 
+                 _br_qchild_event(this, child, br_brick_connect);
+                 pthread_cond_signal(&priv->cond);
+diff --git a/xlators/features/quota/src/quotad-helpers.c b/xlators/features/quota/src/quotad-helpers.c
+index d9f0351..46ac116 100644
+--- a/xlators/features/quota/src/quotad-helpers.c
++++ b/xlators/features/quota/src/quotad-helpers.c
+@@ -32,7 +32,7 @@ get_quotad_aggregator_state(xlator_t *this, rpcsvc_request_t *req)
+     UNLOCK(&priv->lock);
+ 
+     if (active_subvol->itable == NULL)
+-        active_subvol->itable = inode_table_new(4096, active_subvol);
++        active_subvol->itable = inode_table_new(4096, active_subvol, 0, 0);
+ 
+     state->itable = active_subvol->itable;
+ 
+diff --git a/xlators/features/trash/src/trash.c b/xlators/features/trash/src/trash.c
+index 93f020f..099c887 100644
+--- a/xlators/features/trash/src/trash.c
++++ b/xlators/features/trash/src/trash.c
+@@ -2261,7 +2261,7 @@ reconfigure(xlator_t *this, dict_t *options)
+ 
+     if (!active_earlier && active_now) {
+         if (!priv->trash_itable) {
+-            priv->trash_itable = inode_table_new(0, this);
++            priv->trash_itable = inode_table_new(0, this, 0, 0);
+             if (!priv->trash_itable) {
+                 ret = -ENOMEM;
+                 gf_log(this->name, GF_LOG_ERROR,
+@@ -2533,7 +2533,7 @@ init(xlator_t *this)
+     }
+ 
+     if (priv->state) {
+-        priv->trash_itable = inode_table_new(0, this);
++        priv->trash_itable = inode_table_new(0, this, 0, 0);
+         if (!priv->trash_itable) {
+             ret = -ENOMEM;
+             priv->state = _gf_false;
+diff --git a/xlators/mount/fuse/src/fuse-bridge.c b/xlators/mount/fuse/src/fuse-bridge.c
+index 1bddac2..919eea3 100644
+--- a/xlators/mount/fuse/src/fuse-bridge.c
++++ b/xlators/mount/fuse/src/fuse-bridge.c
+@@ -6298,10 +6298,10 @@ fuse_graph_setup(xlator_t *this, glusterfs_graph_t *graph)
+         }
+ 
+ #if FUSE_KERNEL_MINOR_VERSION >= 11
+-        itable = inode_table_with_invalidator(priv->lru_limit, graph->top,
+-                                              fuse_inode_invalidate_fn, this);
++        itable = inode_table_with_invalidator(
++            priv->lru_limit, graph->top, fuse_inode_invalidate_fn, this, 0, 0);
+ #else
+-        itable = inode_table_new(0, graph->top);
++        itable = inode_table_new(0, graph->top, 0, 0);
+ #endif
+         if (!itable) {
+             ret = -1;
+diff --git a/xlators/nfs/server/src/nfs.c b/xlators/nfs/server/src/nfs.c
+index ebded41..402be30 100644
+--- a/xlators/nfs/server/src/nfs.c
++++ b/xlators/nfs/server/src/nfs.c
+@@ -564,7 +564,7 @@ nfs_init_subvolume(struct nfs_state *nfs, xlator_t *xl)
+         return -1;
+ 
+     lrusize = nfs->memfactor * GF_NFS_INODE_LRU_MULT;
+-    xl->itable = inode_table_new(lrusize, xl);
++    xl->itable = inode_table_new(lrusize, xl, 0, 0);
+     if (!xl->itable) {
+         gf_msg(GF_NFS, GF_LOG_CRITICAL, ENOMEM, NFS_MSG_NO_MEMORY,
+                "Failed to allocate inode table");
+diff --git a/xlators/protocol/server/src/server-handshake.c b/xlators/protocol/server/src/server-handshake.c
+index 1d1177d..eeca73c 100644
+--- a/xlators/protocol/server/src/server-handshake.c
++++ b/xlators/protocol/server/src/server-handshake.c
+@@ -36,7 +36,6 @@ gf_compare_client_version(rpcsvc_request_t *req, int fop_prognum,
+     return ret;
+ }
+ 
+-
+ int
+ server_getspec(rpcsvc_request_t *req)
+ {
+@@ -629,7 +628,7 @@ server_setvolume(rpcsvc_request_t *req)
+ 
+             /* TODO: what is this ? */
+             client->bound_xl->itable = inode_table_new(conf->inode_lru_limit,
+-                                                       client->bound_xl);
++                                                       client->bound_xl, 0, 0);
+         }
+     }
+     UNLOCK(&conf->itable_lock);
+-- 
+1.8.3.1
+

@@ -1,0 +1,38 @@
+From 7221352670a750e35268573dba36c139a5041b14 Mon Sep 17 00:00:00 2001
+From: Krutika Dhananjay <kdhananj@redhat.com>
+Date: Fri, 3 May 2019 10:50:40 +0530
+Subject: [PATCH 188/192] features/shard: Fix integer overflow in block count
+ accounting
+
+... by holding delta_blocks in 64-bit int as opposed to 32-bit int.
+
+> Upstream: https://review.gluster.org/22655
+> BUG: 1705884
+> Change-Id: I2c1ddab17457f45e27428575ad16fa678fd6c0eb
+
+Change-Id: I2c1ddab17457f45e27428575ad16fa678fd6c0eb
+updates: bz#1668001
+Signed-off-by: Krutika Dhananjay <kdhananj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/173476
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/features/shard/src/shard.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/features/shard/src/shard.h b/xlators/features/shard/src/shard.h
+index 570fe46..cd6a663 100644
+--- a/xlators/features/shard/src/shard.h
++++ b/xlators/features/shard/src/shard.h
+@@ -275,7 +275,7 @@ typedef struct shard_local {
+     size_t req_size;
+     size_t readdir_size;
+     int64_t delta_size;
+-    int delta_blocks;
++    int64_t delta_blocks;
+     loc_t loc;
+     loc_t dot_shard_loc;
+     loc_t dot_shard_rm_loc;
+-- 
+1.8.3.1
+

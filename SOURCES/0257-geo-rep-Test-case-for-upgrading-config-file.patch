@@ -1,0 +1,80 @@
+From ed6cd2b7674896c810fdd059e35a0d319aacb068 Mon Sep 17 00:00:00 2001
+From: Shwetha K Acharya <sacharya@redhat.com>
+Date: Tue, 2 Jul 2019 15:00:25 +0530
+Subject: [PATCH 257/261] geo-rep: Test case for upgrading config file
+
+Added test case for the patch
+https://review.gluster.org/#/c/glusterfs/+/22894/4
+
+Also updated if else structure in gsyncdconfig.py to avoid
+repeated occurance of values in new configfile.
+
+>fixes: bz#1707731
+>Change-Id: If97e1d37ac52dbd17d47be6cb659fc5a3ccab6d7
+>Signed-off-by: Shwetha K Acharya <sacharya@redhat.com>
+
+backport of https://review.gluster.org/#/c/glusterfs/+/22982/
+
+Bug: 1708064
+Change-Id: If97e1d37ac52dbd17d47be6cb659fc5a3ccab6d7
+Signed-off-by: Shwetha K Acharya <sacharya@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/176603
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ geo-replication/syncdaemon/gsyncdconfig.py | 11 +++++------
+ tests/00-geo-rep/georep-basic-dr-rsync.t   | 13 +++++++++++++
+ 2 files changed, 18 insertions(+), 6 deletions(-)
+
+diff --git a/geo-replication/syncdaemon/gsyncdconfig.py b/geo-replication/syncdaemon/gsyncdconfig.py
+index 7edc582..1fc451f 100644
+--- a/geo-replication/syncdaemon/gsyncdconfig.py
++++ b/geo-replication/syncdaemon/gsyncdconfig.py
+@@ -353,15 +353,14 @@ def config_upgrade(config_file, ret):
+                 new_value = "tarssh"
+             else:
+                 new_value = "rsync"
+-                config.set('vars', new_key, new_value)
+-
+-        if key == "timeout":
++            config.set('vars', new_key, new_value)
++        elif key == "timeout":
+             new_key = "slave-timeout"
+             config.set('vars', new_key, value)
+-
+         #for changes like: ignore_deletes to ignore-deletes
+-        new_key = key.replace("_", "-")
+-        config.set('vars', new_key, value)
++        else:
++            new_key = key.replace("_", "-")
++            config.set('vars', new_key, value)
+ 
+     with open(config_file, 'w') as configfile:
+         config.write(configfile)
+diff --git a/tests/00-geo-rep/georep-basic-dr-rsync.t b/tests/00-geo-rep/georep-basic-dr-rsync.t
+index 428e9ed..b432635 100644
+--- a/tests/00-geo-rep/georep-basic-dr-rsync.t
++++ b/tests/00-geo-rep/georep-basic-dr-rsync.t
+@@ -212,6 +212,19 @@ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 verify_rename_with_existing_destination ${slave
+ #Verify arequal for whole volume
+ EXPECT_WITHIN $GEO_REP_TIMEOUT "x0" arequal_checksum ${master_mnt} ${slave_mnt}
+ 
++#Test config upgrade BUG: 1707731
++config_file=$GLUSTERD_WORKDIR/geo-replication/${GMV0}_${SH0}_${GSV0}/gsyncd.conf
++cat >> $config_file<<EOL
++[peers ${GMV0} ${GSV0}]
++use_tarssh = true
++timeout = 1
++EOL
++TEST $GEOREP_CLI $master $slave stop
++TEST $GEOREP_CLI $master $slave start
++#verify that the config file is updated
++EXPECT "1" echo $(grep -Fc "vars" $config_file)
++EXPECT "1" echo $(grep -Fc "sync-method = tarssh" $config_file)
++EXPECT "1" echo $(grep -Fc "slave-timeout = 1" $config_file)
+ #Stop Geo-rep
+ TEST $GEOREP_CLI $master $slave stop
+ 
+-- 
+1.8.3.1
+

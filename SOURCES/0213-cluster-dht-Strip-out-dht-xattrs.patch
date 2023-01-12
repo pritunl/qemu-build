@@ -1,0 +1,42 @@
+From ff5f06d6ba5ac87094ae5df435d1cfb38802e7ca Mon Sep 17 00:00:00 2001
+From: N Balachandran <nbalacha@redhat.com>
+Date: Tue, 18 Jun 2019 15:33:29 +0530
+Subject: [PATCH 213/221] cluster/dht: Strip out dht xattrs
+
+Some internal DHT xattrs were not being
+removed when calling getxattr in pass-through mode.
+This has been fixed.
+
+upstream patch: https://review.gluster.org/#/c/glusterfs/+/22889/
+
+>Change-Id: If7e3dbc7b495db88a566bd560888e3e9c167defa
+>fixes: bz#1721435
+>Signed-off-by: N Balachandran <nbalacha@redhat.com>
+
+
+BUG: 1721357
+Change-Id: I29bce7ea78bb4fd3b493404282cb2c48ef0bf4ee
+Signed-off-by: N Balachandran <nbalacha@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/174699
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/dht/src/dht-common.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/xlators/cluster/dht/src/dht-common.c b/xlators/cluster/dht/src/dht-common.c
+index e1edb38..9a6ea5b 100644
+--- a/xlators/cluster/dht/src/dht-common.c
++++ b/xlators/cluster/dht/src/dht-common.c
+@@ -11216,6 +11216,8 @@ dht_pt_getxattr_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+ 
+     conf = this->private;
+     dict_del(xattr, conf->xattr_name);
++    dict_del(xattr, conf->mds_xattr_key);
++    dict_del(xattr, conf->commithash_xattr_name);
+ 
+     if (frame->root->pid >= 0) {
+         GF_REMOVE_INTERNAL_XATTR("trusted.glusterfs.quota*", xattr);
+-- 
+1.8.3.1
+

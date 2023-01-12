@@ -1,0 +1,721 @@
+From 0d54bb417e982a100ceefb5eab2a61a17e840f39 Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Thu, 5 Sep 2019 16:12:39 +0530
+Subject: [PATCH 289/297] cluster/ec: quorum-count implementation
+
+Upstream-patch: https://review.gluster.org/c/glusterfs/+/23366
+upstream-issue: #721
+fixes: bz#1748688
+Change-Id: I5333540e3c635ccf441cf1f4696e4c8986e38ea8
+Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/180674
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Ashish Pandey <aspandey@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/glusterfs/globals.h             |   4 +-
+ tests/basic/ec/ec-quorum-count-partial-failure.t |  50 +++++++
+ tests/basic/ec/ec-quorum-count.t                 | 165 +++++++++++++++++++++++
+ tests/ec.rc                                      |   9 ++
+ xlators/cluster/ec/src/ec-common.c               |  13 ++
+ xlators/cluster/ec/src/ec-common.h               |  24 ++++
+ xlators/cluster/ec/src/ec-dir-write.c            |  57 ++++----
+ xlators/cluster/ec/src/ec-inode-write.c          |  61 ++++-----
+ xlators/cluster/ec/src/ec-types.h                |   1 +
+ xlators/cluster/ec/src/ec.c                      |  13 ++
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c  |  46 +++++++
+ 11 files changed, 383 insertions(+), 60 deletions(-)
+ create mode 100755 tests/basic/ec/ec-quorum-count-partial-failure.t
+ create mode 100644 tests/basic/ec/ec-quorum-count.t
+
+diff --git a/libglusterfs/src/glusterfs/globals.h b/libglusterfs/src/glusterfs/globals.h
+index 55476f6..bdc8b3d 100644
+--- a/libglusterfs/src/glusterfs/globals.h
++++ b/libglusterfs/src/glusterfs/globals.h
+@@ -50,7 +50,7 @@
+     1 /* MIN is the fresh start op-version, mostly                             \
+          should not change */
+ #define GD_OP_VERSION_MAX                                                      \
+-    GD_OP_VERSION_7_0 /* MAX VERSION is the maximum                            \
++    GD_OP_VERSION_8_0 /* MAX VERSION is the maximum                            \
+                          count in VME table, should                            \
+                          keep changing with                                    \
+                          introduction of newer                                 \
+@@ -136,6 +136,8 @@
+ 
+ #define GD_OP_VERSION_7_0 70000 /* Op-version for GlusterFS 7.0 */
+ 
++#define GD_OP_VERSION_8_0 80000 /* Op-version for GlusterFS 8.0 */
++
+ #include "glusterfs/xlator.h"
+ #include "glusterfs/options.h"
+ 
+diff --git a/tests/basic/ec/ec-quorum-count-partial-failure.t b/tests/basic/ec/ec-quorum-count-partial-failure.t
+new file mode 100755
+index 0000000..79f5825
+--- /dev/null
++++ b/tests/basic/ec/ec-quorum-count-partial-failure.t
+@@ -0,0 +1,50 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++
++#This test checks that partial failure of fop results in main fop failure only
++cleanup;
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 disperse 6 redundancy 2 $H0:$B0/${V0}{0..5}
++TEST $CLI volume create $V1 $H0:$B0/${V1}{0..5}
++TEST $CLI volume set $V0 performance.flush-behind off
++TEST $CLI volume start $V0
++TEST glusterfs --entry-timeout=0 --attribute-timeout=0 -s $H0 --volfile-id=/$V0 $M0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "6" ec_child_up_count $V0 0
++
++TEST dd if=/dev/urandom of=$M0/a bs=12347 count=1
++TEST dd if=/dev/urandom of=$M0/b bs=12347 count=1
++TEST cp $M0/b $M0/c
++TEST fallocate -p -l 101 $M0/c
++TEST $CLI volume stop $V0
++TEST $CLI volume set $V0 debug.delay-gen posix;
++TEST $CLI volume set $V0 delay-gen.delay-duration 10000000;
++TEST $CLI volume set $V0 delay-gen.enable WRITE;
++TEST $CLI volume set $V0 delay-gen.delay-percentage 100
++TEST $CLI volume set $V0 disperse.quorum-count 6
++TEST $CLI volume start $V0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "6" ec_child_up_count $V0 0
++cksum=$(dd if=$M0/a bs=12345 count=1 | md5sum | awk '{print $1}')
++truncate -s 12345 $M0/a & #While write is waiting for 5 seconds, introduce failure
++fallocate -p -l 101 $M0/b &
++sleep 1
++TEST kill_brick $V0 $H0 $B0/${V0}0
++TEST wait
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" get_pending_heal_count ${V0}
++EXPECT "12345" stat --format=%s $M0/a
++TEST kill_brick $V0 $H0 $B0/${V0}1
++TEST kill_brick $V0 $H0 $B0/${V0}2
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0;
++TEST glusterfs --entry-timeout=0 --attribute-timeout=0 -s $H0 --volfile-id $V0 $M0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "4" ec_child_up_count $V0 0
++cksum_after_heal=$(dd if=$M0/a | md5sum | awk '{print $1}')
++TEST [[ $cksum == $cksum_after_heal ]]
++cksum=$(dd if=$M0/c | md5sum | awk '{print $1}')
++cksum_after_heal=$(dd if=$M0/b | md5sum | awk '{print $1}')
++TEST [[ $cksum == $cksum_after_heal ]]
++
++cleanup;
+diff --git a/tests/basic/ec/ec-quorum-count.t b/tests/basic/ec/ec-quorum-count.t
+new file mode 100644
+index 0000000..56b5329
+--- /dev/null
++++ b/tests/basic/ec/ec-quorum-count.t
+@@ -0,0 +1,165 @@
++ #!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../ec.rc
++
++cleanup
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 disperse 6 redundancy 2 $H0:$B0/${V0}{0..5}
++TEST $CLI volume create $V1 $H0:$B0/${V1}{0..5}
++TEST $CLI volume set $V0 disperse.eager-lock-timeout 5
++TEST $CLI volume set $V0 performance.flush-behind off
++
++#Should fail on non-disperse volume
++TEST ! $CLI volume set $V1 disperse.quorum-count 5
++
++#Should succeed on a valid range
++TEST ! $CLI volume set $V0 disperse.quorum-count 0
++TEST ! $CLI volume set $V0 disperse.quorum-count -0
++TEST ! $CLI volume set $V0 disperse.quorum-count abc
++TEST ! $CLI volume set $V0 disperse.quorum-count 10abc
++TEST ! $CLI volume set $V0 disperse.quorum-count 1
++TEST ! $CLI volume set $V0 disperse.quorum-count 2
++TEST ! $CLI volume set $V0 disperse.quorum-count 3
++TEST $CLI volume set $V0 disperse.quorum-count 4
++TEST $CLI volume start $V0
++TEST glusterfs --entry-timeout=0 --attribute-timeout=0 -s $H0 --volfile-id $V0 $M0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "6" ec_child_up_count $V0 0
++
++#Test that the option is reflected in the mount
++EXPECT_WITHIN $CONFIG_UPDATE_TIMEOUT "^4$" ec_option_value $V0 $M0 0 quorum-count
++TEST $CLI volume reset $V0 disperse.quorum-count
++EXPECT_WITHIN $CONFIG_UPDATE_TIMEOUT "^0$" ec_option_value $V0 $M0 0 quorum-count
++TEST $CLI volume set $V0 disperse.quorum-count 6
++EXPECT_WITHIN $CONFIG_UPDATE_TIMEOUT "^6$" ec_option_value $V0 $M0 0 quorum-count
++
++TEST touch $M0/a
++TEST touch $M0/data
++TEST setfattr -n trusted.def -v def $M0/a
++TEST touch $M0/src
++TEST touch $M0/del-me
++TEST mkdir $M0/dir1
++TEST dd if=/dev/zero of=$M0/read-file bs=1M count=1 oflag=direct
++TEST dd if=/dev/zero of=$M0/del-file bs=1M count=1 oflag=direct
++TEST gf_rm_file_and_gfid_link $B0/${V0}0 del-file
++#modify operations should fail as the file is not in quorum
++TEST ! dd if=/dev/zero of=$M0/del-file bs=1M count=1 oflag=direct
++TEST kill_brick $V0 $H0 $B0/${V0}0
++#Read should succeed even when quorum-count is not met
++TEST dd if=$M0/read-file of=/dev/null iflag=direct
++TEST ! touch $M0/a2
++TEST ! mkdir $M0/dir2
++TEST ! mknod  $M0/b2 b 4 5
++TEST ! ln -s $M0/a $M0/symlink
++TEST ! ln $M0/a $M0/link
++TEST ! mv $M0/src $M0/dst
++TEST ! rm -f $M0/del-me
++TEST ! rmdir $M0/dir1
++TEST ! dd if=/dev/zero of=$M0/a bs=1M count=1 conv=notrunc
++TEST ! dd if=/dev/zero of=$M0/data bs=1M count=1 conv=notrunc
++TEST ! truncate -s 0 $M0/a
++TEST ! setfattr -n trusted.abc -v abc $M0/a
++TEST ! setfattr -x trusted.def $M0/a
++TEST ! chmod +x $M0/a
++TEST ! fallocate -l 2m -n $M0/a
++TEST ! fallocate -p -l 512k $M0/a
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" get_pending_heal_count ${V0}
++
++# reset the option and check whether the default redundancy count is
++# accepted or not.
++TEST $CLI volume reset $V0 disperse.quorum-count
++EXPECT_WITHIN $CONFIG_UPDATE_TIMEOUT "^0$" ec_option_value $V0 $M0 0 quorum-count
++TEST touch $M0/a1
++TEST touch $M0/data1
++TEST setfattr -n trusted.def -v def $M0/a1
++TEST touch $M0/src1
++TEST touch $M0/del-me1
++TEST mkdir $M0/dir11
++TEST kill_brick $V0 $H0 $B0/${V0}0
++TEST kill_brick $V0 $H0 $B0/${V0}1
++TEST touch $M0/a21
++TEST mkdir $M0/dir21
++TEST mknod  $M0/b21 b 4 5
++TEST ln -s $M0/a1 $M0/symlink1
++TEST ln $M0/a1 $M0/link1
++TEST mv $M0/src1 $M0/dst1
++TEST rm -f $M0/del-me1
++TEST rmdir $M0/dir11
++TEST dd if=/dev/zero of=$M0/a1 bs=1M count=1 conv=notrunc
++TEST dd if=/dev/zero of=$M0/data1 bs=1M count=1 conv=notrunc
++TEST truncate -s 0 $M0/a1
++TEST setfattr -n trusted.abc -v abc $M0/a1
++TEST setfattr -x trusted.def $M0/a1
++TEST chmod +x $M0/a1
++TEST fallocate -l 2m -n $M0/a1
++TEST fallocate -p -l 512k $M0/a1
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "6" ec_child_up_count $V0 0
++
++TEST touch $M0/a2
++TEST touch $M0/data2
++TEST setfattr -n trusted.def -v def $M0/a1
++TEST touch $M0/src2
++TEST touch $M0/del-me2
++TEST mkdir $M0/dir12
++TEST kill_brick $V0 $H0 $B0/${V0}0
++TEST kill_brick $V0 $H0 $B0/${V0}1
++TEST kill_brick $V0 $H0 $B0/${V0}2
++TEST ! touch $M0/a22
++TEST ! mkdir $M0/dir22
++TEST ! mknod  $M0/b22 b 4 5
++TEST ! ln -s $M0/a2 $M0/symlink2
++TEST ! ln $M0/a2 $M0/link2
++TEST ! mv $M0/src2 $M0/dst2
++TEST ! rm -f $M0/del-me2
++TEST ! rmdir $M0/dir12
++TEST ! dd if=/dev/zero of=$M0/a2 bs=1M count=1 conv=notrunc
++TEST ! dd if=/dev/zero of=$M0/data2 bs=1M count=1 conv=notrunc
++TEST ! truncate -s 0 $M0/a2
++TEST ! setfattr -n trusted.abc -v abc $M0/a2
++TEST ! setfattr -x trusted.def $M0/a2
++TEST ! chmod +x $M0/a2
++TEST ! fallocate -l 2m -n $M0/a2
++TEST ! fallocate -p -l 512k $M0/a2
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "6" ec_child_up_count $V0 0
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" get_pending_heal_count ${V0}
++
++# Set quorum-count to 5 and kill 1 brick and the fops should pass
++TEST $CLI volume set $V0 disperse.quorum-count 5
++EXPECT_WITHIN $CONFIG_UPDATE_TIMEOUT "^5$" ec_option_value $V0 $M0 0 quorum-count
++TEST touch $M0/a3
++TEST touch $M0/data3
++TEST setfattr -n trusted.def -v def $M0/a3
++TEST touch $M0/src3
++TEST touch $M0/del-me3
++TEST mkdir $M0/dir13
++TEST kill_brick $V0 $H0 $B0/${V0}0
++TEST touch $M0/a31
++TEST mkdir $M0/dir31
++TEST mknod  $M0/b31 b 4 5
++TEST ln -s $M0/a3 $M0/symlink3
++TEST ln $M0/a3 $M0/link3
++TEST mv $M0/src3 $M0/dst3
++TEST rm -f $M0/del-me3
++TEST rmdir $M0/dir13
++TEST dd if=/dev/zero of=$M0/a3 bs=1M count=1 conv=notrunc
++TEST dd if=/dev/zero of=$M0/data3 bs=1M count=1 conv=notrunc
++TEST truncate -s 0 $M0/a3
++TEST setfattr -n trusted.abc -v abc $M0/a3
++TEST setfattr -x trusted.def $M0/a3
++TEST chmod +x $M0/a3
++TEST fallocate -l 2m -n $M0/a3
++TEST fallocate -p -l 512k $M0/a3
++TEST dd if=/dev/urandom of=$M0/heal-file bs=1M count=1 oflag=direct
++cksum_before_heal="$(md5sum $M0/heal-file | awk '{print $1}')"
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" get_pending_heal_count ${V0}
++TEST kill_brick $V0 $H0 $B0/${V0}4
++TEST kill_brick $V0 $H0 $B0/${V0}5
++cksum_after_heal=$(dd if=$M0/heal-file iflag=direct | md5sum | awk '{print $1}')
++TEST [[ $cksum_before_heal == $cksum_after_heal ]]
++cleanup;
+diff --git a/tests/ec.rc b/tests/ec.rc
+index 04405ec..f18752f 100644
+--- a/tests/ec.rc
++++ b/tests/ec.rc
+@@ -7,3 +7,12 @@ function ec_up_status()
+         local ec_id=$3
+         grep -E "^up =" $m/.meta/graphs/active/${v}-disperse-${ec_id}/private | cut -f2 -d'='
+ }
++
++function ec_option_value()
++{
++    local v=$1
++    local m=$2
++    local ec_id=$3
++    local opt=$4
++    grep -E "^$opt =" $m/.meta/graphs/active/${v}-disperse-${ec_id}/private | cut -f2 -d'='| awk '{print $1}'
++}
+diff --git a/xlators/cluster/ec/src/ec-common.c b/xlators/cluster/ec/src/ec-common.c
+index 92d4e5d..2e59180 100644
+--- a/xlators/cluster/ec/src/ec-common.c
++++ b/xlators/cluster/ec/src/ec-common.c
+@@ -707,6 +707,19 @@ ec_child_select(ec_fop_data_t *fop)
+         return 0;
+     }
+ 
++    if (!fop->parent && fop->lock_count &&
++        (fop->locks[0].update[EC_DATA_TXN] ||
++         fop->locks[0].update[EC_METADATA_TXN])) {
++        if (ec->quorum_count && (num < ec->quorum_count)) {
++            gf_msg(ec->xl->name, GF_LOG_ERROR, 0, EC_MSG_CHILDS_INSUFFICIENT,
++                   "Insufficient available children "
++                   "for this request (have %d, need "
++                   "%d). %s",
++                   num, ec->quorum_count, ec_msg_str(fop));
++            return 0;
++        }
++    }
++
+     return 1;
+ }
+ 
+diff --git a/xlators/cluster/ec/src/ec-common.h b/xlators/cluster/ec/src/ec-common.h
+index 3c69471..eab86ee 100644
+--- a/xlators/cluster/ec/src/ec-common.h
++++ b/xlators/cluster/ec/src/ec-common.h
+@@ -26,6 +26,30 @@ typedef enum { EC_DATA_TXN, EC_METADATA_TXN } ec_txn_t;
+ 
+ #define EC_FLAG_LOCK_SHARED 0x0001
+ 
++#define QUORUM_CBK(fn, fop, frame, cookie, this, op_ret, op_errno, params...)  \
++    do {                                                                       \
++        ec_t *__ec = fop->xl->private;                                         \
++        int32_t __op_ret = 0;                                                  \
++        int32_t __op_errno = 0;                                                \
++        int32_t __success_count = gf_bits_count(fop->good);                    \
++                                                                               \
++        __op_ret = op_ret;                                                     \
++        __op_errno = op_errno;                                                 \
++        if (!fop->parent && frame &&                                           \
++            (GF_CLIENT_PID_SELF_HEALD != frame->root->pid) &&                  \
++            __ec->quorum_count && (__success_count < __ec->quorum_count) &&    \
++            op_ret >= 0) {                                                     \
++            __op_ret = -1;                                                     \
++            __op_errno = EIO;                                                  \
++            gf_msg(__ec->xl->name, GF_LOG_ERROR, 0,                            \
++                   EC_MSG_CHILDS_INSUFFICIENT,                                 \
++                   "Insufficient available children for this request "         \
++                   "(have %d, need %d). %s",                                   \
++                   __success_count, __ec->quorum_count, ec_msg_str(fop));      \
++        }                                                                      \
++        fn(frame, cookie, this, __op_ret, __op_errno, params);                 \
++    } while (0)
++
+ enum _ec_xattrop_flags {
+     EC_FLAG_XATTROP,
+     EC_FLAG_DATA_DIRTY,
+diff --git a/xlators/cluster/ec/src/ec-dir-write.c b/xlators/cluster/ec/src/ec-dir-write.c
+index 0b8ee21..8192462 100644
+--- a/xlators/cluster/ec/src/ec-dir-write.c
++++ b/xlators/cluster/ec/src/ec-dir-write.c
+@@ -218,10 +218,10 @@ ec_manager_create(ec_fop_data_t *fop, int32_t state)
+             GF_ASSERT(cbk != NULL);
+ 
+             if (fop->cbks.create != NULL) {
+-                fop->cbks.create(fop->req_frame, fop, fop->xl, cbk->op_ret,
+-                                 cbk->op_errno, fop->fd, fop->loc[0].inode,
+-                                 &cbk->iatt[0], &cbk->iatt[1], &cbk->iatt[2],
+-                                 cbk->xdata);
++                QUORUM_CBK(fop->cbks.create, fop, fop->req_frame, fop, fop->xl,
++                           cbk->op_ret, cbk->op_errno, fop->fd,
++                           fop->loc[0].inode, &cbk->iatt[0], &cbk->iatt[1],
++                           &cbk->iatt[2], cbk->xdata);
+             }
+ 
+             return EC_STATE_LOCK_REUSE;
+@@ -390,9 +390,10 @@ ec_manager_link(ec_fop_data_t *fop, int32_t state)
+             GF_ASSERT(cbk != NULL);
+ 
+             if (fop->cbks.link != NULL) {
+-                fop->cbks.link(fop->req_frame, fop, fop->xl, cbk->op_ret,
+-                               cbk->op_errno, fop->loc[0].inode, &cbk->iatt[0],
+-                               &cbk->iatt[1], &cbk->iatt[2], cbk->xdata);
++                QUORUM_CBK(fop->cbks.link, fop, fop->req_frame, fop, fop->xl,
++                           cbk->op_ret, cbk->op_errno, fop->loc[0].inode,
++                           &cbk->iatt[0], &cbk->iatt[1], &cbk->iatt[2],
++                           cbk->xdata);
+             }
+ 
+             return EC_STATE_LOCK_REUSE;
+@@ -569,9 +570,10 @@ ec_manager_mkdir(ec_fop_data_t *fop, int32_t state)
+             GF_ASSERT(cbk != NULL);
+ 
+             if (fop->cbks.mkdir != NULL) {
+-                fop->cbks.mkdir(fop->req_frame, fop, fop->xl, cbk->op_ret,
+-                                cbk->op_errno, fop->loc[0].inode, &cbk->iatt[0],
+-                                &cbk->iatt[1], &cbk->iatt[2], cbk->xdata);
++                QUORUM_CBK(fop->cbks.mkdir, fop, fop->req_frame, fop, fop->xl,
++                           cbk->op_ret, cbk->op_errno, fop->loc[0].inode,
++                           &cbk->iatt[0], &cbk->iatt[1], &cbk->iatt[2],
++                           cbk->xdata);
+             }
+ 
+             return EC_STATE_LOCK_REUSE;
+@@ -773,9 +775,10 @@ ec_manager_mknod(ec_fop_data_t *fop, int32_t state)
+             GF_ASSERT(cbk != NULL);
+ 
+             if (fop->cbks.mknod != NULL) {
+-                fop->cbks.mknod(fop->req_frame, fop, fop->xl, cbk->op_ret,
+-                                cbk->op_errno, fop->loc[0].inode, &cbk->iatt[0],
+-                                &cbk->iatt[1], &cbk->iatt[2], cbk->xdata);
++                QUORUM_CBK(fop->cbks.mknod, fop, fop->req_frame, fop, fop->xl,
++                           cbk->op_ret, cbk->op_errno, fop->loc[0].inode,
++                           &cbk->iatt[0], &cbk->iatt[1], &cbk->iatt[2],
++                           cbk->xdata);
+             }
+ 
+             return EC_STATE_LOCK_REUSE;
+@@ -931,10 +934,10 @@ ec_manager_rename(ec_fop_data_t *fop, int32_t state)
+             GF_ASSERT(cbk != NULL);
+ 
+             if (fop->cbks.rename != NULL) {
+-                fop->cbks.rename(fop->req_frame, fop, fop->xl, cbk->op_ret,
+-                                 cbk->op_errno, &cbk->iatt[0], &cbk->iatt[1],
+-                                 &cbk->iatt[2], &cbk->iatt[3], &cbk->iatt[4],
+-                                 cbk->xdata);
++                QUORUM_CBK(fop->cbks.rename, fop, fop->req_frame, fop, fop->xl,
++                           cbk->op_ret, cbk->op_errno, &cbk->iatt[0],
++                           &cbk->iatt[1], &cbk->iatt[2], &cbk->iatt[3],
++                           &cbk->iatt[4], cbk->xdata);
+             }
+ 
+             return EC_STATE_LOCK_REUSE;
+@@ -1083,9 +1086,9 @@ ec_manager_rmdir(ec_fop_data_t *fop, int32_t state)
+             GF_ASSERT(cbk != NULL);
+ 
+             if (fop->cbks.rmdir != NULL) {
+-                fop->cbks.rmdir(fop->req_frame, fop, fop->xl, cbk->op_ret,
+-                                cbk->op_errno, &cbk->iatt[0], &cbk->iatt[1],
+-                                cbk->xdata);
++                QUORUM_CBK(fop->cbks.rmdir, fop, fop->req_frame, fop, fop->xl,
++                           cbk->op_ret, cbk->op_errno, &cbk->iatt[0],
++                           &cbk->iatt[1], cbk->xdata);
+             }
+ 
+             return EC_STATE_LOCK_REUSE;
+@@ -1237,10 +1240,10 @@ ec_manager_symlink(ec_fop_data_t *fop, int32_t state)
+             GF_ASSERT(cbk != NULL);
+ 
+             if (fop->cbks.symlink != NULL) {
+-                fop->cbks.symlink(fop->req_frame, fop, fop->xl, cbk->op_ret,
+-                                  cbk->op_errno, fop->loc[0].inode,
+-                                  &cbk->iatt[0], &cbk->iatt[1], &cbk->iatt[2],
+-                                  cbk->xdata);
++                QUORUM_CBK(fop->cbks.symlink, fop, fop->req_frame, fop, fop->xl,
++                           cbk->op_ret, cbk->op_errno, fop->loc[0].inode,
++                           &cbk->iatt[0], &cbk->iatt[1], &cbk->iatt[2],
++                           cbk->xdata);
+             }
+ 
+             return EC_STATE_LOCK_REUSE;
+@@ -1392,9 +1395,9 @@ ec_manager_unlink(ec_fop_data_t *fop, int32_t state)
+             GF_ASSERT(cbk != NULL);
+ 
+             if (fop->cbks.unlink != NULL) {
+-                fop->cbks.unlink(fop->req_frame, fop, fop->xl, cbk->op_ret,
+-                                 cbk->op_errno, &cbk->iatt[0], &cbk->iatt[1],
+-                                 cbk->xdata);
++                QUORUM_CBK(fop->cbks.unlink, fop, fop->req_frame, fop, fop->xl,
++                           cbk->op_ret, cbk->op_errno, &cbk->iatt[0],
++                           &cbk->iatt[1], cbk->xdata);
+             }
+ 
+             return EC_STATE_LOCK_REUSE;
+diff --git a/xlators/cluster/ec/src/ec-inode-write.c b/xlators/cluster/ec/src/ec-inode-write.c
+index 8bfa3b4..2dbb4db 100644
+--- a/xlators/cluster/ec/src/ec-inode-write.c
++++ b/xlators/cluster/ec/src/ec-inode-write.c
+@@ -185,26 +185,26 @@ ec_xattr_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int32_t op_ret,
+     switch (fop->id) {
+         case GF_FOP_SETXATTR:
+             if (fop->cbks.setxattr) {
+-                fop->cbks.setxattr(frame, cookie, this, op_ret, op_errno,
+-                                   xdata);
++                QUORUM_CBK(fop->cbks.setxattr, fop, frame, cookie, this, op_ret,
++                           op_errno, xdata);
+             }
+             break;
+         case GF_FOP_REMOVEXATTR:
+             if (fop->cbks.removexattr) {
+-                fop->cbks.removexattr(frame, cookie, this, op_ret, op_errno,
+-                                      xdata);
++                QUORUM_CBK(fop->cbks.removexattr, fop, frame, cookie, this,
++                           op_ret, op_errno, xdata);
+             }
+             break;
+         case GF_FOP_FSETXATTR:
+             if (fop->cbks.fsetxattr) {
+-                fop->cbks.fsetxattr(frame, cookie, this, op_ret, op_errno,
+-                                    xdata);
++                QUORUM_CBK(fop->cbks.fsetxattr, fop, frame, cookie, this,
++                           op_ret, op_errno, xdata);
+             }
+             break;
+         case GF_FOP_FREMOVEXATTR:
+             if (fop->cbks.fremovexattr) {
+-                fop->cbks.fremovexattr(frame, cookie, this, op_ret, op_errno,
+-                                       xdata);
++                QUORUM_CBK(fop->cbks.fremovexattr, fop, frame, cookie, this,
++                           op_ret, op_errno, xdata);
+             }
+             break;
+     }
+@@ -494,16 +494,15 @@ ec_manager_setattr(ec_fop_data_t *fop, int32_t state)
+ 
+             if (fop->id == GF_FOP_SETATTR) {
+                 if (fop->cbks.setattr != NULL) {
+-                    fop->cbks.setattr(fop->req_frame, fop, fop->xl, cbk->op_ret,
+-                                      cbk->op_errno, &cbk->iatt[0],
+-                                      &cbk->iatt[1], cbk->xdata);
++                    QUORUM_CBK(fop->cbks.setattr, fop, fop->req_frame, fop,
++                               fop->xl, cbk->op_ret, cbk->op_errno,
++                               &cbk->iatt[0], &cbk->iatt[1], cbk->xdata);
+                 }
+             } else {
+                 if (fop->cbks.fsetattr != NULL) {
+-                    fop->cbks.fsetattr(fop->req_frame, fop, fop->xl,
+-                                       cbk->op_ret, cbk->op_errno,
+-                                       &cbk->iatt[0], &cbk->iatt[1],
+-                                       cbk->xdata);
++                    QUORUM_CBK(fop->cbks.fsetattr, fop, fop->req_frame, fop,
++                               fop->xl, cbk->op_ret, cbk->op_errno,
++                               &cbk->iatt[0], &cbk->iatt[1], cbk->xdata);
+                 }
+             }
+ 
+@@ -994,9 +993,9 @@ ec_manager_fallocate(ec_fop_data_t *fop, int32_t state)
+             GF_ASSERT(cbk != NULL);
+ 
+             if (fop->cbks.fallocate != NULL) {
+-                fop->cbks.fallocate(fop->req_frame, fop, fop->xl, cbk->op_ret,
+-                                    cbk->op_errno, &cbk->iatt[0], &cbk->iatt[1],
+-                                    cbk->xdata);
++                QUORUM_CBK(fop->cbks.fallocate, fop, fop->req_frame, fop,
++                           fop->xl, cbk->op_ret, cbk->op_errno, &cbk->iatt[0],
++                           &cbk->iatt[1], cbk->xdata);
+             }
+ 
+             return EC_STATE_LOCK_REUSE;
+@@ -1247,9 +1246,9 @@ ec_manager_discard(ec_fop_data_t *fop, int32_t state)
+             GF_ASSERT(cbk != NULL);
+ 
+             if (fop->cbks.discard != NULL) {
+-                fop->cbks.discard(fop->req_frame, fop, fop->xl, cbk->op_ret,
+-                                  cbk->op_errno, &cbk->iatt[0], &cbk->iatt[1],
+-                                  cbk->xdata);
++                QUORUM_CBK(fop->cbks.discard, fop, fop->req_frame, fop, fop->xl,
++                           cbk->op_ret, cbk->op_errno, &cbk->iatt[0],
++                           &cbk->iatt[1], cbk->xdata);
+             }
+ 
+             return EC_STATE_LOCK_REUSE;
+@@ -1477,17 +1476,15 @@ ec_manager_truncate(ec_fop_data_t *fop, int32_t state)
+ 
+             if (fop->id == GF_FOP_TRUNCATE) {
+                 if (fop->cbks.truncate != NULL) {
+-                    fop->cbks.truncate(fop->req_frame, fop, fop->xl,
+-                                       cbk->op_ret, cbk->op_errno,
+-                                       &cbk->iatt[0], &cbk->iatt[1],
+-                                       cbk->xdata);
++                    QUORUM_CBK(fop->cbks.truncate, fop, fop->req_frame, fop,
++                               fop->xl, cbk->op_ret, cbk->op_errno,
++                               &cbk->iatt[0], &cbk->iatt[1], cbk->xdata);
+                 }
+             } else {
+                 if (fop->cbks.ftruncate != NULL) {
+-                    fop->cbks.ftruncate(fop->req_frame, fop, fop->xl,
+-                                        cbk->op_ret, cbk->op_errno,
+-                                        &cbk->iatt[0], &cbk->iatt[1],
+-                                        cbk->xdata);
++                    QUORUM_CBK(fop->cbks.ftruncate, fop, fop->req_frame, fop,
++                               fop->xl, cbk->op_ret, cbk->op_errno,
++                               &cbk->iatt[0], &cbk->iatt[1], cbk->xdata);
+                 }
+             }
+ 
+@@ -2245,9 +2242,9 @@ ec_manager_writev(ec_fop_data_t *fop, int32_t state)
+             GF_ASSERT(cbk != NULL);
+ 
+             if (fop->cbks.writev != NULL) {
+-                fop->cbks.writev(fop->req_frame, fop, fop->xl, cbk->op_ret,
+-                                 cbk->op_errno, &cbk->iatt[0], &cbk->iatt[1],
+-                                 cbk->xdata);
++                QUORUM_CBK(fop->cbks.writev, fop, fop->req_frame, fop, fop->xl,
++                           cbk->op_ret, cbk->op_errno, &cbk->iatt[0],
++                           &cbk->iatt[1], cbk->xdata);
+             }
+ 
+             return EC_STATE_LOCK_REUSE;
+diff --git a/xlators/cluster/ec/src/ec-types.h b/xlators/cluster/ec/src/ec-types.h
+index f27f2ec..ea4f6ad 100644
+--- a/xlators/cluster/ec/src/ec-types.h
++++ b/xlators/cluster/ec/src/ec-types.h
+@@ -654,6 +654,7 @@ struct _ec {
+     gf_boolean_t optimistic_changelog;
+     gf_boolean_t parallel_writes;
+     uint32_t stripe_cache;
++    uint32_t quorum_count;
+     uint32_t background_heals;
+     uint32_t heal_wait_qlen;
+     uint32_t self_heal_window_size; /* max size of read/writes */
+diff --git a/xlators/cluster/ec/src/ec.c b/xlators/cluster/ec/src/ec.c
+index 3c8013e..19094c4 100644
+--- a/xlators/cluster/ec/src/ec.c
++++ b/xlators/cluster/ec/src/ec.c
+@@ -285,6 +285,7 @@ reconfigure(xlator_t *this, dict_t *options)
+     GF_OPTION_RECONF("parallel-writes", ec->parallel_writes, options, bool,
+                      failed);
+     GF_OPTION_RECONF("stripe-cache", ec->stripe_cache, options, uint32, failed);
++    GF_OPTION_RECONF("quorum-count", ec->quorum_count, options, uint32, failed);
+     ret = 0;
+     if (ec_assign_read_policy(ec, read_policy)) {
+         ret = -1;
+@@ -720,6 +721,7 @@ init(xlator_t *this)
+                    failed);
+     GF_OPTION_INIT("parallel-writes", ec->parallel_writes, bool, failed);
+     GF_OPTION_INIT("stripe-cache", ec->stripe_cache, uint32, failed);
++    GF_OPTION_INIT("quorum-count", ec->quorum_count, uint32, failed);
+ 
+     this->itable = inode_table_new(EC_SHD_INODE_LRU_LIMIT, this);
+     if (!this->itable)
+@@ -1402,6 +1404,7 @@ ec_dump_private(xlator_t *this)
+     gf_proc_dump_write("heal-waiters", "%d", ec->heal_waiters);
+     gf_proc_dump_write("read-policy", "%s", ec_read_policies[ec->read_policy]);
+     gf_proc_dump_write("parallel-writes", "%d", ec->parallel_writes);
++    gf_proc_dump_write("quorum-count", "%u", ec->quorum_count);
+ 
+     snprintf(key_prefix, GF_DUMP_MAX_BUF_LEN, "%s.%s.stats.stripe_cache",
+              this->type, this->name);
+@@ -1672,6 +1675,16 @@ struct volume_options options[] = {
+                     "lead to extra memory consumption, maximum "
+                     "(cache size * stripe size) Bytes per open file."},
+     {
++        .key = {"quorum-count"},
++        .type = GF_OPTION_TYPE_INT,
++        .default_value = "0",
++        .description =
++            "This option can be used to define how many successes on"
++            "the bricks constitute a success to the application. This"
++            " count should be in the range"
++            "[disperse-data-count,  disperse-count] (inclusive)",
++    },
++    {
+         .key = {NULL},
+     },
+ };
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index 8ce338e..7ca47a6 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -1128,6 +1128,42 @@ out:
+ }
+ 
+ static int
++validate_disperse_quorum_count(glusterd_volinfo_t *volinfo, dict_t *dict,
++                               char *key, char *value, char **op_errstr)
++{
++    int ret = -1;
++    int quorum_count = 0;
++    int data_count = 0;
++
++    ret = gf_string2int(value, &quorum_count);
++    if (ret) {
++        gf_asprintf(op_errstr,
++                    "%s is not an integer. %s expects a "
++                    "valid integer value.",
++                    value, key);
++        goto out;
++    }
++
++    if (volinfo->type != GF_CLUSTER_TYPE_DISPERSE) {
++        gf_asprintf(op_errstr, "Cannot set %s for a non-disperse volume.", key);
++        ret = -1;
++        goto out;
++    }
++
++    data_count = volinfo->disperse_count - volinfo->redundancy_count;
++    if (quorum_count < data_count || quorum_count > volinfo->disperse_count) {
++        gf_asprintf(op_errstr, "%d for %s is out of range [%d - %d]",
++                    quorum_count, key, data_count, volinfo->disperse_count);
++        ret = -1;
++        goto out;
++    }
++
++    ret = 0;
++out:
++    return ret;
++}
++
++static int
+ validate_parallel_readdir(glusterd_volinfo_t *volinfo, dict_t *dict, char *key,
+                           char *value, char **op_errstr)
+ {
+@@ -3663,6 +3699,16 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+      .type = NO_DOC,
+      .op_version = GD_OP_VERSION_3_13_0,
+      .flags = VOLOPT_FLAG_CLIENT_OPT},
++    {.key = "disperse.quorum-count",
++     .voltype = "cluster/disperse",
++     .type = NO_DOC,
++     .op_version = GD_OP_VERSION_8_0,
++     .validate_fn = validate_disperse_quorum_count,
++     .description = "This option can be used to define how many successes on"
++                    "the bricks constitute a success to the application. This"
++                    " count should be in the range"
++                    "[disperse-data-count,  disperse-count] (inclusive)",
++     .flags = VOLOPT_FLAG_CLIENT_OPT},
+     {
+         .key = "features.sdfs",
+         .voltype = "features/sdfs",
+-- 
+1.8.3.1
+

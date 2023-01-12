@@ -1,0 +1,184 @@
+From 70842c77735a655a053ed4a7cb77fec01028355a Mon Sep 17 00:00:00 2001
+From: Sunil Kumar Acharya <sheggodu@redhat.com>
+Date: Mon, 22 Apr 2019 12:48:13 +0530
+Subject: [PATCH 117/124] spec: Remove thin-arbiter package
+
+Thin-arbiter is not supported in downstream. Updated the
+code to avoid RPMdiff warnings. Marked thin-arbiter
+test cases as bad to avoid nightly runs from reporting
+expected failures.
+
+Label: DOWNSTREAM ONLY
+
+BUG: 1698436
+Change-Id: Ic36bccdfe1c7039fb7e5ce078a8b64cf71056970
+Signed-off-by: Sunil Kumar Acharya <sheggodu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/168406
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ configure.ac                            |  2 --
+ extras/systemd/Makefile.am              |  6 ++---
+ glusterfs.spec.in                       | 39 +++++----------------------------
+ tests/basic/afr/ta-check-locks.t        |  2 ++
+ tests/basic/afr/ta-read.t               |  2 ++
+ tests/basic/afr/ta-shd.t                |  2 ++
+ tests/basic/afr/ta-write-on-bad-brick.t |  2 ++
+ xlators/features/Makefile.am            |  2 +-
+ 8 files changed, 18 insertions(+), 39 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index 521671b..3065077 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -116,8 +116,6 @@ AC_CONFIG_FILES([Makefile
+                 xlators/features/Makefile
+                 xlators/features/arbiter/Makefile
+                 xlators/features/arbiter/src/Makefile
+-                xlators/features/thin-arbiter/Makefile
+-                xlators/features/thin-arbiter/src/Makefile
+                 xlators/features/changelog/Makefile
+                 xlators/features/changelog/src/Makefile
+                 xlators/features/changelog/lib/Makefile
+diff --git a/extras/systemd/Makefile.am b/extras/systemd/Makefile.am
+index 61446a9..b849775 100644
+--- a/extras/systemd/Makefile.am
++++ b/extras/systemd/Makefile.am
+@@ -1,8 +1,8 @@
+-CLEANFILES = glusterd.service glustereventsd.service glusterfssharedstorage.service gluster-ta-volume.service
+-EXTRA_DIST = glusterd.service.in glustereventsd.service.in glusterfssharedstorage.service.in gluster-ta-volume.service.in
++CLEANFILES = glusterd.service glustereventsd.service glusterfssharedstorage.service
++EXTRA_DIST = glusterd.service.in glustereventsd.service.in glusterfssharedstorage.service.in
+ 
+ if USE_SYSTEMD
+-systemd_DATA = gluster-ta-volume.service
++systemd_DATA =
+ endif
+ 
+ if WITH_SERVER
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index ba095b7..bf72a55 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -682,18 +682,6 @@ is in user space and easily manageable.
+ This package provides the glusterfs server daemon.
+ %endif
+ 
+-%package thin-arbiter
+-Summary:          GlusterFS thin-arbiter module
+-Requires:         %{name}%{?_isa} = %{version}-%{release}
+-Requires:         %{name}-server%{?_isa} = %{version}-%{release}
+-
+-%description thin-arbiter
+-This package provides a tie-breaker functionality to GlusterFS
+-replicate volume. It includes translators required to provide the
+-functionality, and also few other scripts required for getting the setup done.
+-
+-This package provides the glusterfs thin-arbiter translator.
+-
+ %package client-xlators
+ Summary:          GlusterFS client-side translators
+ Requires:         %{name}-libs%{?_isa} = %{version}-%{release}
+@@ -1045,14 +1033,6 @@ fi
+ exit 0
+ %endif
+ 
+-%preun thin-arbiter
+-if [ $1 -eq 0 ]; then
+-    if [ -f %glusterta_svcfile ]; then
+-        %service_stop gluster-ta-volume
+-        %systemd_preun gluster-ta-volume
+-    fi
+-fi
+-
+ ##-----------------------------------------------------------------------------
+ ## All %%postun should be placed here and keep them sorted
+ ##
+@@ -1188,6 +1168,12 @@ exit 0
+ %exclude %{_prefix}/lib/ocf/resource.d/heartbeat/*
+ %endif
+ 
++%exclude %{_datadir}/glusterfs/scripts/setup-thin-arbiter.sh
++
++%if ( 0%{?_without_server:1} )
++%exclude %{_sysconfdir}/glusterfs/thin-arbiter.vol
++%endif
++
+ %files api
+ %exclude %{_libdir}/*.so
+ # libgfapi files
+@@ -1263,19 +1249,6 @@ exit 0
+ %{_bindir}/fusermount-glusterfs
+ %endif
+ 
+-%files thin-arbiter
+-%dir %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator
+-%dir %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features
+-     %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/thin-arbiter.so
+-%dir %{_datadir}/glusterfs/scripts
+-     %{_datadir}/glusterfs/scripts/setup-thin-arbiter.sh
+-%config %{_sysconfdir}/glusterfs/thin-arbiter.vol
+-
+-%if ( 0%{?_with_systemd:1} )
+-%{_unitdir}/gluster-ta-volume.service
+-%endif
+-
+-
+ %if ( 0%{!?_without_georeplication:1} )
+ %files geo-replication
+ %config(noreplace) %{_sysconfdir}/logrotate.d/glusterfs-georep
+diff --git a/tests/basic/afr/ta-check-locks.t b/tests/basic/afr/ta-check-locks.t
+index c0102c3..c51aa39 100644
+--- a/tests/basic/afr/ta-check-locks.t
++++ b/tests/basic/afr/ta-check-locks.t
+@@ -66,3 +66,5 @@ TEST ta_start_brick_process brick0
+ EXPECT_WITHIN $HEAL_TIMEOUT "0" get_lock_count_on_ta
+ 
+ cleanup;
++#G_TESTDEF_TEST_STATUS_CENTOS6=BAD_TEST,BUG=0000000
++#G_TESTDEF_TEST_STATUS_NETBSD7=BAD_TEST,BUG=0000000
+diff --git a/tests/basic/afr/ta-read.t b/tests/basic/afr/ta-read.t
+index f2b3c38..1b36dba 100644
+--- a/tests/basic/afr/ta-read.t
++++ b/tests/basic/afr/ta-read.t
+@@ -58,3 +58,5 @@ TEST [ -z $TA_PID ]
+ # Read must now succeed.
+ TEST cat $M0/FILE
+ cleanup;
++#G_TESTDEF_TEST_STATUS_CENTOS6=BAD_TEST,BUG=0000000
++#G_TESTDEF_TEST_STATUS_NETBSD7=BAD_TEST,BUG=0000000
+diff --git a/tests/basic/afr/ta-shd.t b/tests/basic/afr/ta-shd.t
+index bb2e58b..4b1ea85 100644
+--- a/tests/basic/afr/ta-shd.t
++++ b/tests/basic/afr/ta-shd.t
+@@ -47,3 +47,5 @@ TEST ta_start_mount_process $M0
+ EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" ta_up_status $V0 $M0 0
+ EXPECT "Hello" cat $M0/a.txt
+ cleanup;
++#G_TESTDEF_TEST_STATUS_CENTOS6=BAD_TEST,BUG=0000000
++#G_TESTDEF_TEST_STATUS_NETBSD7=BAD_TEST,BUG=0000000
+diff --git a/tests/basic/afr/ta-write-on-bad-brick.t b/tests/basic/afr/ta-write-on-bad-brick.t
+index 18cb65b..77cbf5f 100644
+--- a/tests/basic/afr/ta-write-on-bad-brick.t
++++ b/tests/basic/afr/ta-write-on-bad-brick.t
+@@ -49,3 +49,5 @@ EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status_meta $M0 $V0-replicate
+ TEST dd if=/dev/zero of=$M0/a.txt bs=1M count=5
+ 
+ cleanup;
++#G_TESTDEF_TEST_STATUS_CENTOS6=BAD_TEST,BUG=0000000
++#G_TESTDEF_TEST_STATUS_NETBSD7=BAD_TEST,BUG=0000000
+diff --git a/xlators/features/Makefile.am b/xlators/features/Makefile.am
+index 545c02b..537c148 100644
+--- a/xlators/features/Makefile.am
++++ b/xlators/features/Makefile.am
+@@ -4,7 +4,7 @@ endif
+ 
+ SUBDIRS = locks quota read-only quiesce marker index barrier arbiter upcall \
+ 	compress changelog gfid-access snapview-client snapview-server trash \
+-	shard bit-rot leases selinux sdfs namespace $(CLOUDSYNC_DIR) thin-arbiter \
++	shard bit-rot leases selinux sdfs namespace $(CLOUDSYNC_DIR) \
+ 	utime changetimerecorder
+ 
+ CLEANFILES =
+-- 
+1.8.3.1
+

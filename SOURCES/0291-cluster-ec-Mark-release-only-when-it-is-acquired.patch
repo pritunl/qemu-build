@@ -1,0 +1,106 @@
+From 87d8070f80487322a1736846a78725fd88f8de34 Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Tue, 20 Aug 2019 13:27:24 +0530
+Subject: [PATCH 291/297] cluster/ec: Mark release only when it is acquired
+
+Problem:
+Mount-1                                Mount-2
+1)Tries to acquire lock on 'dir1'   1)Tries to acquire lock on 'dir1'
+2)Lock is granted on brick-0        2)Lock gets EAGAIN on brick-0 and
+				      leads to blocking lock on brick-0
+3)Gets a lock-contention            3) Doesn't matter what happens on mount-2
+  notification, marks lock->release    from here on.
+  to true.
+4)New fop comes on 'dir1' which will
+  be put in frozen list as lock->release
+  is set to true.
+5) Lock acquisition from step-2 fails because
+3 bricks went down in 4+2 setup.
+
+Fop on mount-1 which is put in frozen list will hang because no codepath will
+move it from frozen list to any other list and the lock will not be retried.
+
+Fix:
+Don't set lock->release to true if lock is not acquired at the time of
+lock-contention-notification
+
+Upstream-patch: https://review.gluster.org/c/glusterfs/+/23272
+fixes: bz#1731896
+Change-Id: Ie6630db8735ccf372cc54b873a3a3aed7a6082b7
+Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/180870
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Ashish Pandey <aspandey@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/ec/src/ec-common.c | 20 ++++++++++++++++++--
+ xlators/cluster/ec/src/ec-types.h  |  1 +
+ 2 files changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/cluster/ec/src/ec-common.c b/xlators/cluster/ec/src/ec-common.c
+index 2e59180..5cae37b 100644
+--- a/xlators/cluster/ec/src/ec-common.c
++++ b/xlators/cluster/ec/src/ec-common.c
+@@ -1867,6 +1867,10 @@ ec_lock_acquired(ec_lock_link_t *link)
+     LOCK(&lock->loc.inode->lock);
+ 
+     lock->acquired = _gf_true;
++    if (lock->contention) {
++        lock->release = _gf_true;
++        lock->contention = _gf_false;
++    }
+ 
+     ec_lock_update_fd(lock, fop);
+     ec_lock_wake_shared(lock, &list);
+@@ -1892,15 +1896,20 @@ ec_locked(call_frame_t *frame, void *cookie, xlator_t *this, int32_t op_ret,
+     ec_lock_link_t *link = NULL;
+     ec_lock_t *lock = NULL;
+ 
++    link = fop->data;
++    lock = link->lock;
+     if (op_ret >= 0) {
+-        link = fop->data;
+-        lock = link->lock;
+         lock->mask = lock->good_mask = fop->good;
+         lock->healing = 0;
+ 
+         ec_lock_acquired(link);
+         ec_lock(fop->parent);
+     } else {
++        LOCK(&lock->loc.inode->lock);
++        {
++            lock->contention = _gf_false;
++        }
++        UNLOCK(&lock->loc.inode->lock);
+         gf_msg(this->name, GF_LOG_WARNING, op_errno, EC_MSG_PREOP_LOCK_FAILED,
+                "Failed to complete preop lock");
+     }
+@@ -2547,6 +2556,13 @@ ec_lock_release(ec_t *ec, inode_t *inode)
+     gf_msg_debug(ec->xl->name, 0, "Releasing inode %p due to lock contention",
+                  inode);
+ 
++    if (!lock->acquired) {
++        /* This happens if some bricks already got the lock while inodelk is in
++         * progress.  Set release to true after lock is acquired*/
++        lock->contention = _gf_true;
++        goto done;
++    }
++
+     /* The lock is not marked to be released, so the frozen list should be
+      * empty. */
+     GF_ASSERT(list_empty(&lock->frozen));
+diff --git a/xlators/cluster/ec/src/ec-types.h b/xlators/cluster/ec/src/ec-types.h
+index ea4f6ad..34a9768 100644
+--- a/xlators/cluster/ec/src/ec-types.h
++++ b/xlators/cluster/ec/src/ec-types.h
+@@ -267,6 +267,7 @@ struct _ec_lock {
+     uint32_t refs_pending;  /* Refs assigned to fops being prepared */
+     uint32_t waiting_flags; /*Track xattrop/dirty marking*/
+     gf_boolean_t acquired;
++    gf_boolean_t contention;
+     gf_boolean_t unlock_now;
+     gf_boolean_t release;
+     gf_boolean_t query;
+-- 
+1.8.3.1
+

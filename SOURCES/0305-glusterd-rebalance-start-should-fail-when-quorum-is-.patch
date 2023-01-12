@@ -1,0 +1,56 @@
+From 90e52f3b44da0ed05e35ebd474e284d45794b0d6 Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Thu, 10 Oct 2019 20:40:49 +0530
+Subject: [PATCH 305/307] glusterd: rebalance start should fail when quorum is
+ not met
+
+rebalance start should not succeed if quorum is not met.
+this patch adds a condition to check whether quorum is met
+in pre-validation stage.
+
+> fixes: bz#1760467
+> Change-Id: Ic7d0d08f69e4bc6d5e7abae713ec1881531c8ad4
+> Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+
+upstream patch: https://review.gluster.org/#/c/glusterfs/+/23536/
+BUG: 1760261
+Change-Id: Ic7d0d08f69e4bc6d5e7abae713ec1881531c8ad4
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/183146
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/glusterd/quorum-validation.t   | 2 ++
+ xlators/mgmt/glusterd/src/glusterd-mgmt.c | 3 ++-
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/tests/bugs/glusterd/quorum-validation.t b/tests/bugs/glusterd/quorum-validation.t
+index ff46729..3cc3351 100644
+--- a/tests/bugs/glusterd/quorum-validation.t
++++ b/tests/bugs/glusterd/quorum-validation.t
+@@ -34,6 +34,8 @@ TEST ! $CLI_1 volume add-brick $V0 $H1:$B1/${V0}2
+ TEST ! $CLI_1 volume remove-brick $V0 $H1:$B1/${V0}0 start
+ TEST ! $CLI_1 volume set $V0 barrier enable
+ 
++#quorum is not met, rebalance/profile start should fail
++TEST ! $CLI_1 volume rebalance $V0 start
+ TEST ! $CLI_1 volume profile $V0 start
+ 
+ #bug-1690753 - Volume stop when quorum not met is successful
+diff --git a/xlators/mgmt/glusterd/src/glusterd-mgmt.c b/xlators/mgmt/glusterd/src/glusterd-mgmt.c
+index ec78913..a4915f3 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-mgmt.c
++++ b/xlators/mgmt/glusterd/src/glusterd-mgmt.c
+@@ -1059,7 +1059,8 @@ glusterd_mgmt_v3_pre_validate(glusterd_op_t op, dict_t *req_dict,
+         goto out;
+     }
+ 
+-    if (op == GD_OP_PROFILE_VOLUME || op == GD_OP_STOP_VOLUME) {
++    if (op == GD_OP_PROFILE_VOLUME || op == GD_OP_STOP_VOLUME ||
++        op == GD_OP_REBALANCE) {
+         ret = glusterd_validate_quorum(this, op, req_dict, op_errstr);
+         if (ret) {
+             gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_SERVER_QUORUM_NOT_MET,
+-- 
+1.8.3.1
+

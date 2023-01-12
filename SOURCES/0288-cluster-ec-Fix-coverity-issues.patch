@@ -1,0 +1,77 @@
+From ccf7775760dd923e21341438725946737eb8d8af Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Sat, 7 Sep 2019 20:18:01 +0530
+Subject: [PATCH 288/297] cluster/ec: Fix coverity issues
+
+Fixed the following coverity issue in both flush/fsync
+>>>     CID 1404964:  Null pointer dereferences  (REVERSE_INULL)
+>>>     Null-checking "fd" suggests that it may be null, but it has already
+been dereferenced on all paths leading to the check.
+>>>         if (fd != NULL) {
+>>>           fop->fd = fd_ref(fd);
+>>>             if (fop->fd == NULL) {
+>>>                 gf_msg(this->name, GF_LOG_ERROR, 0,
+>>>                        "Failed to reference a "
+>>>                        "file descriptor.");
+
+Upstream-patch: https://review.gluster.org/c/glusterfs/+/23382
+fixes: bz#1745107
+Change-Id: I19c05d585e23f8fbfbc195d1f3775ec528eed671
+Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/180673
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Ashish Pandey <aspandey@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/ec/src/ec-generic.c | 28 ++++++++++++++++------------
+ 1 file changed, 16 insertions(+), 12 deletions(-)
+
+diff --git a/xlators/cluster/ec/src/ec-generic.c b/xlators/cluster/ec/src/ec-generic.c
+index b019050..192bb02 100644
+--- a/xlators/cluster/ec/src/ec-generic.c
++++ b/xlators/cluster/ec/src/ec-generic.c
+@@ -196,12 +196,14 @@ ec_flush(call_frame_t *frame, xlator_t *this, uintptr_t target,
+     GF_VALIDATE_OR_GOTO(this->name, frame, out);
+     GF_VALIDATE_OR_GOTO(this->name, this->private, out);
+ 
+-    error = ec_validate_fd(fd, this);
+-    if (error) {
+-        gf_msg(this->name, GF_LOG_ERROR, EBADF, EC_MSG_FD_BAD,
+-               "Failing %s on %s", gf_fop_list[GF_FOP_FLUSH],
+-               fd->inode ? uuid_utoa(fd->inode->gfid) : "");
+-        goto out;
++    if (fd) {
++        error = ec_validate_fd(fd, this);
++        if (error) {
++            gf_msg(this->name, GF_LOG_ERROR, EBADF, EC_MSG_FD_BAD,
++                   "Failing %s on %s", gf_fop_list[GF_FOP_FLUSH],
++                   fd->inode ? uuid_utoa(fd->inode->gfid) : "");
++            goto out;
++        }
+     }
+ 
+     fop = ec_fop_data_allocate(frame, this, GF_FOP_FLUSH, 0, target, fop_flags,
+@@ -420,12 +422,14 @@ ec_fsync(call_frame_t *frame, xlator_t *this, uintptr_t target,
+     GF_VALIDATE_OR_GOTO(this->name, frame, out);
+     GF_VALIDATE_OR_GOTO(this->name, this->private, out);
+ 
+-    error = ec_validate_fd(fd, this);
+-    if (error) {
+-        gf_msg(this->name, GF_LOG_ERROR, EBADF, EC_MSG_FD_BAD,
+-               "Failing %s on %s", gf_fop_list[GF_FOP_FSYNC],
+-               fd->inode ? uuid_utoa(fd->inode->gfid) : "");
+-        goto out;
++    if (fd) {
++        error = ec_validate_fd(fd, this);
++        if (error) {
++            gf_msg(this->name, GF_LOG_ERROR, EBADF, EC_MSG_FD_BAD,
++                   "Failing %s on %s", gf_fop_list[GF_FOP_FSYNC],
++                   fd->inode ? uuid_utoa(fd->inode->gfid) : "");
++            goto out;
++        }
+     }
+ 
+     fop = ec_fop_data_allocate(frame, this, GF_FOP_FSYNC, 0, target, fop_flags,
+-- 
+1.8.3.1
+

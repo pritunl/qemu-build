@@ -1,0 +1,39 @@
+From d23859d5cbd5823b2587811aa57030436ce9e74c Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Tue, 17 Dec 2019 15:52:30 +0530
+Subject: [PATCH 391/449] glusterd: unlink the file after killing the process
+
+In glusterd_proc_stop(), after killing the pid
+we should remove the pidfile.
+
+> upstream patch link: https://review.gluster.org/#/c/glusterfs/+/23890/
+> fixes: bz#1784375
+> Change-Id: Ib6367aed590932c884b0f6f892fc40542aa19686
+> Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+
+BUG: 1784211
+Change-Id: Ib6367aed590932c884b0f6f892fc40542aa19686
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202257
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-proc-mgmt.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-proc-mgmt.c b/xlators/mgmt/glusterd/src/glusterd-proc-mgmt.c
+index f55a5fd..a05c90d 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-proc-mgmt.c
++++ b/xlators/mgmt/glusterd/src/glusterd-proc-mgmt.c
+@@ -107,6 +107,8 @@ glusterd_proc_stop(glusterd_proc_t *proc, int sig, int flags)
+                        "service, reason:%s",
+                        proc->name, strerror(errno));
+         }
++    } else {
++        (void)glusterd_unlink_file(proc->pidfile);
+     }
+     if (flags != PROC_STOP_FORCE)
+         goto out;
+-- 
+1.8.3.1
+

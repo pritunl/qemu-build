@@ -1,0 +1,53 @@
+From de24d64c2599e48a05e8792b845cfecc210a6fc5 Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Mon, 22 Jul 2019 17:35:21 +0530
+Subject: [PATCH 258/261] geo-rep: Fix mount broker setup issue
+
+The patch [1] added validation in gverify.sh to check if the gluster
+binary on slave by executing gluster directly on slave.  But for
+non-root users, even though gluster binary is present, path is not
+found when executed via ssh. Hence validate the gluster binary using
+bash builtin 'type' command.
+
+[1] https://review.gluster.org/19224
+
+Backport of:
+ > Patch: https://review.gluster.org/23089
+ > Change-Id: I93ca62c0c5b1e16263e586ddbbca8407d60ca126
+ > fixes: bz#1731920
+ > Signed-off-by: Kotresh HR <khiremat@redhat.com>
+
+Change-Id: I93ca62c0c5b1e16263e586ddbbca8407d60ca126
+BUG: 1720992
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/176727
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ geo-replication/src/gverify.sh | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/geo-replication/src/gverify.sh b/geo-replication/src/gverify.sh
+index 7c88f9f..692c1d6 100755
+--- a/geo-replication/src/gverify.sh
++++ b/geo-replication/src/gverify.sh
+@@ -207,13 +207,13 @@ function main()
+     fi;
+ 
+     if [[ -z "${GR_SSH_IDENTITY_KEY}" ]]; then
+-        err=$((ssh -p ${SSH_PORT} -oNumberOfPasswordPrompts=0 -oStrictHostKeyChecking=no $2@$3 "gluster --version") 2>&1)
++        ssh -p ${SSH_PORT} -oNumberOfPasswordPrompts=0 -oStrictHostKeyChecking=no $2@$3 "type -p gluster"
+     else
+-        err=$((ssh -p ${SSH_PORT} -i ${GR_SSH_IDENTITY_KEY} -oNumberOfPasswordPrompts=0 -oStrictHostKeyChecking=no $2@$3 "gluster --version") 2>&1)
++        ssh -p ${SSH_PORT} -i ${GR_SSH_IDENTITY_KEY} -oNumberOfPasswordPrompts=0 -oStrictHostKeyChecking=no $2@$3 "type -p gluster"
+     fi
+ 
+     if [ $? -ne 0 ]; then
+-        echo "FORCE_BLOCKER|gluster command on $2@$3 failed. Error: $err" > $log_file
++        echo "FORCE_BLOCKER|gluster command not found on $3 for user $2." > $log_file
+         exit 1;
+     fi;
+ 
+-- 
+1.8.3.1
+

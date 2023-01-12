@@ -1,0 +1,75 @@
+From 0cd08d9e89f5ee86d5f4f90f0ca5c07bd290636c Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Fri, 26 Apr 2019 22:28:53 +0530
+Subject: [PATCH 125/141] glusterd: define dumpops in the xlator_api of
+ glusterd
+
+Problem: statedump is not capturing information related to glusterd
+
+Solution: statdump is not capturing glusterd info because
+trav->dumpops is null in gf_proc_dump_single_xlator_info ()
+where trav is glusterd xlator object. trav->dumpops is null
+because we missed to define dumpops in xlator_api of glusterd.
+defining dumpops in xlator_api of glusterd fixes the issue.
+
+> fixes: bz#1703629
+> Change-Id: If85429ecb1ef580aced8d5b88d09fc15258bfc4c
+> Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+
+upstream patch: https://review.gluster.org/#/c/glusterfs/+/22640/
+
+BUG: 1703753
+Change-Id: If85429ecb1ef580aced8d5b88d09fc15258bfc4c
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/169207
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ tests/bugs/glusterd/optimized-basic-testcases.t | 13 +++++++++++++
+ xlators/mgmt/glusterd/src/glusterd.c            |  1 +
+ 2 files changed, 14 insertions(+)
+
+diff --git a/tests/bugs/glusterd/optimized-basic-testcases.t b/tests/bugs/glusterd/optimized-basic-testcases.t
+index dd98a65..d700b5e 100644
+--- a/tests/bugs/glusterd/optimized-basic-testcases.t
++++ b/tests/bugs/glusterd/optimized-basic-testcases.t
+@@ -32,6 +32,16 @@ function get_brick_host_uuid()
+     echo $host_uuid_list | awk '{print $1}'
+ }
+ 
++function generate_statedump_and_check_for_glusterd_info {
++        pid=`pidof glusterd`
++        #remove old stale statedumps
++        cleanup_statedump $pid
++        kill -USR1 $pid
++        #Wait till the statedump is generated
++        sleep 1
++        fname=$(ls $statedumpdir | grep -E "\.$pid\.dump\.")
++        cat $statedumpdir/$fname | grep "xlator.glusterd.priv" | wc -l
++}
+ 
+ cleanup;
+ 
+@@ -279,4 +289,7 @@ mkdir -p /xyz/var/lib/glusterd/abc
+ TEST  $CLI volume create "test" $H0:/xyz/var/lib/glusterd/abc
+ EXPECT 'Created' volinfo_field "test" 'Status';
+ 
++EXPECT "1" generate_statedump_and_check_for_glusterd_info
++
++cleanup_statedump `pidof glusterd`
+ cleanup
+diff --git a/xlators/mgmt/glusterd/src/glusterd.c b/xlators/mgmt/glusterd/src/glusterd.c
+index d4ab630..c0973cb 100644
+--- a/xlators/mgmt/glusterd/src/glusterd.c
++++ b/xlators/mgmt/glusterd/src/glusterd.c
+@@ -2231,6 +2231,7 @@ xlator_api_t xlator_api = {
+     .fini = fini,
+     .mem_acct_init = mem_acct_init,
+     .op_version = {1}, /* Present from the initial version */
++    .dumpops = &dumpops,
+     .fops = &fops,
+     .cbks = &cbks,
+     .options = options,
+-- 
+1.8.3.1
+

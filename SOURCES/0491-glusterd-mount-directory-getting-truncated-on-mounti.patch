@@ -1,0 +1,56 @@
+From 0fed8ca9c6c9e3a9041951bc748c7936d0abc8cf Mon Sep 17 00:00:00 2001
+From: nik-redhat <nladha@redhat.com>
+Date: Tue, 15 Sep 2020 16:20:19 +0530
+Subject: [PATCH 491/511] glusterd: mount directory getting truncated on
+ mounting shared_storage
+
+Issue:
+In case of a user created volume the mount point
+is the brick path 'ex: /data/brick' but in case of
+shared_storage the mount point is '/'.So, here
+we increment the array by one so as to get the exact
+path of brick without '/', which works fine for other
+volumes as the pointer of the brick_dir variable is
+at '/', but for shared_storage it is at 'v'(where v is
+starting letter of 'var' directory). So, on incrementing
+the path we get in case of shared_storage starts from
+'ar/lib/glusterd/...'
+
+Fix:
+Only, increment the pointer if the current position is '/',
+else the path will be wrong.
+
+>Fixes: #1480
+
+>Change-Id: Id31bb13f58134ae2099884fbc5984c4e055fb357
+>Signed-off-by: nik-redhat <nladha@redhat.com>
+
+Upstream patch: https://review.gluster.org/c/glusterfs/+/24989
+
+BUG: 1878077
+Change-Id: Id31bb13f58134ae2099884fbc5984c4e055fb357
+Signed-off-by: nik-redhat <nladha@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/220536
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-utils.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index ad3750e..b343eee 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -1221,7 +1221,8 @@ glusterd_get_brick_mount_dir(char *brickpath, char *hostname, char *mount_dir)
+         }
+ 
+         brick_dir = &brickpath[strlen(mnt_pt)];
+-        brick_dir++;
++        if (brick_dir[0] == '/')
++            brick_dir++;
+ 
+         snprintf(mount_dir, VALID_GLUSTERD_PATHMAX, "/%s", brick_dir);
+     }
+-- 
+1.8.3.1
+

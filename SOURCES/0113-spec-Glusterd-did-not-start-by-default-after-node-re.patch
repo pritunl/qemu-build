@@ -1,0 +1,71 @@
+From 850d5418fb48417d94ab17e565b2184ba951ccbe Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawa@redhat.com>
+Date: Wed, 17 Apr 2019 18:04:44 +0530
+Subject: [PATCH 113/124] spec: Glusterd did not start by default after node
+ reboot
+
+Problem: After install gluster rpms glusterd service is not enabled
+         so systemctl status is showing "disabled"
+
+Solution: Update glusterfs.spec.in to enable glusterd after install
+          gluster rpms
+
+label: DOWNSTREAM ONLY
+BUG: 1699835
+
+Change-Id: Ied9be5dfb1bf3bda24868722b1fbd77cb1c1d18c
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/168168
+Reviewed-by: Kaleb Keithley <kkeithle@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ glusterfs.spec.in | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index cb17eaa..ba095b7 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -168,6 +168,8 @@
+ %endif
+ 
+ %if ( 0%{?_with_systemd:1} )
++%global service_enable()   /bin/systemctl --quiet enable %1.service || : \
++%{nil}
+ %global service_start()   /bin/systemctl --quiet start %1.service || : \
+ %{nil}
+ %global service_stop()    /bin/systemctl --quiet stop %1.service || :\
+@@ -181,7 +183,7 @@
+ %global glustereventsd_svcfile %{_unitdir}/glustereventsd.service
+ %global glusterfssharedstorage_svcfile %{_unitdir}/glusterfssharedstorage.service
+ %else
+-%global systemd_post()  /sbin/chkconfig --add %1 >/dev/null 2>&1 || : \
++%global service_enable()  /sbin/chkconfig --add %1 >/dev/null 2>&1 || : \
+ %{nil}
+ %global systemd_preun() /sbin/chkconfig --del %1 >/dev/null 2>&1 || : \
+ %{nil}
+@@ -926,7 +928,7 @@ exit 0
+ 
+ %if ( 0%{!?_without_events:1} )
+ %post events
+-%systemd_post glustereventsd
++%service_enable glustereventsd
+ %endif
+ 
+ %if ( 0%{!?_without_server:1} )
+@@ -951,9 +953,9 @@ exit 0
+ %if ( 0%{!?_without_server:1} )
+ %post server
+ # Legacy server
+-%systemd_post glusterd
++%service_enable glusterd
+ %if ( 0%{_for_fedora_koji_builds} )
+-%systemd_post glusterfsd
++%service_enable glusterfsd
+ %endif
+ # ".cmd_log_history" is renamed to "cmd_history.log" in GlusterFS-3.7 .
+ # While upgrading glusterfs-server package form GlusterFS version <= 3.6 to
+-- 
+1.8.3.1
+

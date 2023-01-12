@@ -1,0 +1,35 @@
+From 030b5681d47268c591a72035d5a2419234bd1f5f Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Thu, 11 Jul 2019 12:44:55 +0530
+Subject: [PATCH 236/255] Revert "shd/mux: Fix race between mux_proc unlink and
+ stop"
+
+This reverts commit e386fb4f4baf834e6a8fc25cc2fbbb17eb0a7a56.
+
+BUG: 1471742
+Change-Id: I6c52835981389fc5bfeb43483feb581ad8507990
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/175945
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-shd-svc.c | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+index dbe2560..d81d760 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+@@ -694,9 +694,6 @@ glusterd_shdsvc_stop(glusterd_svc_t *svc, int sig)
+         gf_is_service_running(svc->proc.pidfile, &pid);
+         cds_list_del_init(&svc->mux_svc);
+         empty = cds_list_empty(&svc_proc->svcs);
+-        if (empty) {
+-            cds_list_del_init(&svc_proc->svc_proc_list);
+-        }
+     }
+     pthread_mutex_unlock(&conf->attach_lock);
+     if (empty) {
+-- 
+1.8.3.1
+

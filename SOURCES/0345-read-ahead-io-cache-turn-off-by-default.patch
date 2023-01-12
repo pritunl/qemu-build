@@ -1,0 +1,82 @@
+From d45c64e17e1eb8003ac1086cbd3abea32414c7f9 Mon Sep 17 00:00:00 2001
+From: Raghavendra Gowdappa <rgowdapp@redhat.com>
+Date: Tue, 12 Feb 2019 18:33:44 +0530
+Subject: [PATCH 345/346] read-ahead/io-cache: turn off by default
+
+We've found perf xlators io-cache and read-ahead not adding any
+performance improvement. At best read-ahead is redundant due to kernel
+read-ahead and at worst io-cache is degrading the performance for
+workloads that doesn't involve re-read. Given that VFS already have
+both these functionalities, this patch makes these two
+translators turned off by default for native fuse mounts.
+
+For non-native fuse mounts like gfapi (NFS-ganesha/samba) we can have
+these xlators on by having custom profiles.
+
+>Change-Id: Ie7535788909d4c741844473696f001274dc0bb60
+>Signed-off-by: Raghavendra Gowdappa <rgowdapp@redhat.com>
+>fixes: bz#1676479
+Upstream fix link: https://review.gluster.org/#/c/glusterfs/+/22203/
+
+BUG: 1788656
+Change-Id: Ie7535788909d4c741844473696f001274dc0bb60
+Signed-off-by: Sunil Kumar Acharya <sheggodu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/188967
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ tests/basic/ec/self-heal.t                      | 2 ++
+ tests/basic/glusterd/volfile_server_switch.t    | 2 +-
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c | 4 ++--
+ 3 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/tests/basic/ec/self-heal.t b/tests/basic/ec/self-heal.t
+index d217559..6329bb6 100644
+--- a/tests/basic/ec/self-heal.t
++++ b/tests/basic/ec/self-heal.t
+@@ -131,6 +131,8 @@ TEST $CLI volume create $V0 redundancy 2 $H0:$B0/${V0}{0..5}
+ TEST $CLI volume set $V0 client-log-level DEBUG
+ #Write-behind has a bug where lookup can race over write which leads to size mismatch on the mount after a 'cp'
+ TEST $CLI volume set $V0 performance.write-behind off
++#md-cache can return stale stat due to default timeout being 1 sec
++TEST $CLI volume set $V0 performance.stat-prefetch off
+ EXPECT "Created" volinfo_field $V0 'Status'
+ TEST $CLI volume start $V0
+ EXPECT_WITHIN $PROCESS_UP_TIMEOUT "Started" volinfo_field $V0 'Status'
+diff --git a/tests/basic/glusterd/volfile_server_switch.t b/tests/basic/glusterd/volfile_server_switch.t
+index 3090609..e11cfed 100644
+--- a/tests/basic/glusterd/volfile_server_switch.t
++++ b/tests/basic/glusterd/volfile_server_switch.t
+@@ -34,7 +34,7 @@ TEST glusterfs --volfile-id=/$V0 --volfile-server=$H1 --volfile-server=$H2 --vol
+ 
+ TEST kill_glusterd 1
+ 
+-TEST $CLI_2 volume set $V0 performance.io-cache off
++TEST $CLI_2 volume set $V0 performance.write-behind off
+ 
+ # make sure by this time directory will be created
+ # TODO: suggest ideal time to wait
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index 16601a2..9001b88 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -2235,7 +2235,7 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+     {.key = "performance.read-ahead",
+      .voltype = "performance/read-ahead",
+      .option = "!perf",
+-     .value = "on",
++     .value = "off",
+      .op_version = 1,
+      .description = "enable/disable read-ahead translator in the volume.",
+      .flags = VOLOPT_FLAG_CLIENT_OPT | VOLOPT_FLAG_XLATOR_OPT},
+@@ -2249,7 +2249,7 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+     {.key = "performance.io-cache",
+      .voltype = "performance/io-cache",
+      .option = "!perf",
+-     .value = "on",
++     .value = "off",
+      .op_version = 1,
+      .description = "enable/disable io-cache translator in the volume.",
+      .flags = VOLOPT_FLAG_CLIENT_OPT},
+-- 
+1.8.3.1
+

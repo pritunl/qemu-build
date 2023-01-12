@@ -1,0 +1,78 @@
+From 5c85ce7363b658bc8fa643742626109efe3ade0c Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Thu, 11 Jul 2019 12:44:04 +0530
+Subject: [PATCH 233/255] Revert "graph/shd: Use glusterfs_graph_deactivate to
+ free the xl rec"
+
+This reverts commit 8cc6d8af00303c445b94715c92fe9e3e01edb867.
+
+BUG: 1471742
+Change-Id: Ib90fe89b85f4143db29702338decec76c83872bc
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/175942
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/graph.c           | 2 +-
+ libglusterfs/src/xlator.c          | 9 +--------
+ xlators/features/shard/src/shard.c | 3 ---
+ 3 files changed, 2 insertions(+), 12 deletions(-)
+
+diff --git a/libglusterfs/src/graph.c b/libglusterfs/src/graph.c
+index 5b95fd6..27d9335 100644
+--- a/libglusterfs/src/graph.c
++++ b/libglusterfs/src/graph.c
+@@ -1394,7 +1394,7 @@ glusterfs_graph_cleanup(void *arg)
+ 
+     pthread_mutex_lock(&ctx->cleanup_lock);
+     {
+-        glusterfs_graph_deactivate(graph);
++        glusterfs_graph_fini(graph);
+         glusterfs_graph_destroy(graph);
+     }
+     pthread_mutex_unlock(&ctx->cleanup_lock);
+diff --git a/libglusterfs/src/xlator.c b/libglusterfs/src/xlator.c
+index d9d3441..71e1ed4 100644
+--- a/libglusterfs/src/xlator.c
++++ b/libglusterfs/src/xlator.c
+@@ -659,7 +659,6 @@ xlator_fini_rec(xlator_t *xl)
+         trav = trav->next;
+     }
+ 
+-    xl->cleanup_starting = 1;
+     if (xl->init_succeeded) {
+         if (xl->fini) {
+             old_THIS = THIS;
+@@ -667,14 +666,8 @@ xlator_fini_rec(xlator_t *xl)
+ 
+             xl->fini(xl);
+ 
+-            if (xl->local_pool) {
++            if (xl->local_pool)
+                 mem_pool_destroy(xl->local_pool);
+-                xl->local_pool = NULL;
+-            }
+-            if (xl->itable) {
+-                inode_table_destroy(xl->itable);
+-                xl->itable = NULL;
+-            }
+ 
+             THIS = old_THIS;
+         } else {
+diff --git a/xlators/features/shard/src/shard.c b/xlators/features/shard/src/shard.c
+index 31c7eec..b248767 100644
+--- a/xlators/features/shard/src/shard.c
++++ b/xlators/features/shard/src/shard.c
+@@ -6785,9 +6785,6 @@ fini(xlator_t *this)
+ 
+     GF_VALIDATE_OR_GOTO("shard", this, out);
+ 
+-    /*Itable was not created by shard, hence setting to NULL.*/
+-    this->itable = NULL;
+-
+     mem_pool_destroy(this->local_pool);
+     this->local_pool = NULL;
+ 
+-- 
+1.8.3.1
+

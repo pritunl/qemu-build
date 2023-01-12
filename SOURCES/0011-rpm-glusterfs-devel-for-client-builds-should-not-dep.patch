@@ -1,0 +1,138 @@
+From 40eb62a8872ce061416e899fb6c0784b6253ab16 Mon Sep 17 00:00:00 2001
+From: Niels de Vos <ndevos@redhat.com>
+Date: Fri, 7 Dec 2018 14:05:21 +0530
+Subject: [PATCH 11/52] rpm: glusterfs-devel for client-builds should not
+ depend on -server
+
+glusterfs-devel for client-side packages should *not* include the
+libgfdb.so symlink and libgfdb.pc file or any of the libchangelog
+ones.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Ifb4a9cf48841e5af5dd0a98b6de51e2ee469fc56
+Signed-off-by: Niels de Vos <ndevos@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/51019
+Reviewed-by: Balamurugan Arumugam <barumuga@redhat.com>
+Tested-by: Balamurugan Arumugam <barumuga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/60139
+Tested-by: Milind Changire <mchangir@redhat.com>
+---
+ glusterfs.spec.in | 86 +++++++++++++++++++++++++++++++++++++++----------------
+ 1 file changed, 62 insertions(+), 24 deletions(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index b70dbfc..1c631db 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -450,30 +450,6 @@ is in user space and easily manageable.
+ This package provides support to FUSE based clients and inlcudes the
+ glusterfs(d) binary.
+ 
+-%if ( 0%{!?_without_server:1} )
+-%package ganesha
+-Summary:          NFS-Ganesha configuration
+-Group:            Applications/File
+-
+-Requires:         %{name}-server%{?_isa} = %{version}-%{release}
+-Requires:         nfs-ganesha-gluster, pcs, dbus
+-%if ( 0%{?rhel} && 0%{?rhel} == 6 )
+-Requires:         cman, pacemaker, corosync
+-%endif
+-
+-%description ganesha
+-GlusterFS is a distributed file-system capable of scaling to several
+-petabytes. It aggregates various storage bricks over Infiniband RDMA
+-or TCP/IP interconnect into one large parallel network file
+-system. GlusterFS is one of the most sophisticated file systems in
+-terms of features and extensibility.  It borrows a powerful concept
+-called Translators from GNU Hurd kernel. Much of the code in GlusterFS
+-is in user space and easily manageable.
+-
+-This package provides the configuration and related files for using
+-NFS-Ganesha as the NFS server using GlusterFS
+-%endif
+-
+ %if ( 0%{!?_without_georeplication:1} )
+ %package geo-replication
+ Summary:          GlusterFS Geo-replication
+@@ -1157,6 +1133,62 @@ exit 0
+ %exclude %{_datadir}/glusterfs/run-tests.sh
+ %exclude %{_datadir}/glusterfs/tests
+ %endif
++%if 0%{?_without_server:1}
++%exclude %{_sysconfdir}/glusterfs/gluster-rsyslog-5.8.conf
++%exclude %{_sysconfdir}/glusterfs/gluster-rsyslog-7.2.conf
++%exclude %{_sysconfdir}/glusterfs/glusterd.vol
++%exclude %{_sysconfdir}/glusterfs/glusterfs-georep-logrotate
++%exclude %{_sysconfdir}/glusterfs/glusterfs-logrotate
++%exclude %{_sysconfdir}/glusterfs/group-db-workload
++%exclude %{_sysconfdir}/glusterfs/group-distributed-virt
++%exclude %{_sysconfdir}/glusterfs/group-gluster-block
++%exclude %{_sysconfdir}/glusterfs/group-metadata-cache
++%exclude %{_sysconfdir}/glusterfs/group-nl-cache
++%exclude %{_sysconfdir}/glusterfs/group-virt.example
++%exclude %{_sysconfdir}/glusterfs/logger.conf.example
++%exclude %{_sysconfdir}/rsyslog.d/gluster.conf.example
++%exclude %{_prefix}/bin/glusterfind
++%exclude %{_prefix}/lib/firewalld/services/glusterfs.xml
++%exclude %{_prefix}/lib/systemd/system/glusterd.service
++%exclude %{_prefix}/lib/systemd/system/glusterfssharedstorage.service
++%exclude %{_prefix}/lib/tmpfiles.d/gluster.conf
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/arbiter.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/bit-rot.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/bitrot-stub.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/index.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/leases.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/locks.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/marker.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/posix-locks.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/quota.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/quotad.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/sdfs.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/selinux.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/snapview-server.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/thin-arbiter.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/trash.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/upcall.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/mgmt/glusterd.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/performance/decompounder.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/protocol/server.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/storage/posix.so
++%exclude %{_libexecdir}/glusterfs/*
++%exclude %{_sbindir}/conf.py
++%exclude %{_sbindir}/gcron.py
++%exclude %{_sbindir}/gf_attach
++%exclude %{_sbindir}/gfind_missing_files
++%exclude %{_sbindir}/glfsheal
++%exclude %{_sbindir}/gluster
++%exclude %{_sbindir}/gluster-setgfid2path
++%exclude %{_sbindir}/glusterd
++%exclude %{_sbindir}/snap_scheduler.py
++%exclude %{_datadir}/glusterfs/scripts/control-cpu-load.sh
++%exclude %{_datadir}/glusterfs/scripts/control-mem.sh
++%exclude %{_datadir}/glusterfs/scripts/post-upgrade-script-for-quota.sh
++%exclude %{_datadir}/glusterfs/scripts/pre-upgrade-script-for-quota.sh
++%exclude %{_datadir}/glusterfs/scripts/stop-all-gluster-processes.sh
++%exclude %{_sharedstatedir}/glusterd/*
++%endif
+ 
+ %files api
+ %exclude %{_libdir}/*.so
+@@ -1190,7 +1222,13 @@ exit 0
+ %exclude %{_includedir}/glusterfs/api
+ %exclude %{_libdir}/libgfapi.so
+ %{_libdir}/*.so
++%if ( 0%{?_without_server:1} )
++%exclude %{_libdir}/pkgconfig/libgfchangelog.pc
++%exclude %{_libdir}/libgfchangelog.so
++%else
+ %{_libdir}/pkgconfig/libgfchangelog.pc
++%{_libdir}/libgfchangelog.so
++%endif
+ 
+ %files client-xlators
+ %dir %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator
+-- 
+1.8.3.1
+

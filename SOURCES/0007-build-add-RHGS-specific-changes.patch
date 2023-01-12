@@ -1,0 +1,620 @@
+From 7744475550cd27f58f536741e9c50c639d3b02d8 Mon Sep 17 00:00:00 2001
+From: "Bala.FA" <barumuga@redhat.com>
+Date: Thu, 6 Dec 2018 20:06:27 +0530
+Subject: [PATCH 07/52] build: add RHGS specific changes
+
+Label: DOWNSTREAM ONLY
+
+Bug-Url: https://bugzilla.redhat.com/show_bug.cgi?id=1074947
+Bug-Url: https://bugzilla.redhat.com/show_bug.cgi?id=1097782
+Bug-Url: https://bugzilla.redhat.com/show_bug.cgi?id=1115267
+Bug-Url: https://bugzilla.redhat.com/show_bug.cgi?id=1221743
+Change-Id: I08333334745adf2350e772c6454ffcfe9c08cb89
+Reviewed-on: https://code.engineering.redhat.com/gerrit/24983
+Reviewed-on: https://code.engineering.redhat.com/gerrit/25451
+Reviewed-on: https://code.engineering.redhat.com/gerrit/25518
+Reviewed-on: https://code.engineering.redhat.com/gerrit/25983
+Signed-off-by: Bala.FA <barumuga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/60134
+Tested-by: Milind Changire <mchangir@redhat.com>
+---
+ glusterfs.spec.in | 485 +++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 481 insertions(+), 4 deletions(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 6be492e..eb04491 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -95,9 +95,16 @@
+ %{?_without_server:%global _without_server --without-server}
+ 
+ # disable server components forcefully as rhel <= 6
+-%if ( 0%{?rhel} && 0%{?rhel} <= 6 )
++%if ( 0%{?rhel} )
++%if ( "%{?dist}" == ".el6rhs" ) || ( "%{?dist}" == ".el7rhs" ) || ( "%{?dist}" == ".el7rhgs" )
++%global _without_server %{nil}
++%else
+ %global _without_server --without-server
+ %endif
++%endif
++
++%global _without_extra_xlators 1
++%global _without_regression_tests 1
+ 
+ # syslog
+ # if you wish to build rpms without syslog logging, compile like this
+@@ -229,7 +236,8 @@ Release:          0.1%{?prereltag:.%{prereltag}}%{?dist}
+ %else
+ Name:             @PACKAGE_NAME@
+ Version:          @PACKAGE_VERSION@
+-Release:          0.@PACKAGE_RELEASE@%{?dist}
++Release:          @PACKAGE_RELEASE@%{?dist}
++ExcludeArch:      i686
+ %endif
+ License:          GPLv2 or LGPLv3+
+ URL:              http://docs.gluster.org/
+@@ -243,8 +251,6 @@ Source8:          glusterfsd.init
+ Source0:          @PACKAGE_NAME@-@PACKAGE_VERSION@.tar.gz
+ %endif
+ 
+-BuildRoot:        %(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXX)
+-
+ Requires(pre):    shadow-utils
+ %if ( 0%{?_with_systemd:1} )
+ BuildRequires:    systemd
+@@ -384,7 +390,9 @@ This package provides cloudsync plugins for archival feature.
+ Summary:          Development Libraries
+ Requires:         %{name}%{?_isa} = %{version}-%{release}
+ # Needed for the Glupy examples to work
++%if ( 0%{!?_without_extra_xlators:1} )
+ Requires:         %{name}-extra-xlators%{?_isa} = %{version}-%{release}
++%endif
+ 
+ %description devel
+ GlusterFS is a distributed file-system capable of scaling to several
+@@ -397,6 +405,7 @@ is in user space and easily manageable.
+ 
+ This package provides the development libraries and include files.
+ 
++%if ( 0%{!?_without_extra_xlators:1} )
+ %package extra-xlators
+ Summary:          Extra Gluster filesystem Translators
+ # We need python-gluster rpm for gluster module's __init__.py in Python
+@@ -415,6 +424,7 @@ is in user space and easily manageable.
+ 
+ This package provides extra filesystem Translators, such as Glupy,
+ for GlusterFS.
++%endif
+ 
+ %package fuse
+ Summary:          Fuse client
+@@ -440,6 +450,30 @@ is in user space and easily manageable.
+ This package provides support to FUSE based clients and inlcudes the
+ glusterfs(d) binary.
+ 
++%if ( 0%{!?_without_server:1} )
++%package ganesha
++Summary:          NFS-Ganesha configuration
++Group:            Applications/File
++
++Requires:         %{name}-server%{?_isa} = %{version}-%{release}
++Requires:         nfs-ganesha-gluster, pcs, dbus
++%if ( 0%{?rhel} && 0%{?rhel} == 6 )
++Requires:         cman, pacemaker, corosync
++%endif
++
++%description ganesha
++GlusterFS is a distributed file-system capable of scaling to several
++petabytes. It aggregates various storage bricks over Infiniband RDMA
++or TCP/IP interconnect into one large parallel network file
++system. GlusterFS is one of the most sophisticated file systems in
++terms of features and extensibility.  It borrows a powerful concept
++called Translators from GNU Hurd kernel. Much of the code in GlusterFS
++is in user space and easily manageable.
++
++This package provides the configuration and related files for using
++NFS-Ganesha as the NFS server using GlusterFS
++%endif
++
+ %if ( 0%{!?_without_georeplication:1} )
+ %package geo-replication
+ Summary:          GlusterFS Geo-replication
+@@ -541,6 +575,7 @@ is in user space and easily manageable.
+ This package provides support to ib-verbs library.
+ %endif
+ 
++%if ( 0%{!?_without_regression_tests:1} )
+ %package regression-tests
+ Summary:          Development Tools
+ Requires:         %{name}%{?_isa} = %{version}-%{release}
+@@ -556,6 +591,7 @@ Requires:         nfs-utils xfsprogs yajl psmisc bc
+ %description regression-tests
+ The Gluster Test Framework, is a suite of scripts used for
+ regression testing of Gluster.
++%endif
+ 
+ %if ( 0%{!?_without_ocf:1} )
+ %package resource-agents
+@@ -1092,6 +1128,16 @@ exit 0
+ %if 0%{?_tmpfilesdir:1} && 0%{!?_without_server:1}
+ %{_tmpfilesdir}/gluster.conf
+ %endif
++%if ( 0%{?_without_extra_xlators:1} )
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/encryption/rot-13.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/quiesce.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/playground/template.so
++%exclude %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/testing/performance/symlink-cache.so
++%endif
++%if ( 0%{?_without_regression_tests:1} )
++%exclude %{_datadir}/glusterfs/run-tests.sh
++%exclude %{_datadir}/glusterfs/tests
++%endif
+ 
+ %files api
+ %exclude %{_libdir}/*.so
+@@ -1134,12 +1180,14 @@ exit 0
+ %dir %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/protocol
+      %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/protocol/client.so
+ 
++%if ( 0%{!?_without_extra_xlators:1} )
+ %files extra-xlators
+ %dir %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator
+ %dir %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features
+      %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/features/quiesce.so
+ %dir %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/playground
+      %{_libdir}/glusterfs/%{version}%{?prereltag}/xlator/playground/template.so
++%endif
+ 
+ %files fuse
+ # glusterfs is a symlink to glusterfsd, -server depends on -fuse.
+@@ -1239,11 +1287,13 @@ exit 0
+      %{_libdir}/glusterfs/%{version}%{?prereltag}/rpc-transport/rdma*
+ %endif
+ 
++%if ( 0%{!?_without_regression_tests:1} )
+ %files regression-tests
+ %dir %{_datadir}/glusterfs
+      %{_datadir}/glusterfs/run-tests.sh
+      %{_datadir}/glusterfs/tests
+ %exclude %{_datadir}/glusterfs/tests/vagrant
++%endif
+ 
+ %if ( 0%{!?_without_ocf:1} )
+ %files resource-agents
+@@ -1424,6 +1474,433 @@ exit 0
+ %endif
+ %endif
+ 
++##-----------------------------------------------------------------------------
++## All %pretrans should be placed here and keep them sorted
++##
++%if 0%{!?_without_server:1}
++%pretrans -p <lua>
++if not posix.access("/bin/bash", "x") then
++    -- initial installation, no shell, no running glusterfsd
++    return 0
++end
++
++-- TODO: move this completely to a lua script
++-- For now, we write a temporary bash script and execute that.
++
++script = [[#!/bin/sh
++pidof -c -o %PPID -x glusterfsd &>/dev/null
++
++if [ $? -eq 0 ]; then
++   pushd . > /dev/null 2>&1
++   for volume in /var/lib/glusterd/vols/*; do cd $volume;
++       vol_type=`grep '^type=' info | awk -F'=' '{print $2}'`
++       volume_started=`grep '^status=' info | awk -F'=' '{print $2}'`
++       if [ $vol_type -eq 0 ] && [ $volume_started -eq 1 ] ; then
++          echo "ERROR: Distribute volumes detected. In-service rolling upgrade requires distribute volume(s) to be stopped."
++          echo "ERROR: Please stop distribute volume(s) before proceeding... exiting!"
++          exit 1;
++       fi
++   done
++
++   popd > /dev/null 2>&1
++   echo "WARNING: Updating glusterfs requires its processes to be killed. This action does NOT incur downtime."
++   echo "WARNING: Ensure to wait for the upgraded server to finish healing before proceeding."
++   echo "WARNING: Refer upgrade section of install guide for more details"
++   echo "Please run # service glusterd stop; pkill glusterfs; pkill glusterfsd; pkill gsyncd.py;"
++   exit 1;
++fi
++]]
++
++-- rpm in RHEL5 does not have os.tmpname()
++-- io.tmpfile() can not be resolved to a filename to pass to bash :-/
++tmpname = "/tmp/glusterfs_pretrans_" .. os.date("%s")
++tmpfile = io.open(tmpname, "w")
++tmpfile:write(script)
++tmpfile:close()
++ok, how, val = os.execute("/bin/bash " .. tmpname)
++os.remove(tmpname)
++if not (ok == 0) then
++   error("Detected running glusterfs processes", ok)
++end
++
++
++
++%pretrans api -p <lua>
++if not posix.access("/bin/bash", "x") then
++    -- initial installation, no shell, no running glusterfsd
++    return 0
++end
++
++-- TODO: move this completely to a lua script
++-- For now, we write a temporary bash script and execute that.
++
++script = [[#!/bin/sh
++pidof -c -o %PPID -x glusterfsd &>/dev/null
++
++if [ $? -eq 0 ]; then
++   pushd . > /dev/null 2>&1
++   for volume in /var/lib/glusterd/vols/*; do cd $volume;
++       vol_type=`grep '^type=' info | awk -F'=' '{print $2}'`
++       volume_started=`grep '^status=' info | awk -F'=' '{print $2}'`
++       if [ $vol_type -eq 0 ] && [ $volume_started -eq 1 ] ; then
++          exit 1;
++       fi
++   done
++
++   popd > /dev/null 2>&1
++   exit 1;
++fi
++]]
++
++-- rpm in RHEL5 does not have os.tmpname()
++-- io.tmpfile() can not be resolved to a filename to pass to bash :-/
++tmpname = "/tmp/glusterfs-api_pretrans_" .. os.date("%s")
++tmpfile = io.open(tmpname, "w")
++tmpfile:write(script)
++tmpfile:close()
++ok, how, val = os.execute("/bin/bash " .. tmpname)
++os.remove(tmpname)
++if not (ok == 0) then
++   error("Detected running glusterfs processes", ok)
++end
++
++
++
++%pretrans api-devel -p <lua>
++if not posix.access("/bin/bash", "x") then
++    -- initial installation, no shell, no running glusterfsd
++    return 0
++end
++
++-- TODO: move this completely to a lua script
++-- For now, we write a temporary bash script and execute that.
++
++script = [[#!/bin/sh
++pidof -c -o %PPID -x glusterfsd &>/dev/null
++
++if [ $? -eq 0 ]; then
++   pushd . > /dev/null 2>&1
++   for volume in /var/lib/glusterd/vols/*; do cd $volume;
++       vol_type=`grep '^type=' info | awk -F'=' '{print $2}'`
++       volume_started=`grep '^status=' info | awk -F'=' '{print $2}'`
++       if [ $vol_type -eq 0 ] && [ $volume_started -eq 1 ] ; then
++          exit 1;
++       fi
++   done
++
++   popd > /dev/null 2>&1
++   exit 1;
++fi
++]]
++
++-- rpm in RHEL5 does not have os.tmpname()
++-- io.tmpfile() can not be resolved to a filename to pass to bash :-/
++tmpname = "/tmp/glusterfs-api-devel_pretrans_" .. os.date("%s")
++tmpfile = io.open(tmpname, "w")
++tmpfile:write(script)
++tmpfile:close()
++ok, how, val = os.execute("/bin/bash " .. tmpname)
++os.remove(tmpname)
++if not (ok == 0) then
++   error("Detected running glusterfs processes", ok)
++end
++
++
++
++%pretrans devel -p <lua>
++if not posix.access("/bin/bash", "x") then
++    -- initial installation, no shell, no running glusterfsd
++    return 0
++end
++
++-- TODO: move this completely to a lua script
++-- For now, we write a temporary bash script and execute that.
++
++script = [[#!/bin/sh
++pidof -c -o %PPID -x glusterfsd &>/dev/null
++
++if [ $? -eq 0 ]; then
++   pushd . > /dev/null 2>&1
++   for volume in /var/lib/glusterd/vols/*; do cd $volume;
++       vol_type=`grep '^type=' info | awk -F'=' '{print $2}'`
++       volume_started=`grep '^status=' info | awk -F'=' '{print $2}'`
++       if [ $vol_type -eq 0 ] && [ $volume_started -eq 1 ] ; then
++          exit 1;
++       fi
++   done
++
++   popd > /dev/null 2>&1
++   exit 1;
++fi
++]]
++
++-- rpm in RHEL5 does not have os.tmpname()
++-- io.tmpfile() can not be resolved to a filename to pass to bash :-/
++tmpname = "/tmp/glusterfs-devel_pretrans_" .. os.date("%s")
++tmpfile = io.open(tmpname, "w")
++tmpfile:write(script)
++tmpfile:close()
++ok, how, val = os.execute("/bin/bash " .. tmpname)
++os.remove(tmpname)
++if not (ok == 0) then
++   error("Detected running glusterfs processes", ok)
++end
++
++
++
++%pretrans fuse -p <lua>
++if not posix.access("/bin/bash", "x") then
++    -- initial installation, no shell, no running glusterfsd
++    return 0
++end
++
++-- TODO: move this completely to a lua script
++-- For now, we write a temporary bash script and execute that.
++
++script = [[#!/bin/sh
++pidof -c -o %PPID -x glusterfsd &>/dev/null
++
++if [ $? -eq 0 ]; then
++   pushd . > /dev/null 2>&1
++   for volume in /var/lib/glusterd/vols/*; do cd $volume;
++       vol_type=`grep '^type=' info | awk -F'=' '{print $2}'`
++       volume_started=`grep '^status=' info | awk -F'=' '{print $2}'`
++       if [ $vol_type -eq 0 ] && [ $volume_started -eq 1 ] ; then
++          exit 1;
++       fi
++   done
++
++   popd > /dev/null 2>&1
++   exit 1;
++fi
++]]
++
++-- rpm in RHEL5 does not have os.tmpname()
++-- io.tmpfile() can not be resolved to a filename to pass to bash :-/
++tmpname = "/tmp/glusterfs-fuse_pretrans_" .. os.date("%s")
++tmpfile = io.open(tmpname, "w")
++tmpfile:write(script)
++tmpfile:close()
++ok, how, val = os.execute("/bin/bash " .. tmpname)
++os.remove(tmpname)
++if not (ok == 0) then
++   error("Detected running glusterfs processes", ok)
++end
++
++
++
++%if 0%{?_can_georeplicate}
++%if ( 0%{!?_without_georeplication:1} )
++%pretrans geo-replication -p <lua>
++if not posix.access("/bin/bash", "x") then
++    -- initial installation, no shell, no running glusterfsd
++    return 0
++end
++
++-- TODO: move this completely to a lua script
++-- For now, we write a temporary bash script and execute that.
++
++script = [[#!/bin/sh
++pidof -c -o %PPID -x glusterfsd &>/dev/null
++
++if [ $? -eq 0 ]; then
++   pushd . > /dev/null 2>&1
++   for volume in /var/lib/glusterd/vols/*; do cd $volume;
++       vol_type=`grep '^type=' info | awk -F'=' '{print $2}'`
++       volume_started=`grep '^status=' info | awk -F'=' '{print $2}'`
++       if [ $vol_type -eq 0 ] && [ $volume_started -eq 1 ] ; then
++          exit 1;
++       fi
++   done
++
++   popd > /dev/null 2>&1
++   exit 1;
++fi
++]]
++
++-- rpm in RHEL5 does not have os.tmpname()
++-- io.tmpfile() can not be resolved to a filename to pass to bash :-/
++tmpname = "/tmp/glusterfs-geo-replication_pretrans_" .. os.date("%s")
++tmpfile = io.open(tmpname, "w")
++tmpfile:write(script)
++tmpfile:close()
++ok, how, val = os.execute("/bin/bash " .. tmpname)
++os.remove(tmpname)
++if not (ok == 0) then
++   error("Detected running glusterfs processes", ok)
++end
++%endif
++%endif
++
++
++
++%pretrans libs -p <lua>
++if not posix.access("/bin/bash", "x") then
++    -- initial installation, no shell, no running glusterfsd
++    return 0
++end
++
++-- TODO: move this completely to a lua script
++-- For now, we write a temporary bash script and execute that.
++
++script = [[#!/bin/sh
++pidof -c -o %PPID -x glusterfsd &>/dev/null
++
++if [ $? -eq 0 ]; then
++   pushd . > /dev/null 2>&1
++   for volume in /var/lib/glusterd/vols/*; do cd $volume;
++       vol_type=`grep '^type=' info | awk -F'=' '{print $2}'`
++       volume_started=`grep '^status=' info | awk -F'=' '{print $2}'`
++       if [ $vol_type -eq 0 ] && [ $volume_started -eq 1 ] ; then
++          exit 1;
++       fi
++   done
++
++   popd > /dev/null 2>&1
++   exit 1;
++fi
++]]
++
++-- rpm in RHEL5 does not have os.tmpname()
++-- io.tmpfile() can not be resolved to a filename to pass to bash :-/
++tmpname = "/tmp/glusterfs-libs_pretrans_" .. os.date("%s")
++tmpfile = io.open(tmpname, "w")
++tmpfile:write(script)
++tmpfile:close()
++ok, how, val = os.execute("/bin/bash " .. tmpname)
++os.remove(tmpname)
++if not (ok == 0) then
++   error("Detected running glusterfs processes", ok)
++end
++
++
++
++%if ( 0%{!?_without_rdma:1} )
++%pretrans rdma -p <lua>
++if not posix.access("/bin/bash", "x") then
++    -- initial installation, no shell, no running glusterfsd
++    return 0
++end
++
++-- TODO: move this completely to a lua script
++-- For now, we write a temporary bash script and execute that.
++
++script = [[#!/bin/sh
++pidof -c -o %PPID -x glusterfsd &>/dev/null
++
++if [ $? -eq 0 ]; then
++   pushd . > /dev/null 2>&1
++   for volume in /var/lib/glusterd/vols/*; do cd $volume;
++       vol_type=`grep '^type=' info | awk -F'=' '{print $2}'`
++       volume_started=`grep '^status=' info | awk -F'=' '{print $2}'`
++       if [ $vol_type -eq 0 ] && [ $volume_started -eq 1 ] ; then
++          exit 1;
++       fi
++   done
++
++   popd > /dev/null 2>&1
++   exit 1;
++fi
++]]
++
++-- rpm in RHEL5 does not have os.tmpname()
++-- io.tmpfile() can not be resolved to a filename to pass to bash :-/
++tmpname = "/tmp/glusterfs-rdma_pretrans_" .. os.date("%s")
++tmpfile = io.open(tmpname, "w")
++tmpfile:write(script)
++tmpfile:close()
++ok, how, val = os.execute("/bin/bash " .. tmpname)
++os.remove(tmpname)
++if not (ok == 0) then
++   error("Detected running glusterfs processes", ok)
++end
++%endif
++
++
++
++%if ( 0%{!?_without_ocf:1} )
++%pretrans resource-agents -p <lua>
++if not posix.access("/bin/bash", "x") then
++    -- initial installation, no shell, no running glusterfsd
++    return 0
++end
++
++-- TODO: move this completely to a lua script
++-- For now, we write a temporary bash script and execute that.
++
++script = [[#!/bin/sh
++pidof -c -o %PPID -x glusterfsd &>/dev/null
++
++if [ $? -eq 0 ]; then
++   pushd . > /dev/null 2>&1
++   for volume in /var/lib/glusterd/vols/*; do cd $volume;
++       vol_type=`grep '^type=' info | awk -F'=' '{print $2}'`
++       volume_started=`grep '^status=' info | awk -F'=' '{print $2}'`
++       if [ $vol_type -eq 0 ] && [ $volume_started -eq 1 ] ; then
++          exit 1;
++       fi
++   done
++
++   popd > /dev/null 2>&1
++   exit 1;
++fi
++]]
++
++-- rpm in RHEL5 does not have os.tmpname()
++-- io.tmpfile() can not be resolved to a filename to pass to bash :-/
++tmpname = "/tmp/glusterfs-resource-agents_pretrans_" .. os.date("%s")
++tmpfile = io.open(tmpname, "w")
++tmpfile:write(script)
++tmpfile:close()
++ok, how, val = os.execute("/bin/bash " .. tmpname)
++os.remove(tmpname)
++if not (ok == 0) then
++   error("Detected running glusterfs processes", ok)
++end
++%endif
++
++
++
++%pretrans server -p <lua>
++if not posix.access("/bin/bash", "x") then
++    -- initial installation, no shell, no running glusterfsd
++    return 0
++end
++
++-- TODO: move this completely to a lua script
++-- For now, we write a temporary bash script and execute that.
++
++script = [[#!/bin/sh
++pidof -c -o %PPID -x glusterfsd &>/dev/null
++
++if [ $? -eq 0 ]; then
++   pushd . > /dev/null 2>&1
++   for volume in /var/lib/glusterd/vols/*; do cd $volume;
++       vol_type=`grep '^type=' info | awk -F'=' '{print $2}'`
++       volume_started=`grep '^status=' info | awk -F'=' '{print $2}'`
++       if [ $vol_type -eq 0 ] && [ $volume_started -eq 1 ] ; then
++          exit 1;
++       fi
++   done
++
++   popd > /dev/null 2>&1
++   exit 1;
++fi
++]]
++
++-- rpm in RHEL5 does not have os.tmpname()
++-- io.tmpfile() can not be resolved to a filename to pass to bash :-/
++tmpname = "/tmp/glusterfs-server_pretrans_" .. os.date("%s")
++tmpfile = io.open(tmpname, "w")
++tmpfile:write(script)
++tmpfile:close()
++ok, how, val = os.execute("/bin/bash " .. tmpname)
++os.remove(tmpname)
++if not (ok == 0) then
++   error("Detected running glusterfs processes", ok)
++end
++%endif
++
+ %changelog
+ * Wed Mar 6 2019 Kaleb S. KEITHLEY <kkeithle@redhat.com>
+ - remove unneeded ldconfig in scriptlets
+-- 
+1.8.3.1
+

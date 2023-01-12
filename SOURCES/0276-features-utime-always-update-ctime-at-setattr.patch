@@ -1,0 +1,74 @@
+From 7f5658a299081cec4c77d3cca4e70099cd59b1fc Mon Sep 17 00:00:00 2001
+From: Kinglong Mee <kinglongmee@gmail.com>
+Date: Mon, 5 Aug 2019 11:08:02 +0800
+Subject: [PATCH 276/276] features/utime: always update ctime at setattr
+
+For the nfs EXCLUSIVE mode create may sets a later time
+to mtime (at verifier), it should not set to ctime for
+storage.ctime does not allowed set ctime to a earlier time.
+
+ /* Earlier, mdata was updated only if the existing time is less
+  * than the time to be updated. This would fail the scenarios
+  * where mtime can be set to any time using the syscall. Hence
+  * just updating without comparison. But the ctime is not
+  * allowed to changed to older date.
+  */
+
+According to kernel's setattr, always set ctime at setattr,
+and doesnot set ctime from mtime at storage.ctime.
+
+>Change-Id: I5cfde6cb7f8939da9617506e3dc80bd840e0d749
+>fixes: bz#1737288
+>Signed-off-by: Kinglong Mee <kinglongmee@gmail.com>
+Upstream Patch: https://review.gluster.org/#/c/glusterfs/+/23154/
+
+BUG: 1737705
+Change-Id: I5cfde6cb7f8939da9617506e3dc80bd840e0d749
+Signed-off-by: Sunil Kumar Acharya <sheggodu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/178225
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ xlators/features/utime/src/utime-gen-fops-c.py | 13 +------------
+ xlators/storage/posix/src/posix-metadata.c     |  2 +-
+ 2 files changed, 2 insertions(+), 13 deletions(-)
+
+diff --git a/xlators/features/utime/src/utime-gen-fops-c.py b/xlators/features/utime/src/utime-gen-fops-c.py
+index 8730a51..a8637ff 100755
+--- a/xlators/features/utime/src/utime-gen-fops-c.py
++++ b/xlators/features/utime/src/utime-gen-fops-c.py
+@@ -82,18 +82,7 @@ gf_utime_@NAME@ (call_frame_t *frame, xlator_t *this,
+              @LONG_ARGS@)
+ {
+         gl_timespec_get(&frame->root->ctime);
+-
+-        if (!valid) {
+-                frame->root->flags |= MDATA_CTIME;
+-        }
+-
+-        if (valid & (GF_SET_ATTR_UID | GF_SET_ATTR_GID)) {
+-                frame->root->flags |= MDATA_CTIME;
+-        }
+-
+-        if (valid & GF_SET_ATTR_MODE) {
+-                frame->root->flags |= MDATA_CTIME;
+-        }
++        frame->root->flags |= MDATA_CTIME;
+ 
+         STACK_WIND (frame, gf_utime_@NAME@_cbk, FIRST_CHILD(this),
+                     FIRST_CHILD(this)->fops->@NAME@, @SHORT_ARGS@);
+diff --git a/xlators/storage/posix/src/posix-metadata.c b/xlators/storage/posix/src/posix-metadata.c
+index 57791fa..5cbdc98 100644
+--- a/xlators/storage/posix/src/posix-metadata.c
++++ b/xlators/storage/posix/src/posix-metadata.c
+@@ -631,7 +631,7 @@ posix_update_utime_in_mdata(xlator_t *this, const char *real_path, int fd,
+             tv.tv_sec = stbuf->ia_mtime;
+             SET_TIMESPEC_NSEC_OR_TIMEVAL_USEC(tv, stbuf->ia_mtime_nsec);
+ 
+-            flag.ctime = 1;
++            flag.ctime = 0;
+             flag.mtime = 1;
+             flag.atime = 0;
+ 
+-- 
+1.8.3.1
+

@@ -1,0 +1,38 @@
+From f880df2ce4706dd748a09d3d6db57d49f62a234c Mon Sep 17 00:00:00 2001
+From: "Kaleb S. KEITHLEY" <kkeithle@redhat.com>
+Date: Thu, 28 May 2020 08:26:47 -0400
+Subject: [PATCH 383/383] common-ha: ganesha-ha.sh bad test for {rhel,centos}
+ for pcs options
+
+bash [[ ... =~ ... ]] built-in returns _0_ when the regex matches,
+not 1, thus the sense of the test is backwards and never correctly
+detects rhel or centos.
+
+https://review.gluster.org/#/c/glusterfs/+/24502/
+
+Change-Id: Ic9e60aae4ea38aff8f13979080995e60621a68fe
+BUG: 1840794
+Signed-off-by: Kaleb S. KEITHLEY <kkeithle@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/201686
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/ganesha/scripts/ganesha-ha.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/extras/ganesha/scripts/ganesha-ha.sh b/extras/ganesha/scripts/ganesha-ha.sh
+index 4ecf91b..a6814b1 100644
+--- a/extras/ganesha/scripts/ganesha-ha.sh
++++ b/extras/ganesha/scripts/ganesha-ha.sh
+@@ -1054,7 +1054,7 @@ main()
+         # Fedora 29+ and rhel/centos 8 has PCS-0.10.x
+         # default is pcs-0.10.x options but check for
+         # rhel/centos 7 (pcs-0.9.x) and adjust accordingly
+-        if [[ ${ID} =~ {rhel,centos} ]]; then
++        if [[ ! ${ID} =~ {rhel,centos} ]]; then
+             if [[ ${VERSION_ID} == 7.* ]]; then
+                 PCS9OR10_PCS_CNAME_OPTION="--name"
+                 PCS9OR10_PCS_CLONE_OPTION="--clone"
+-- 
+1.8.3.1
+

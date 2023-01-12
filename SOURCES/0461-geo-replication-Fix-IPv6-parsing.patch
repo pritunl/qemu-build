@@ -1,0 +1,127 @@
+From d425ed54261d5bc19aa853854cc3b64647e3c897 Mon Sep 17 00:00:00 2001
+From: Aravinda Vishwanathapura <aravinda@kadalu.io>
+Date: Sun, 12 Jul 2020 12:42:36 +0530
+Subject: [PATCH 461/465] geo-replication: Fix IPv6 parsing
+
+Brick paths in Volinfo used `:` as delimiter, Geo-rep uses split
+based on `:` char. This will go wrong with IPv6.
+
+This patch handles the IPv6 case and handles the split properly.
+Backport of:
+   >Upstream Patch: https://review.gluster.org/#/c/glusterfs/+/24706
+   >Fixes: #1366
+   >Change-Id: I25e88d693744381c0ccf3c1dbf1541b84be2499d
+   >Signed-off-by: Aravinda Vishwanathapura <aravinda@kadalu.io>
+
+BUG: 1855966
+Change-Id: I25e88d693744381c0ccf3c1dbf1541b84be2499d
+Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/208610
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ geo-replication/syncdaemon/master.py     |  5 ++--
+ geo-replication/syncdaemon/syncdutils.py | 43 +++++++++++++++++++++++++++++---
+ 2 files changed, 43 insertions(+), 5 deletions(-)
+
+diff --git a/geo-replication/syncdaemon/master.py b/geo-replication/syncdaemon/master.py
+index 3f98337..08e98f8 100644
+--- a/geo-replication/syncdaemon/master.py
++++ b/geo-replication/syncdaemon/master.py
+@@ -26,7 +26,8 @@ from rconf import rconf
+ from syncdutils import Thread, GsyncdError, escape_space_newline
+ from syncdutils import unescape_space_newline, gauxpfx, escape
+ from syncdutils import lstat, errno_wrap, FreeObject, lf, matching_disk_gfid
+-from syncdutils import NoStimeAvailable, PartialHistoryAvailable
++from syncdutils import NoStimeAvailable, PartialHistoryAvailable, host_brick_split
++
+ 
+ URXTIME = (-1, 0)
+ 
+@@ -1466,7 +1467,7 @@ class GMasterChangelogMixin(GMasterCommon):
+         node = rconf.args.resource_remote
+         node_data = node.split("@")
+         node = node_data[-1]
+-        remote_node_ip = node.split(":")[0]
++        remote_node_ip, _ = host_brick_split(node)
+         self.status.set_slave_node(remote_node_ip)
+ 
+     def changelogs_batch_process(self, changes):
+diff --git a/geo-replication/syncdaemon/syncdutils.py b/geo-replication/syncdaemon/syncdutils.py
+index 7560fa1..f43e13b 100644
+--- a/geo-replication/syncdaemon/syncdutils.py
++++ b/geo-replication/syncdaemon/syncdutils.py
+@@ -883,6 +883,19 @@ class Popen(subprocess.Popen):
+             self.errfail()
+ 
+ 
++def host_brick_split(value):
++    """
++    IPv6 compatible way to split and get the host
++    and brick information. Example inputs:
++    node1.example.com:/exports/bricks/brick1/brick
++    fe80::af0f:df82:844f:ef66%utun0:/exports/bricks/brick1/brick
++    """
++    parts = value.split(":")
++    brick = parts[-1]
++    hostparts = parts[0:-1]
++    return (":".join(hostparts), brick)
++
++
+ class Volinfo(object):
+ 
+     def __init__(self, vol, host='localhost', prelude=[], master=True):
+@@ -925,7 +938,7 @@ class Volinfo(object):
+     @memoize
+     def bricks(self):
+         def bparse(b):
+-            host, dirp = b.find("name").text.split(':', 2)
++            host, dirp = host_brick_split(b.find("name").text)
+             return {'host': host, 'dir': dirp, 'uuid': b.find("hostUuid").text}
+         return [bparse(b) for b in self.get('brick')]
+ 
+@@ -1001,6 +1014,16 @@ class VolinfoFromGconf(object):
+     def is_hot(self, brickpath):
+         return False
+ 
++    def is_uuid(self, value):
++        try:
++            uuid.UUID(value)
++            return True
++        except ValueError:
++            return False
++
++    def possible_path(self, value):
++        return "/" in value
++
+     @property
+     @memoize
+     def bricks(self):
+@@ -1014,8 +1037,22 @@ class VolinfoFromGconf(object):
+         out = []
+         for b in bricks_data:
+             parts = b.split(":")
+-            bpath = parts[2] if len(parts) == 3 else ""
+-            out.append({"host": parts[1], "dir": bpath, "uuid": parts[0]})
++            b_uuid = None
++            if self.is_uuid(parts[0]):
++                b_uuid = parts[0]
++                # Set all parts except first
++                parts = parts[1:]
++
++            if self.possible_path(parts[-1]):
++                bpath = parts[-1]
++                # Set all parts except last
++                parts = parts[0:-1]
++
++            out.append({
++                "host": ":".join(parts),   # if remaining parts are IPv6 name
++                "dir": bpath,
++                "uuid": b_uuid
++            })
+ 
+         return out
+ 
+-- 
+1.8.3.1
+

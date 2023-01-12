@@ -1,0 +1,51 @@
+From 0d8c6d78130d22c475010bcce8055073b19de82a Mon Sep 17 00:00:00 2001
+From: Xie Changlong <xiechanglong@cmss.chinamobile.com>
+Date: Fri, 17 May 2019 18:33:11 +0800
+Subject: [PATCH 358/362] inode: fix wrong loop count in __inode_ctx_free
+
+Avoid serious memory leak
+
+Backport of :
+>fixes: bz#1711240
+>Upstream patch link: https://review.gluster.org/#/c/glusterfs/+/22738/
+>Change-Id: Ic61a8fdd0e941e136c98376a87b5a77fa8c22316
+>Signed-off-by: Xie Changlong <xiechanglong@cmss.chinamobile.com>
+
+BUG: 1781543
+Change-Id: I601ebb6cd6744a61c64edd3d21d3b9a0edf1e95b
+Signed-off-by: Rinku Kothiya <rkothiya@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/195611
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/inode.c | 11 ++++++-----
+ 1 file changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/libglusterfs/src/inode.c b/libglusterfs/src/inode.c
+index 5331e93..9dbb25b 100644
+--- a/libglusterfs/src/inode.c
++++ b/libglusterfs/src/inode.c
+@@ -402,14 +402,15 @@ __inode_ctx_free(inode_t *inode)
+         goto noctx;
+     }
+ 
+-    for (index = 0; index < inode->table->xl->graph->xl_count; index++) {
++    for (index = 0; index < inode->table->ctxcount; index++) {
+         if (inode->_ctx[index].value1 || inode->_ctx[index].value2) {
+             xl = (xlator_t *)(long)inode->_ctx[index].xl_key;
+-            old_THIS = THIS;
+-            THIS = xl;
+-            if (!xl->call_cleanup && xl->cbks->forget)
++            if (xl && !xl->call_cleanup && xl->cbks->forget) {
++                old_THIS = THIS;
++                THIS = xl;
+                 xl->cbks->forget(xl, inode);
+-            THIS = old_THIS;
++                THIS = old_THIS;
++            }
+         }
+     }
+ 
+-- 
+1.8.3.1
+

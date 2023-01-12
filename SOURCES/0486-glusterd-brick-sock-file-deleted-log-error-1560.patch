@@ -1,0 +1,87 @@
+From 9b19d4841fc3002d30ec3e44c85ec37682c11bfb Mon Sep 17 00:00:00 2001
+From: schaffung <ssivakum@redhat.com>
+Date: Thu, 22 Oct 2020 13:07:09 +0530
+Subject: [PATCH 486/511] glusterd: brick sock file deleted, log error (#1560)
+
+Issue: The satus of the brick as tracked by glusterd is
+stopped if the socket file corresponding to a running
+brick process is absent in /var/run/gluster. The glusterd
+keeps on trying to reconnect ( rpc layer ) but it fails.
+
+Code change: Rather than registering the rpc connection
+with the help of the given sockfilepath which is not
+even present as it keeps on reconnecting, why not log
+this as an error and not try to reconnect using the
+non-existing sock file path.
+
+>Fixes: #1526
+>Change-Id: I6c81691ab1624c66dec74f5ffcc6c383201ac757
+>Signed-off-by: srijan-sivakumar <ssivakumar@redhat.com>
+Upstream Patch : https://github.com/gluster/glusterfs/pull/1560
+
+BUG: 1882923
+Change-Id: I6c81691ab1624c66dec74f5ffcc6c383201ac757
+Signed-off-by: Srijan Sivakumar <ssivakum@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/220376
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-utils.c | 27 +++++++++++++++++++++++++--
+ 1 file changed, 25 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index d25fc8a..a72c494 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -6310,7 +6310,7 @@ find_compatible_brick(glusterd_conf_t *conf, glusterd_volinfo_t *volinfo,
+    check if passed pid is match with running  glusterfs process
+ */
+ 
+-int
++static int
+ glusterd_get_sock_from_brick_pid(int pid, char *sockpath, size_t len)
+ {
+     char fname[128] = "";
+@@ -6383,7 +6383,17 @@ glusterd_get_sock_from_brick_pid(int pid, char *sockpath, size_t len)
+ 
+     if (tmpsockpath[0]) {
+         strncpy(sockpath, tmpsockpath, i);
+-        ret = 0;
++        /*
++         * Condition to check if the brick socket file is present
++         * in the stated path or not. This helps in preventing
++         * constant re-connect triggered in the RPC layer and also
++         * a log message would help out the user.
++         */
++        ret = sys_access(sockpath, F_OK);
++        if (ret) {
++            gf_smsg(this->name, GF_LOG_ERROR, 0, GD_MSG_FILE_NOT_FOUND,
++                    "%s not found", sockpath, NULL);
++        }
+     }
+ 
+     return ret;
+@@ -6581,7 +6591,20 @@ glusterd_brick_start(glusterd_volinfo_t *volinfo,
+             if (!is_brick_mx_enabled()) {
+                 glusterd_set_brick_socket_filepath(
+                     volinfo, brickinfo, socketpath, sizeof(socketpath));
++                /*
++                 * Condition to check if the brick socket file is present
++                 * in the stated path or not. This helps in preventing
++                 * constant re-connect triggered in the RPC layer and also
++                 * a log message would help out the user.
++                 */
++                ret = sys_access(socketpath, F_OK);
++                if (ret) {
++                    gf_smsg(this->name, GF_LOG_ERROR, 0, GD_MSG_FILE_NOT_FOUND,
++                            "%s not found", socketpath, NULL);
++                    goto out;
++                }
+             }
++
+             gf_log(this->name, GF_LOG_DEBUG,
+                    "Using %s as sockfile for brick %s of volume %s ",
+                    socketpath, brickinfo->path, volinfo->volname);
+-- 
+1.8.3.1
+

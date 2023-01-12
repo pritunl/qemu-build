@@ -1,0 +1,152 @@
+From b166826b283d9071532174ebbec857dea600064b Mon Sep 17 00:00:00 2001
+From: Ashish Pandey <aspandey@redhat.com>
+Date: Thu, 23 Jul 2020 11:07:32 +0530
+Subject: [PATCH 460/465] cluster/ec: Remove stale entries from indices/xattrop
+ folder
+
+Problem:
+If a gfid is present in indices/xattrop folder while
+the file/dir is actaully healthy and all the xattrs are healthy,
+it causes lot of lookups by shd on an entry which does not need
+to be healed.
+This whole process eats up lot of CPU usage without doing meaningful
+work.
+
+Solution:
+Set trusted.ec.dirty xattr of the entry so that actual heal process
+happens and at the end of it, during unset of dirty, gfid enrty from
+indices/xattrop will be removed.
+
+>Upstream patch : https://review.gluster.org/#/c/glusterfs/+/24765/
+>Fixes: #1385
+
+Change-Id: Ib1b9377d8dda384bba49523e9ff6ba9f0699cc1b
+BUG: 1785714
+Signed-off-by: Ashish Pandey <aspandey@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/208591
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/ec/src/ec-heal.c  | 73 ++++++++++++++++++++++++++++++++++++++-
+ xlators/cluster/ec/src/ec-types.h |  7 +++-
+ 2 files changed, 78 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/cluster/ec/src/ec-heal.c b/xlators/cluster/ec/src/ec-heal.c
+index e2de879..7d25853 100644
+--- a/xlators/cluster/ec/src/ec-heal.c
++++ b/xlators/cluster/ec/src/ec-heal.c
+@@ -2488,6 +2488,59 @@ out:
+     return ret;
+ }
+ 
++int
++ec_heal_set_dirty_without_lock(call_frame_t *frame, ec_t *ec, inode_t *inode)
++{
++    int i = 0;
++    int ret = 0;
++    dict_t **xattr = NULL;
++    loc_t loc = {0};
++    uint64_t dirty_xattr[EC_VERSION_SIZE] = {0};
++    unsigned char *on = NULL;
++    default_args_cbk_t *replies = NULL;
++    dict_t *dict = NULL;
++
++    /* Allocate the required memory */
++    loc.inode = inode_ref(inode);
++    gf_uuid_copy(loc.gfid, inode->gfid);
++    on = alloca0(ec->nodes);
++    EC_REPLIES_ALLOC(replies, ec->nodes);
++    xattr = GF_CALLOC(ec->nodes, sizeof(*xattr), gf_common_mt_pointer);
++    if (!xattr) {
++        ret = -ENOMEM;
++        goto out;
++    }
++    dict = dict_new();
++    if (!dict) {
++        ret = -ENOMEM;
++        goto out;
++    }
++    for (i = 0; i < ec->nodes; i++) {
++        xattr[i] = dict;
++        on[i] = 1;
++    }
++    dirty_xattr[EC_METADATA_TXN] = hton64(1);
++    ret = dict_set_static_bin(dict, EC_XATTR_DIRTY, dirty_xattr,
++                              (sizeof(*dirty_xattr) * EC_VERSION_SIZE));
++    if (ret < 0) {
++        ret = -ENOMEM;
++        goto out;
++    }
++    PARALLEL_FOP_ONLIST(ec->xl_list, on, ec->nodes, replies, frame,
++                        ec_wind_xattrop_parallel, &loc, GF_XATTROP_ADD_ARRAY64,
++                        xattr, NULL);
++out:
++    if (dict) {
++        dict_unref(dict);
++    }
++    if (xattr) {
++        GF_FREE(xattr);
++    }
++    cluster_replies_wipe(replies, ec->nodes);
++    loc_wipe(&loc);
++    return ret;
++}
++
+ void
+ ec_heal_do(xlator_t *this, void *data, loc_t *loc, int32_t partial)
+ {
+@@ -2563,7 +2616,18 @@ ec_heal_do(xlator_t *this, void *data, loc_t *loc, int32_t partial)
+         ec_heal_inspect(frame, ec, loc->inode, up_subvols, _gf_false, _gf_false,
+                         &need_heal);
+ 
+-        if (need_heal == EC_HEAL_NONEED) {
++        if (need_heal == EC_HEAL_PURGE_INDEX) {
++            gf_msg(ec->xl->name, GF_LOG_INFO, 0, EC_MSG_HEAL_FAIL,
++                   "Index entry needs to be purged for: %s ",
++                   uuid_utoa(loc->gfid));
++            /* We need to send xattrop to set dirty flag so that it can be
++             * healed and index entry could be removed. We need not to take lock
++             * on this entry to do so as we are just setting dirty flag which
++             * actually increases the trusted.ec.dirty count and does not set
++             * the new value.
++             * This will make sure that it is not interfering in other fops.*/
++            ec_heal_set_dirty_without_lock(frame, ec, loc->inode);
++        } else if (need_heal == EC_HEAL_NONEED) {
+             gf_msg(ec->xl->name, GF_LOG_DEBUG, 0, EC_MSG_HEAL_FAIL,
+                    "Heal is not required for : %s ", uuid_utoa(loc->gfid));
+             goto out;
+@@ -2958,6 +3022,13 @@ _need_heal_calculate(ec_t *ec, uint64_t *dirty, unsigned char *sources,
+                     goto out;
+                 }
+             }
++            /* If lock count is 0, all dirty flags are 0 and all the
++             * versions are macthing then why are we here. It looks
++             * like something went wrong while removing the index entries
++             * after completing a successful heal or fop. In this case
++             * we need to remove this index entry to avoid triggering heal
++             * in a loop and causing lookups again and again*/
++            *need_heal = EC_HEAL_PURGE_INDEX;
+         } else {
+             for (i = 0; i < ec->nodes; i++) {
+                 /* Since each lock can only increment the dirty
+diff --git a/xlators/cluster/ec/src/ec-types.h b/xlators/cluster/ec/src/ec-types.h
+index f15429d..700dc39 100644
+--- a/xlators/cluster/ec/src/ec-types.h
++++ b/xlators/cluster/ec/src/ec-types.h
+@@ -130,7 +130,12 @@ typedef void (*ec_resume_f)(ec_fop_data_t *, int32_t);
+ 
+ enum _ec_read_policy { EC_ROUND_ROBIN, EC_GFID_HASH, EC_READ_POLICY_MAX };
+ 
+-enum _ec_heal_need { EC_HEAL_NONEED, EC_HEAL_MAYBE, EC_HEAL_MUST };
++enum _ec_heal_need {
++    EC_HEAL_NONEED,
++    EC_HEAL_MAYBE,
++    EC_HEAL_MUST,
++    EC_HEAL_PURGE_INDEX
++};
+ 
+ enum _ec_stripe_part { EC_STRIPE_HEAD, EC_STRIPE_TAIL };
+ 
+-- 
+1.8.3.1
+

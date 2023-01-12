@@ -1,0 +1,54 @@
+From 17940583c4d991a568582581f68dcbf08463ccaf Mon Sep 17 00:00:00 2001
+From: Susant Palai <spalai@redhat.com>
+Date: Tue, 16 Jul 2019 10:31:46 +0530
+Subject: [PATCH 334/335] dht: log getxattr failure for node-uuid at "DEBUG"
+
+There are two ways to fetch node-uuid information from dht.
+
+1 - #define GF_XATTR_LIST_NODE_UUIDS_KEY "trusted.glusterfs.list-node-uuids"
+This key is used by AFR.
+
+2 - #define GF_REBAL_FIND_LOCAL_SUBVOL "glusterfs.find-local-subvol"
+This key is used for non-afr volume type.
+
+We do two getxattr operations. First on the #1 key followed by on #2 if
+getxattr on #1 key fails.
+
+Since the parent function "dht_init_local_subvols_and_nodeuuids" logs failure,
+moving the log-level to DEBUG in dht_find_local_subvol_cbk.
+
+>fixes: bz#1730175
+>Change-Id: I4d88244dc26587b111ca5b00d4c00118efdaac14
+>Signed-off-by: Susant Palai <spalai@redhat.com>
+Upstream patch: https://review.gluster.org/#/c/glusterfs/+/23053/
+
+BUG: 1727755
+Change-Id: I4d88244dc26587b111ca5b00d4c00118efdaac14
+Signed-off-by: Sunil Kumar Acharya <sheggodu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/185876
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ xlators/cluster/dht/src/dht-common.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/cluster/dht/src/dht-common.c b/xlators/cluster/dht/src/dht-common.c
+index 37952ba..d0b5287 100644
+--- a/xlators/cluster/dht/src/dht-common.c
++++ b/xlators/cluster/dht/src/dht-common.c
+@@ -4253,8 +4253,11 @@ dht_find_local_subvol_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+             local->op_ret = -1;
+             local->op_errno = op_errno;
+             UNLOCK(&frame->lock);
+-            gf_msg(this->name, GF_LOG_ERROR, op_errno, DHT_MSG_GET_XATTR_FAILED,
+-                   "getxattr err for dir");
++            if (op_errno == ENODATA)
++                gf_msg_debug(this->name, 0, "failed to get node-uuid");
++            else
++                gf_msg(this->name, GF_LOG_ERROR, op_errno,
++                       DHT_MSG_GET_XATTR_FAILED, "failed to get node-uuid");
+             goto post_unlock;
+         }
+ 
+-- 
+1.8.3.1
+

@@ -1,0 +1,62 @@
+From 172f32058b1a7d2e42f373490853aef5dd72f02f Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Wed, 22 Feb 2017 14:20:41 +0530
+Subject: [PATCH 058/124] glusterd/ganesha : During volume delete remove the
+ ganesha export configuration file
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I0363e7f4d7cefd3f1b3c4f91e495767ec52e230e
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://review.gluster.org/16707
+Smoke: Gluster Build System <jenkins@build.gluster.org>
+NetBSD-regression: NetBSD Build System <jenkins@build.gluster.org>
+CentOS-regression: Gluster Build System <jenkins@build.gluster.org>
+Reviewed-by: soumya k <skoduri@redhat.com>
+Reviewed-by: Kaleb KEITHLEY <kkeithle@redhat.com>
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167143
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-ganesha.c    | 2 +-
+ xlators/mgmt/glusterd/src/glusterd-volume-ops.c | 9 +++++++++
+ 2 files changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-ganesha.c b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+index 81f794d..6d72fda 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-ganesha.c
++++ b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+@@ -445,7 +445,7 @@ manage_export_config(char *volname, char *value, char **op_errstr)
+                     CONFDIR, value, volname, NULL);
+     ret = runner_run(&runner);
+ 
+-    if (ret)
++    if (ret && !(*op_errstr))
+         gf_asprintf(op_errstr,
+                     "Failed to create"
+                     " NFS-Ganesha export config file.");
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-ops.c b/xlators/mgmt/glusterd/src/glusterd-volume-ops.c
+index a0417ca..81c668c 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-ops.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-ops.c
+@@ -2936,6 +2936,15 @@ glusterd_op_delete_volume(dict_t *dict)
+         goto out;
+     }
+ 
++    if (glusterd_check_ganesha_export(volinfo)) {
++        ret = manage_export_config(volname, "off", NULL);
++        if (ret)
++            gf_msg(this->name, GF_LOG_WARNING, 0, 0,
++                   "Could not delete ganesha export conf file "
++                   "for %s",
++                   volname);
++    }
++
+     ret = glusterd_delete_volume(volinfo);
+ out:
+     gf_msg_debug(this->name, 0, "returning %d", ret);
+-- 
+1.8.3.1
+

@@ -1,0 +1,36 @@
+From e44b75fdb86dcf759204816c873b4f9f4efbefa8 Mon Sep 17 00:00:00 2001
+From: Susant Palai <spalai@redhat.com>
+Date: Tue, 21 May 2019 16:17:09 +0530
+Subject: [PATCH 142/169] lock: check null value of dict to avoid log flooding
+
+> updates: bz#1712322
+> Change-Id: I120a1d23506f9ebcf88c7ea2f2eff4978a61cf4a
+> Signed-off-by: Susant Palai <spalai@redhat.com>
+(backport of fix https://review.gluster.org/#/c/glusterfs/+/22756/)
+
+BUG: bz#1704181
+Change-Id: I2a192236328ebb39666ffef1146df312c08a377d
+Signed-off-by: Susant Palai <spalai@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/171325
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/features/locks/src/posix.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/features/locks/src/posix.c b/xlators/features/locks/src/posix.c
+index 3f1c7a7..adb0df5 100644
+--- a/xlators/features/locks/src/posix.c
++++ b/xlators/features/locks/src/posix.c
+@@ -121,7 +121,7 @@ fetch_pathinfo(xlator_t *, inode_t *, int32_t *, char **);
+ 
+ #define PL_CHECK_LOCK_ENFORCE_KEY(frame, dict, name, this, loc, fd, priv)      \
+     do {                                                                       \
+-        if (dict_get(dict, GF_ENFORCE_MANDATORY_LOCK) ||                       \
++        if ((dict && (dict_get(dict, GF_ENFORCE_MANDATORY_LOCK))) ||           \
+             (name && (strcmp(name, GF_ENFORCE_MANDATORY_LOCK) == 0))) {        \
+             inode_t *__inode = (loc ? loc->inode : fd->inode);                 \
+             pl_inode_t *__pl_inode = pl_inode_get(this, __inode, NULL);        \
+-- 
+1.8.3.1
+

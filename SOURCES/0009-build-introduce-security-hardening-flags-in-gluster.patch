@@ -1,0 +1,57 @@
+From 2adb5d540e9344149ae2591811ad34928775e6fd Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Wed, 3 Jun 2015 11:09:21 +0530
+Subject: [PATCH 09/52] build: introduce security hardening flags in gluster
+
+This patch introduces two of the security hardening compiler flags RELRO & PIE
+in gluster codebase. Using _hardened_build as 1 doesn't guarantee the existance
+of these flags in the compilation as different versions of RHEL have different
+redhat-rpm-config macro. So the idea is to export these flags at spec file
+level.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I0a1a56d0a8f54f110d306ba5e55e39b1b073dc84
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/49780
+Reviewed-by: Balamurugan Arumugam <barumuga@redhat.com>
+Tested-by: Balamurugan Arumugam <barumuga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/60137
+Tested-by: Milind Changire <mchangir@redhat.com>
+---
+ glusterfs.spec.in | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index eb04491..8a31a98 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -736,6 +736,25 @@ done
+ 
+ %build
+ 
++# In RHEL7 few hardening flags are available by default, however the RELRO
++# default behaviour is partial, convert to full
++%if ( 0%{?rhel} && 0%{?rhel} >= 7 )
++LDFLAGS="$RPM_LD_FLAGS -Wl,-z,relro,-z,now"
++export LDFLAGS
++%else
++%if ( 0%{?rhel} && 0%{?rhel} == 6 )
++CFLAGS="$RPM_OPT_FLAGS -fPIE -DPIE"
++LDFLAGS="$RPM_LD_FLAGS -pie -Wl,-z,relro,-z,now"
++%else
++#It appears that with gcc-4.1.2 in RHEL5 there is an issue using both -fPIC and
++ # -fPIE that makes -z relro not work; -fPIE seems to undo what -fPIC does
++CFLAGS="$CFLAGS $RPM_OPT_FLAGS"
++LDFLAGS="$RPM_LD_FLAGS -Wl,-z,relro,-z,now"
++%endif
++export CFLAGS
++export LDFLAGS
++%endif
++
+ ./autogen.sh && %configure \
+         %{?_with_asan} \
+         %{?_with_cmocka} \
+-- 
+1.8.3.1
+

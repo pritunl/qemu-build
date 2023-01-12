@@ -1,0 +1,60 @@
+From de31f2b0cb09a59941892c9981cb8a8b3aced9ec Mon Sep 17 00:00:00 2001
+From: kshithijiyer <kshithij.ki@gmail.com>
+Date: Tue, 24 Dec 2019 13:02:21 +0530
+Subject: [PATCH 407/449] [geo-rep] Improving help message in
+ schedule_georep.py.in
+
+SLAVE positional argument doesn't provide a clear
+picture of what it is when compared to mastervol and slavevol
+in schedule_georep.py.in. It would be better if we change it to
+something like "Slave hostame (<username>@SLAVEHOST or SLAVEHOST)"
+
+Present:
+----------
+positional arguments:
+  mastervol            Master Volume Name
+  SLAVE                SLAVEHOST or root@SLAVEHOST or user@SLAVEHOST
+  slavevol             Slave Volume Name
+
+Suggested:
+-----------
+positional arguments:
+  mastervol            Master Volume Name
+  SLAVE                Slave hostname (<username>@SLAVEHOST or SLAVEHOST)
+  slavevol             Slave Volume Name
+
+Backport of:
+    >Upstream Patch: https://review.gluster.org/#/c/glusterfs/+/23919/
+    >fixes: bz#1786276
+    >Change-Id: I73d52247997d623f77d55e51cbb6eccc08eb95ff
+    >Signed-off-by: kshithijiyer <kshithij.ki@gmail.com>
+
+BUG: 1787994
+Change-Id: I73d52247997d623f77d55e51cbb6eccc08eb95ff
+Signed-off-by: kshithijiyer <kshithij.ki@gmail.com>
+Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202454
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/geo-rep/schedule_georep.py.in | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/extras/geo-rep/schedule_georep.py.in b/extras/geo-rep/schedule_georep.py.in
+index f29ae02..ac93716 100644
+--- a/extras/geo-rep/schedule_georep.py.in
++++ b/extras/geo-rep/schedule_georep.py.in
+@@ -459,8 +459,8 @@ if __name__ == "__main__":
+                             description=__doc__)
+     parser.add_argument("mastervol", help="Master Volume Name")
+     parser.add_argument("slave",
+-                        help="SLAVEHOST or root@SLAVEHOST "
+-                        "or user@SLAVEHOST",
++                        help="Slave hostname "
++                        "(<username>@SLAVEHOST or SLAVEHOST)",
+                         metavar="SLAVE")
+     parser.add_argument("slavevol", help="Slave Volume Name")
+     parser.add_argument("--interval", help="Interval in Seconds. "
+-- 
+1.8.3.1
+

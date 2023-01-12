@@ -1,0 +1,161 @@
+From 4f0aa008ed393d7ce222c4ea4bd0fa6ed52b48f6 Mon Sep 17 00:00:00 2001
+From: Krutika Dhananjay <kdhananj@redhat.com>
+Date: Fri, 5 Apr 2019 12:29:23 +0530
+Subject: [PATCH 177/178] features/shard: Fix extra unref when inode object is
+ lru'd out and added back
+
+Long tale of double unref! But do read...
+
+In cases where a shard base inode is evicted from lru list while still
+being part of fsync list but added back soon before its unlink, there
+could be an extra inode_unref() leading to premature inode destruction
+leading to crash.
+
+One such specific case is the following -
+
+Consider features.shard-deletion-rate = features.shard-lru-limit = 2.
+This is an oversimplified example but explains the problem clearly.
+
+First, a file is FALLOCATE'd to a size so that number of shards under
+/.shard = 3 > lru-limit.
+Shards 1, 2 and 3 need to be resolved. 1 and 2 are resolved first.
+Resultant lru list:
+                               1 -----> 2
+refs on base inode -          (1)  +   (1) = 2
+3 needs to be resolved. So 1 is lru'd out. Resultant lru list -
+		               2 -----> 3
+refs on base inode -          (1)  +   (1) = 2
+
+Note that 1 is inode_unlink()d but not destroyed because there are
+non-zero refs on it since it is still participating in this ongoing
+FALLOCATE operation.
+
+FALLOCATE is sent on all participant shards. In the cbk, all of them are
+added to fync_list.
+Resulting fsync list -
+                               1 -----> 2 -----> 3 (order doesn't matter)
+refs on base inode -          (1)  +   (1)  +   (1) = 3
+Total refs = 3 + 2 = 5
+
+Now an attempt is made to unlink this file. Background deletion is triggered.
+The first $shard-deletion-rate shards need to be unlinked in the first batch.
+So shards 1 and 2 need to be resolved. inode_resolve fails on 1 but succeeds
+on 2 and so it's moved to tail of list.
+lru list now -
+                              3 -----> 2
+No change in refs.
+
+shard 1 is looked up. In lookup_cbk, it's linked and added back to lru list
+at the cost of evicting shard 3.
+lru list now -
+                              2 -----> 1
+refs on base inode:          (1)  +   (1) = 2
+fsync list now -
+                              1 -----> 2 (again order doesn't matter)
+refs on base inode -         (1)  +   (1) = 2
+Total refs = 2 + 2 = 4
+After eviction, it is found 3 needs fsync. So fsync is wound, yet to be ack'd.
+So it is still inode_link()d.
+
+Now deletion of shards 1 and 2 completes. lru list is empty. Base inode unref'd and
+destroyed.
+In the next batched deletion, 3 needs to be deleted. It is inode_resolve()able.
+It is added back to lru list but base inode passed to __shard_update_shards_inode_list()
+is NULL since the inode is destroyed. But its ctx->inode still contains base inode ptr
+from first addition to lru list for no additional ref on it.
+lru list now -
+                              3
+refs on base inode -         (0)
+Total refs on base inode = 0
+Unlink is sent on 3. It completes. Now since the ctx contains ptr to base_inode and the
+shard is part of lru list, base shard is unref'd leading to a crash.
+
+FIX:
+When shard is readded back to lru list, copy the base inode pointer as is into its inode ctx,
+even if it is NULL. This is needed to prevent double unrefs at the time of deleting it.
+
+Upstream patch:
+> BUG: 1696136
+> Upstream patch link: https://review.gluster.org/c/glusterfs/+/22517
+> Change-Id: I99a44039da2e10a1aad183e84f644d63ca552462
+> Signed-off-by: Krutika Dhananjay <kdhananj@redhat.com>
+
+Change-Id: I99a44039da2e10a1aad183e84f644d63ca552462
+Updates: bz#1694595
+Signed-off-by: Krutika Dhananjay <kdhananj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172803
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ .../bug-1696136-lru-limit-equals-deletion-rate.t   | 34 ++++++++++++++++++++++
+ xlators/features/shard/src/shard.c                 |  6 ++--
+ 2 files changed, 36 insertions(+), 4 deletions(-)
+ create mode 100644 tests/bugs/shard/bug-1696136-lru-limit-equals-deletion-rate.t
+
+diff --git a/tests/bugs/shard/bug-1696136-lru-limit-equals-deletion-rate.t b/tests/bugs/shard/bug-1696136-lru-limit-equals-deletion-rate.t
+new file mode 100644
+index 0000000..3e4a65a
+--- /dev/null
++++ b/tests/bugs/shard/bug-1696136-lru-limit-equals-deletion-rate.t
+@@ -0,0 +1,34 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../fallocate.rc
++
++cleanup
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 replica 3 $H0:$B0/${V0}{0,1,2}
++TEST $CLI volume set $V0 features.shard on
++TEST $CLI volume set $V0 features.shard-block-size 4MB
++TEST $CLI volume set $V0 features.shard-lru-limit 120
++TEST $CLI volume set $V0 features.shard-deletion-rate 120
++TEST $CLI volume set $V0 performance.write-behind off
++TEST $CLI volume start $V0
++
++TEST $GFS --volfile-id=$V0 --volfile-server=$H0 $M0
++
++TEST build_tester $(dirname $0)/bug-1696136.c -lgfapi -Wall -O2
++
++# Create a file
++TEST touch $M0/file1
++
++# Fallocate a 500M file. This will make sure number of participant shards are > lru-limit
++TEST $(dirname $0)/bug-1696136 $H0 $V0 "0" "0" "536870912" /file1 `gluster --print-logdir`/glfs-$V0.log
++
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
++TEST $CLI volume stop $V0
++TEST $CLI volume delete $V0
++rm -f $(dirname $0)/bug-1696136
++
++cleanup
+diff --git a/xlators/features/shard/src/shard.c b/xlators/features/shard/src/shard.c
+index 3c4bcdc..c1799ad 100644
+--- a/xlators/features/shard/src/shard.c
++++ b/xlators/features/shard/src/shard.c
+@@ -689,8 +689,7 @@ __shard_update_shards_inode_list(inode_t *linked_inode, xlator_t *this,
+             ctx->block_num = block_num;
+             list_add_tail(&ctx->ilist, &priv->ilist_head);
+             priv->inode_count++;
+-            if (base_inode)
+-                ctx->base_inode = inode_ref(base_inode);
++            ctx->base_inode = inode_ref(base_inode);
+         } else {
+             /*If on the other hand there is no available slot for this inode
+              * in the list, delete the lru inode from the head of the list,
+@@ -765,8 +764,7 @@ __shard_update_shards_inode_list(inode_t *linked_inode, xlator_t *this,
+             else
+                 gf_uuid_copy(ctx->base_gfid, gfid);
+             ctx->block_num = block_num;
+-            if (base_inode)
+-                ctx->base_inode = inode_ref(base_inode);
++            ctx->base_inode = inode_ref(base_inode);
+             list_add_tail(&ctx->ilist, &priv->ilist_head);
+         }
+     } else {
+-- 
+1.8.3.1
+

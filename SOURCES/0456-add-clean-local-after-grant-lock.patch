@@ -1,0 +1,74 @@
+From c38b38249fdf951565f6501ce8e9a4d01142d43e Mon Sep 17 00:00:00 2001
+From: l17zhou <cynthia.zhou@nokia-sbell.com>
+Date: Tue, 3 Dec 2019 07:43:35 +0200
+Subject: [PATCH 456/456] add clean local after grant lock
+
+found by flock test, without correct ref number of fd,
+lock will not be correctly released.
+
+Upstream patch:
+> Upstream patch link: https://review.gluster.org/c/glusterfs/+/23794
+> Fixes: bz#1779089
+> Change-Id: I3e466b17c852eb219c8778e43af8ad670a8449cc
+> Signed-off-by: l17zhou <cynthia.zhou@nokia-sbell.com>
+
+BUG: 1854165
+Change-Id: I3e466b17c852eb219c8778e43af8ad670a8449cc
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/206673
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/features/locks/src/common.c | 15 ++++++++-------
+ 1 file changed, 8 insertions(+), 7 deletions(-)
+
+diff --git a/xlators/features/locks/src/common.c b/xlators/features/locks/src/common.c
+index 0c52853..cddbfa6 100644
+--- a/xlators/features/locks/src/common.c
++++ b/xlators/features/locks/src/common.c
+@@ -961,7 +961,7 @@ grant_blocked_locks(xlator_t *this, pl_inode_t *pl_inode)
+     struct list_head granted_list;
+     posix_lock_t *tmp = NULL;
+     posix_lock_t *lock = NULL;
+-
++    pl_local_t *local = NULL;
+     INIT_LIST_HEAD(&granted_list);
+ 
+     pthread_mutex_lock(&pl_inode->mutex);
+@@ -976,9 +976,9 @@ grant_blocked_locks(xlator_t *this, pl_inode_t *pl_inode)
+ 
+         pl_trace_out(this, lock->frame, NULL, NULL, F_SETLKW, &lock->user_flock,
+                      0, 0, NULL);
+-
+-        STACK_UNWIND_STRICT(lk, lock->frame, 0, 0, &lock->user_flock, NULL);
+-
++        local = lock->frame->local;
++        PL_STACK_UNWIND_AND_FREE(local, lk, lock->frame, 0, 0,
++                                 &lock->user_flock, NULL);
+         __destroy_lock(lock);
+     }
+ 
+@@ -997,6 +997,7 @@ pl_send_prelock_unlock(xlator_t *this, pl_inode_t *pl_inode,
+     struct list_head granted_list;
+     posix_lock_t *tmp = NULL;
+     posix_lock_t *lock = NULL;
++    pl_local_t *local = NULL;
+ 
+     int ret = -1;
+ 
+@@ -1024,9 +1025,9 @@ pl_send_prelock_unlock(xlator_t *this, pl_inode_t *pl_inode,
+ 
+         pl_trace_out(this, lock->frame, NULL, NULL, F_SETLKW, &lock->user_flock,
+                      0, 0, NULL);
+-
+-        STACK_UNWIND_STRICT(lk, lock->frame, 0, 0, &lock->user_flock, NULL);
+-
++        local = lock->frame->local;
++        PL_STACK_UNWIND_AND_FREE(local, lk, lock->frame, 0, 0,
++                                 &lock->user_flock, NULL);
+         __destroy_lock(lock);
+     }
+ 
+-- 
+1.8.3.1
+

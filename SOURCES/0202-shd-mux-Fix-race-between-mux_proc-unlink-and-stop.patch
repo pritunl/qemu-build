@@ -1,0 +1,46 @@
+From e386fb4f4baf834e6a8fc25cc2fbbb17eb0a7a56 Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Thu, 20 Jun 2019 20:43:24 +0530
+Subject: [PATCH 202/221] shd/mux: Fix race between mux_proc unlink and stop
+
+There is a small race window, where we have a shd proc
+without having a connection. That is when we stopped the
+last shd running on a process. The list was removed
+outside of a lock just after stopping the process.
+
+So there is a window where we stopped the process, but
+the shd proc list contains the entry.
+
+Backport of: https://review.gluster.org/22909
+
+>Change-Id: Id82a82509e5cd72acac24e8b7b87197626525441
+>fixes: bz#1722541
+>Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+
+Change-Id: I794131ede23f32fcfa5f71181149d8c1e7e439b8
+BUG: 1721802
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/174541
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-shd-svc.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+index d81d760..dbe2560 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+@@ -694,6 +694,9 @@ glusterd_shdsvc_stop(glusterd_svc_t *svc, int sig)
+         gf_is_service_running(svc->proc.pidfile, &pid);
+         cds_list_del_init(&svc->mux_svc);
+         empty = cds_list_empty(&svc_proc->svcs);
++        if (empty) {
++            cds_list_del_init(&svc_proc->svc_proc_list);
++        }
+     }
+     pthread_mutex_unlock(&conf->attach_lock);
+     if (empty) {
+-- 
+1.8.3.1
+

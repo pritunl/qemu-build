@@ -1,0 +1,308 @@
+From 4c47d6dd7c5ddcaa2a1e159427c0f6713fd33907 Mon Sep 17 00:00:00 2001
+From: karthik-us <ksubrahm@redhat.com>
+Date: Wed, 23 Dec 2020 14:57:51 +0530
+Subject: [PATCH 514/517] afr: event gen changes
+
+The general idea of the changes is to prevent resetting event generation
+to zero in the inode ctx, since event gen is something that should
+follow 'causal order'.
+
+Change #1:
+For a read txn, in inode refresh cbk, if event_generation is
+found zero, we are failing the read fop. This is not needed
+because change in event gen is only a marker for the next inode refresh to
+happen and should not be taken into account by the current read txn.
+
+Change #2:
+The event gen being zero above can happen if there is a racing lookup,
+which resets even get (in afr_lookup_done) if there are non zero afr
+xattrs. The resetting is done only to trigger an inode refresh and a
+possible client side heal on the next lookup. That can be acheived by
+setting the need_refresh flag in the inode ctx. So replaced all
+occurences of resetting even gen to zero with a call to
+afr_inode_need_refresh_set().
+
+Change #3:
+In both lookup and discover path, we are doing an inode refresh which is
+not required since all 3 essentially do the same thing- update the inode
+ctx with the good/bad copies from the brick replies. Inode refresh also
+triggers background heals, but I think it is okay to do it when we call
+refresh during the read and write txns and not in the lookup path.
+
+The .ts which relied on inode refresh in lookup path to trigger heals are
+now changed to do read txn so that inode refresh and the heal happens.
+
+Upstream patch details:
+> Change-Id: Iebf39a9be6ffd7ffd6e4046c96b0fa78ade6c5ec
+> Fixes: #1179
+> Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+> Reported-by: Erik Jacobson <erik.jacobson at hpe.com>
+Upstream patch: https://review.gluster.org/#/c/glusterfs/+/24316/
+
+BUG: 1640148
+Change-Id: Iebf39a9be6ffd7ffd6e4046c96b0fa78ade6c5ec
+Signed-off-by: karthik-us <ksubrahm@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/222074
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Ravishankar Narayanankutty <ravishankar@redhat.com>
+---
+ ...fid-mismatch-resolution-with-fav-child-policy.t |  8 +-
+ xlators/cluster/afr/src/afr-common.c               | 92 +++++-----------------
+ xlators/cluster/afr/src/afr-dir-write.c            |  6 +-
+ xlators/cluster/afr/src/afr.h                      |  5 +-
+ 4 files changed, 29 insertions(+), 82 deletions(-)
+
+diff --git a/tests/basic/afr/gfid-mismatch-resolution-with-fav-child-policy.t b/tests/basic/afr/gfid-mismatch-resolution-with-fav-child-policy.t
+index f4aa351..12af0c8 100644
+--- a/tests/basic/afr/gfid-mismatch-resolution-with-fav-child-policy.t
++++ b/tests/basic/afr/gfid-mismatch-resolution-with-fav-child-policy.t
+@@ -168,8 +168,8 @@ TEST [ "$gfid_1" != "$gfid_2" ]
+ #We know that second brick has the bigger size file
+ BIGGER_FILE_MD5=$(md5sum $B0/${V0}1/f3 | cut -d\  -f1)
+ 
+-TEST ls $M0/f3
+-TEST cat $M0/f3
++TEST ls $M0 #Trigger entry heal via readdir inode refresh
++TEST cat $M0/f3 #Trigger data heal via readv inode refresh
+ EXPECT_WITHIN $HEAL_TIMEOUT "^0$" get_pending_heal_count $V0
+ 
+ #gfid split-brain should be resolved
+@@ -215,8 +215,8 @@ TEST $CLI volume start $V0 force
+ EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}2
+ EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 2
+ 
+-TEST ls $M0/f4
+-TEST cat $M0/f4
++TEST ls $M0 #Trigger entry heal via readdir inode refresh
++TEST cat $M0/f4  #Trigger data heal via readv inode refresh
+ EXPECT_WITHIN $HEAL_TIMEOUT "^0$" get_pending_heal_count $V0
+ 
+ #gfid split-brain should be resolved
+diff --git a/xlators/cluster/afr/src/afr-common.c b/xlators/cluster/afr/src/afr-common.c
+index fca2cd5..90b4f14 100644
+--- a/xlators/cluster/afr/src/afr-common.c
++++ b/xlators/cluster/afr/src/afr-common.c
+@@ -284,7 +284,7 @@ __afr_set_in_flight_sb_status(xlator_t *this, afr_local_t *local,
+                 metadatamap |= (1 << index);
+             }
+             if (metadatamap_old != metadatamap) {
+-                event = 0;
++                __afr_inode_need_refresh_set(inode, this);
+             }
+             break;
+ 
+@@ -297,7 +297,7 @@ __afr_set_in_flight_sb_status(xlator_t *this, afr_local_t *local,
+                 datamap |= (1 << index);
+             }
+             if (datamap_old != datamap)
+-                event = 0;
++                __afr_inode_need_refresh_set(inode, this);
+             break;
+ 
+         default:
+@@ -461,34 +461,6 @@ out:
+ }
+ 
+ int
+-__afr_inode_event_gen_reset_small(inode_t *inode, xlator_t *this)
+-{
+-    int ret = -1;
+-    uint16_t datamap = 0;
+-    uint16_t metadatamap = 0;
+-    uint32_t event = 0;
+-    uint64_t val = 0;
+-    afr_inode_ctx_t *ctx = NULL;
+-
+-    ret = __afr_inode_ctx_get(this, inode, &ctx);
+-    if (ret)
+-        return ret;
+-
+-    val = ctx->read_subvol;
+-
+-    metadatamap = (val & 0x000000000000ffff) >> 0;
+-    datamap = (val & 0x00000000ffff0000) >> 16;
+-    event = 0;
+-
+-    val = ((uint64_t)metadatamap) | (((uint64_t)datamap) << 16) |
+-          (((uint64_t)event) << 32);
+-
+-    ctx->read_subvol = val;
+-
+-    return ret;
+-}
+-
+-int
+ __afr_inode_read_subvol_get(inode_t *inode, xlator_t *this, unsigned char *data,
+                             unsigned char *metadata, int *event_p)
+ {
+@@ -559,22 +531,6 @@ out:
+ }
+ 
+ int
+-__afr_inode_event_gen_reset(inode_t *inode, xlator_t *this)
+-{
+-    afr_private_t *priv = NULL;
+-    int ret = -1;
+-
+-    priv = this->private;
+-
+-    if (priv->child_count <= 16)
+-        ret = __afr_inode_event_gen_reset_small(inode, this);
+-    else
+-        ret = -1;
+-
+-    return ret;
+-}
+-
+-int
+ afr_inode_read_subvol_get(inode_t *inode, xlator_t *this, unsigned char *data,
+                           unsigned char *metadata, int *event_p)
+ {
+@@ -723,30 +679,22 @@ out:
+     return need_refresh;
+ }
+ 
+-static int
+-afr_inode_need_refresh_set(inode_t *inode, xlator_t *this)
++int
++__afr_inode_need_refresh_set(inode_t *inode, xlator_t *this)
+ {
+     int ret = -1;
+     afr_inode_ctx_t *ctx = NULL;
+ 
+-    GF_VALIDATE_OR_GOTO(this->name, inode, out);
+-
+-    LOCK(&inode->lock);
+-    {
+-        ret = __afr_inode_ctx_get(this, inode, &ctx);
+-        if (ret)
+-            goto unlock;
+-
++    ret = __afr_inode_ctx_get(this, inode, &ctx);
++    if (ret == 0) {
+         ctx->need_refresh = _gf_true;
+     }
+-unlock:
+-    UNLOCK(&inode->lock);
+-out:
++
+     return ret;
+ }
+ 
+ int
+-afr_inode_event_gen_reset(inode_t *inode, xlator_t *this)
++afr_inode_need_refresh_set(inode_t *inode, xlator_t *this)
+ {
+     int ret = -1;
+ 
+@@ -754,7 +702,7 @@ afr_inode_event_gen_reset(inode_t *inode, xlator_t *this)
+ 
+     LOCK(&inode->lock);
+     {
+-        ret = __afr_inode_event_gen_reset(inode, this);
++        ret = __afr_inode_need_refresh_set(inode, this);
+     }
+     UNLOCK(&inode->lock);
+ out:
+@@ -1191,7 +1139,7 @@ afr_txn_refresh_done(call_frame_t *frame, xlator_t *this, int err)
+     ret = afr_inode_get_readable(frame, inode, this, local->readable,
+                                  &event_generation, local->transaction.type);
+ 
+-    if (ret == -EIO || (local->is_read_txn && !event_generation)) {
++    if (ret == -EIO) {
+         /* No readable subvolume even after refresh ==> splitbrain.*/
+         if (!priv->fav_child_policy) {
+             err = EIO;
+@@ -2413,7 +2361,7 @@ afr_lookup_done(call_frame_t *frame, xlator_t *this)
+         if (read_subvol == -1)
+             goto cant_interpret;
+         if (ret) {
+-            afr_inode_event_gen_reset(local->inode, this);
++            afr_inode_need_refresh_set(local->inode, this);
+             dict_del_sizen(local->replies[read_subvol].xdata, GF_CONTENT_KEY);
+         }
+     } else {
+@@ -2971,6 +2919,7 @@ afr_discover_unwind(call_frame_t *frame, xlator_t *this)
+     afr_private_t *priv = NULL;
+     afr_local_t *local = NULL;
+     int read_subvol = -1;
++    int ret = 0;
+     unsigned char *data_readable = NULL;
+     unsigned char *success_replies = NULL;
+ 
+@@ -2992,7 +2941,10 @@ afr_discover_unwind(call_frame_t *frame, xlator_t *this)
+     if (!afr_has_quorum(success_replies, this, frame))
+         goto unwind;
+ 
+-    afr_replies_interpret(frame, this, local->inode, NULL);
++    ret = afr_replies_interpret(frame, this, local->inode, NULL);
++    if (ret) {
++        afr_inode_need_refresh_set(local->inode, this);
++    }
+ 
+     read_subvol = afr_read_subvol_decide(local->inode, this, NULL,
+                                          data_readable);
+@@ -3248,11 +3200,7 @@ afr_discover(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *xattr_req)
+     afr_read_subvol_get(loc->inode, this, NULL, NULL, &event,
+                         AFR_DATA_TRANSACTION, NULL);
+ 
+-    if (afr_is_inode_refresh_reqd(loc->inode, this, event,
+-                                  local->event_generation))
+-        afr_inode_refresh(frame, this, loc->inode, NULL, afr_discover_do);
+-    else
+-        afr_discover_do(frame, this, 0);
++    afr_discover_do(frame, this, 0);
+ 
+     return 0;
+ out:
+@@ -3393,11 +3341,7 @@ afr_lookup(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *xattr_req)
+     afr_read_subvol_get(loc->parent, this, NULL, NULL, &event,
+                         AFR_DATA_TRANSACTION, NULL);
+ 
+-    if (afr_is_inode_refresh_reqd(loc->inode, this, event,
+-                                  local->event_generation))
+-        afr_inode_refresh(frame, this, loc->parent, NULL, afr_lookup_do);
+-    else
+-        afr_lookup_do(frame, this, 0);
++    afr_lookup_do(frame, this, 0);
+ 
+     return 0;
+ out:
+diff --git a/xlators/cluster/afr/src/afr-dir-write.c b/xlators/cluster/afr/src/afr-dir-write.c
+index 416c19d..d419bfc 100644
+--- a/xlators/cluster/afr/src/afr-dir-write.c
++++ b/xlators/cluster/afr/src/afr-dir-write.c
+@@ -123,11 +123,11 @@ __afr_dir_write_finalize(call_frame_t *frame, xlator_t *this)
+             continue;
+         if (local->replies[i].op_ret < 0) {
+             if (local->inode)
+-                afr_inode_event_gen_reset(local->inode, this);
++                afr_inode_need_refresh_set(local->inode, this);
+             if (local->parent)
+-                afr_inode_event_gen_reset(local->parent, this);
++                afr_inode_need_refresh_set(local->parent, this);
+             if (local->parent2)
+-                afr_inode_event_gen_reset(local->parent2, this);
++                afr_inode_need_refresh_set(local->parent2, this);
+             continue;
+         }
+ 
+diff --git a/xlators/cluster/afr/src/afr.h b/xlators/cluster/afr/src/afr.h
+index ed5096e..3a2b26d 100644
+--- a/xlators/cluster/afr/src/afr.h
++++ b/xlators/cluster/afr/src/afr.h
+@@ -948,7 +948,10 @@ afr_inode_read_subvol_set(inode_t *inode, xlator_t *this,
+                           int event_generation);
+ 
+ int
+-afr_inode_event_gen_reset(inode_t *inode, xlator_t *this);
++__afr_inode_need_refresh_set(inode_t *inode, xlator_t *this);
++
++int
++afr_inode_need_refresh_set(inode_t *inode, xlator_t *this);
+ 
+ int
+ afr_read_subvol_select_by_policy(inode_t *inode, xlator_t *this,
+-- 
+1.8.3.1
+

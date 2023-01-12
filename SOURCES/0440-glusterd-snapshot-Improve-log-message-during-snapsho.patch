@@ -1,0 +1,62 @@
+From 9cbab9110523cfafe23d6c6b3080d0d744062b85 Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Thu, 21 May 2020 16:04:33 +0530
+Subject: [PATCH 440/449] glusterd/snapshot: Improve log message during
+ snapshot clone
+
+While taking a snapshot clone, if the snapshot is not activated,
+the cli was returning that the bricks are down.
+This patch clearly print tha the error is due to the snapshot
+state.
+
+>Change-Id: Ia840e6e071342e061ad38bf15e2e2ff2b0dacdfa
+>Fixes: #1255
+>Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Upstream Patch: https://review.gluster.org/#/c/glusterfs/+/24478/
+
+BUG: 1837926
+Change-Id: Ia840e6e071342e061ad38bf15e2e2ff2b0dacdfa
+Signed-off-by: Srijan Sivakumar <ssivakum@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202707
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-snapshot.c | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-snapshot.c b/xlators/mgmt/glusterd/src/glusterd-snapshot.c
+index c56be91..5b8ae97 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-snapshot.c
++++ b/xlators/mgmt/glusterd/src/glusterd-snapshot.c
+@@ -2238,7 +2238,6 @@ glusterd_snapshot_clone_prevalidate(dict_t *dict, char **op_errstr,
+     char *clonename = NULL;
+     char *snapname = NULL;
+     char device_name[64] = "";
+-    char key[PATH_MAX] = "";
+     glusterd_snap_t *snap = NULL;
+     char err_str[PATH_MAX] = "";
+     int ret = -1;
+@@ -2299,8 +2298,18 @@ glusterd_snapshot_clone_prevalidate(dict_t *dict, char **op_errstr,
+         goto out;
+     }
+ 
+-    snprintf(key, sizeof(key) - 1, "vol1_volid");
+-    ret = dict_get_bin(dict, key, (void **)&snap_volid);
++
++    if (!glusterd_is_volume_started(snap_vol)) {
++        snprintf(err_str, sizeof(err_str),
++                 "Snapshot %s is "
++                 "not activated",
++                 snap->snapname);
++        loglevel = GF_LOG_WARNING;
++        *op_errno = EG_VOLSTP;
++        goto out;
++    }
++
++    ret = dict_get_bin(dict, "vol1_volid", (void **)&snap_volid);
+     if (ret) {
+         gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_DICT_GET_FAILED,
+                "Unable to fetch snap_volid");
+-- 
+1.8.3.1
+

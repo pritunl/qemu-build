@@ -1,0 +1,119 @@
+From e772bef5631017145cd0270d72a9ada1378e022a Mon Sep 17 00:00:00 2001
+From: Barak Sason Rofman <bsasonro@redhat.com>
+Date: Fri, 30 Oct 2020 08:27:47 +0200
+Subject: [PATCH 478/478] DHT - Fixing rebalance failure on issuing stop
+ command
+
+Issuing a stop command for an ongoing rebalance process results in an error.
+This issue was brought up in https://bugzilla.redhat.com/1286171 and a patch
+(https://review.gluster.org/24103/) was submitted to resolve the issue.
+
+However the submitted patch resolved only part of the
+problem by reducing the number of log messages that were printed (since
+rebalnace is currently a recursive process, an error message was printed
+for every directory) but didn't fully resolve the root cause for the
+failure.
+
+This patch fixes the issue by modifying the code-path which handles the
+termination of the rebalance process by issuing a stop command.
+
+Upstream:
+> Reviewed-on: https://github.com/gluster/glusterfs/pull/1628
+> fixes: #1627
+> Change-Id: I604f2b0f8b1ccb1026b8425a14200bbd1dc5bd03
+> Signed-off-by: Barak Sason Rofman bsasonro@redhat.com
+
+BUG: 1286171
+Change-Id: I604f2b0f8b1ccb1026b8425a14200bbd1dc5bd03
+Signed-off-by: Barak Sason Rofman <bsasonro@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/216896
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/dht/src/dht-rebalance.c | 22 ++++++++++++----------
+ 1 file changed, 12 insertions(+), 10 deletions(-)
+
+diff --git a/xlators/cluster/dht/src/dht-rebalance.c b/xlators/cluster/dht/src/dht-rebalance.c
+index abc10fc..d49a719 100644
+--- a/xlators/cluster/dht/src/dht-rebalance.c
++++ b/xlators/cluster/dht/src/dht-rebalance.c
+@@ -3113,12 +3113,10 @@ int static gf_defrag_get_entry(xlator_t *this, int i,
+     struct dht_container *tmp_container = NULL;
+ 
+     if (defrag->defrag_status != GF_DEFRAG_STATUS_STARTED) {
+-        ret = -1;
+         goto out;
+     }
+ 
+     if (dir_dfmeta->offset_var[i].readdir_done == 1) {
+-        ret = 0;
+         goto out;
+     }
+ 
+@@ -3135,7 +3133,6 @@ int static gf_defrag_get_entry(xlator_t *this, int i,
+                               &(dir_dfmeta->equeue[i]), xattr_req, NULL);
+         if (ret == 0) {
+             dir_dfmeta->offset_var[i].readdir_done = 1;
+-            ret = 0;
+             goto out;
+         }
+ 
+@@ -3161,7 +3158,6 @@ int static gf_defrag_get_entry(xlator_t *this, int i,
+ 
+     while (1) {
+         if (defrag->defrag_status != GF_DEFRAG_STATUS_STARTED) {
+-            ret = -1;
+             goto out;
+         }
+ 
+@@ -3273,12 +3269,14 @@ int static gf_defrag_get_entry(xlator_t *this, int i,
+     }
+ 
+ out:
+-    if (ret == 0) {
+-        *container = tmp_container;
+-    } else {
+-        if (tmp_container) {
++    if (defrag->defrag_status == GF_DEFRAG_STATUS_STARTED) {
++        if (ret == 0) {
++            *container = tmp_container;
++        } else {
+             gf_defrag_free_container(tmp_container);
+         }
++    } else {
++        gf_defrag_free_container(tmp_container);
+     }
+ 
+     return ret;
+@@ -3487,7 +3485,7 @@ gf_defrag_process_dir(xlator_t *this, gf_defrag_info_t *defrag, loc_t *loc,
+                                       migrate_data, dir_dfmeta, xattr_req,
+                                       &should_commit_hash, perrno);
+ 
+-            if (defrag->defrag_status == GF_DEFRAG_STATUS_STOPPED) {
++            if (defrag->defrag_status != GF_DEFRAG_STATUS_STARTED) {
+                 goto out;
+             }
+ 
+@@ -3947,7 +3945,7 @@ gf_defrag_fix_layout(xlator_t *this, gf_defrag_info_t *defrag, loc_t *loc,
+             ret = gf_defrag_fix_layout(this, defrag, &entry_loc, fix_layout,
+                                        migrate_data);
+ 
+-            if (defrag->defrag_status == GF_DEFRAG_STATUS_STOPPED) {
++            if (defrag->defrag_status != GF_DEFRAG_STATUS_STARTED) {
+                 goto out;
+             }
+ 
+@@ -4015,6 +4013,10 @@ gf_defrag_fix_layout(xlator_t *this, gf_defrag_info_t *defrag, loc_t *loc,
+         (defrag->cmd != GF_DEFRAG_CMD_START_LAYOUT_FIX)) {
+         ret = gf_defrag_process_dir(this, defrag, loc, migrate_data, &perrno);
+ 
++        if (defrag->defrag_status != GF_DEFRAG_STATUS_STARTED) {
++            goto out;
++        }
++
+         if (ret && (ret != 2)) {
+             if (perrno == ENOENT || perrno == ESTALE) {
+                 ret = 0;
+-- 
+1.8.3.1
+

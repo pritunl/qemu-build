@@ -1,0 +1,55 @@
+From a8d8fc91af226fbf49e9dd1d7d91ad287707c4fe Mon Sep 17 00:00:00 2001
+From: Vishal Pandey <vpandey@redhat.com>
+Date: Wed, 7 Aug 2019 12:53:06 +0530
+Subject: [PATCH 328/335] glusterd: Add warning and abort in case of failures
+ in migration during remove-brick commit
+
+Problem -
+Currently remove-brick commit goes through even though there were files
+that failed to migrate or were skipped. There is no warning raised to the user.
+Solution-
+Add a check in the remove brick staging phase to verify if the status of the
+rebalnce process is complete but there has been failures or some skipped files
+while migration, In this case user will be given a warning and remove-brick
+commit. User will need to use the force option to remove the bricks.
+
+> Upstream Path Link: https://review.gluster.org/#/c/glusterfs/+/23171/
+> Fixes: bz#1514683
+> Signed-offby- Vishal Pandey <vpandey@redhat.com>
+> Change-Id: I014d0f0afb4b2fac35ab0de52227f98dbae079d5
+
+BUG: 1344758
+Change-Id: I014d0f0afb4b2fac35ab0de52227f98dbae079d5
+Signed-off-by: Vishal Pandey <vpandey@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/185831
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-brick-ops.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-brick-ops.c b/xlators/mgmt/glusterd/src/glusterd-brick-ops.c
+index ad9a572..c5141de 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-brick-ops.c
++++ b/xlators/mgmt/glusterd/src/glusterd-brick-ops.c
+@@ -2191,6 +2191,17 @@ glusterd_op_stage_remove_brick(dict_t *dict, char **op_errstr)
+                 goto out;
+             }
+ 
++            if (volinfo->rebal.defrag_status == GF_DEFRAG_STATUS_COMPLETE) {
++                if (volinfo->rebal.rebalance_failures > 0 ||
++                    volinfo->rebal.skipped_files > 0) {
++                    errstr = gf_strdup(
++                        "use 'force' option as migration "
++                        "of some files might have been skipped or "
++                        "has failed");
++                    goto out;
++                }
++            }
++
+             ret = glusterd_remove_brick_validate_bricks(
+                 cmd, brick_count, dict, volinfo, &errstr, GF_DEFRAG_CMD_NONE);
+             if (ret)
+-- 
+1.8.3.1
+

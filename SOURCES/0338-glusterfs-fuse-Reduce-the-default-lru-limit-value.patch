@@ -1,0 +1,83 @@
+From 6d2e12a53ef0bcbeea274c47537a0c707a3f7b1e Mon Sep 17 00:00:00 2001
+From: N Balachandran <nbalacha@redhat.com>
+Date: Fri, 20 Sep 2019 13:30:42 +0530
+Subject: [PATCH 338/344] glusterfs/fuse: Reduce the default lru-limit value
+
+The current lru-limit value still uses memory for
+upto 128K inodes.
+Reduce the default value of lru-limit to 64K.
+
+> Upstream https://review.gluster.org/23461
+> Change-Id: Ica2dd4f8f5fde45cb5180d8f02c3d86114ac52b3
+> Fixes: bz#1753880
+> Signed-off-by: N Balachandran <nbalacha@redhat.com>
+> Signed-off-by: Csaba Henk <csaba@redhat.com>
+
+BUG: 1763208
+Change-Id: I04ab39b5278e702aacdceebfa5b63702b9f9703b
+Signed-off-by: Csaba Henk <csaba@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/187535
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ doc/mount.glusterfs.8                | 2 +-
+ glusterfsd/src/glusterfsd.c          | 2 +-
+ xlators/mount/fuse/src/fuse-bridge.c | 2 +-
+ xlators/mount/fuse/src/fuse-bridge.h | 2 +-
+ 4 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/doc/mount.glusterfs.8 b/doc/mount.glusterfs.8
+index b35b362..87a5669 100644
+--- a/doc/mount.glusterfs.8
++++ b/doc/mount.glusterfs.8
+@@ -123,7 +123,7 @@ Provide list of backup volfile servers in the following format [default: None]
+ .TP
+ .TP
+ \fBlru-limit=\fRN
+-Set fuse module's limit for number of inodes kept in LRU list to N [default: 131072]
++Set fuse module's limit for number of inodes kept in LRU list to N [default: 65536]
+ .TP
+ .TP
+ \fBinvalidate-limit=\fRN
+diff --git a/glusterfsd/src/glusterfsd.c b/glusterfsd/src/glusterfsd.c
+index 0856471..974fb88 100644
+--- a/glusterfsd/src/glusterfsd.c
++++ b/glusterfsd/src/glusterfsd.c
+@@ -211,7 +211,7 @@ static struct argp_option gf_options[] = {
+      "Resolve all auxiliary groups in fuse translator (max 32 otherwise)"},
+     {"lru-limit", ARGP_FUSE_LRU_LIMIT_KEY, "N", 0,
+      "Set fuse module's limit for number of inodes kept in LRU list to N "
+-     "[default: 131072]"},
++     "[default: 65536]"},
+     {"invalidate-limit", ARGP_FUSE_INVALIDATE_LIMIT_KEY, "N", 0,
+      "Suspend inode invalidations implied by 'lru-limit' if the number of "
+      "outstanding invalidations reaches N"},
+diff --git a/xlators/mount/fuse/src/fuse-bridge.c b/xlators/mount/fuse/src/fuse-bridge.c
+index 8b2e7f0..ebe5c28 100644
+--- a/xlators/mount/fuse/src/fuse-bridge.c
++++ b/xlators/mount/fuse/src/fuse-bridge.c
+@@ -6972,7 +6972,7 @@ struct volume_options options[] = {
+     {
+         .key = {"lru-limit"},
+         .type = GF_OPTION_TYPE_INT,
+-        .default_value = "131072",
++        .default_value = "65536",
+         .min = 0,
+         .description = "makes glusterfs invalidate kernel inodes after "
+                        "reaching this limit (0 means 'unlimited')",
+diff --git a/xlators/mount/fuse/src/fuse-bridge.h b/xlators/mount/fuse/src/fuse-bridge.h
+index 2311582..cf4479c 100644
+--- a/xlators/mount/fuse/src/fuse-bridge.h
++++ b/xlators/mount/fuse/src/fuse-bridge.h
+@@ -189,7 +189,7 @@ struct fuse_private {
+     gf_boolean_t flush_handle_interrupt;
+     gf_boolean_t fuse_auto_inval;
+ 
+-    /* LRU Limit, if not set, default is 128k for now */
++    /* LRU Limit, if not set, default is 64k for now */
+     uint32_t lru_limit;
+     uint32_t invalidate_limit;
+ };
+-- 
+1.8.3.1
+

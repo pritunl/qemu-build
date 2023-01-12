@@ -1,0 +1,67 @@
+From bfbda24746bf11573b485baf534a5cf1373c6c89 Mon Sep 17 00:00:00 2001
+From: "Kaleb S. KEITHLEY" <kkeithle@redhat.com>
+Date: Wed, 7 Jun 2017 08:15:48 -0400
+Subject: [PATCH 074/124] common-ha: enable pacemaker at end of setup
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I3ccd59b67ed364bfc5d27e88321ab5b9f8d471fd
+Signed-off-by: Kaleb S. KEITHLEY <kkeithle@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/108431
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167159
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/ganesha/scripts/ganesha-ha.sh | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/extras/ganesha/scripts/ganesha-ha.sh b/extras/ganesha/scripts/ganesha-ha.sh
+index e1d3ea0..d7dfb87 100644
+--- a/extras/ganesha/scripts/ganesha-ha.sh
++++ b/extras/ganesha/scripts/ganesha-ha.sh
+@@ -787,6 +787,22 @@ setup_state_volume()
+ }
+ 
+ 
++enable_pacemaker()
++{
++    while [[ ${1} ]]; do
++        if [ "${SERVICE_MAN}" == "/usr/bin/systemctl" ]; then
++${SECRET_PEM} root@${1} ${SERVICE_MAN} enable pacemaker"
++            ssh -oPasswordAuthentication=no -oStrictHostKeyChecking=no -i \
++${SECRET_PEM} root@${1} "${SERVICE_MAN} enable pacemaker"
++        else
++            ssh -oPasswordAuthentication=no -oStrictHostKeyChecking=no -i \
++${SECRET_PEM} root@${1} "${SERVICE_MAN} pacemaker enable"
++        fi
++        shift
++    done
++}
++
++
+ addnode_state_volume()
+ {
+     local newnode=${1}; shift
+@@ -1011,6 +1027,8 @@ main()
+ 
+         if [ "X${HA_NUM_SERVERS}X" != "X1X" ]; then
+ 
++            determine_service_manager
++
+             setup_cluster ${HA_NAME} ${HA_NUM_SERVERS} "${HA_SERVERS}"
+ 
+             setup_create_resources ${HA_SERVERS}
+@@ -1019,6 +1037,8 @@ main()
+ 
+             setup_state_volume ${HA_SERVERS}
+ 
++            enable_pacemaker ${HA_SERVERS}
++
+         else
+ 
+             logger "insufficient servers for HA, aborting"
+-- 
+1.8.3.1
+

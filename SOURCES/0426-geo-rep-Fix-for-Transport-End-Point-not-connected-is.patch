@@ -1,0 +1,216 @@
+From 91936fe5ef854bd9d2f91e643795d0e7791b97ba Mon Sep 17 00:00:00 2001
+From: Harpreet Kaur <hlalwani@redhat.com>
+Date: Mon, 7 Jan 2019 16:38:25 +0530
+Subject: [PATCH 426/449] geo-rep: Fix for "Transport End Point not connected"
+ issue
+
+problem: Geo-rep gsyncd process mounts the master and slave volume
+         on master nodes and slave nodes respectively and starts
+         the sync. But it doesn't wait for the mount to be in ready
+         state to accept I/O. The gluster mount is considered to be
+         ready when all the distribute sub-volumes is up. If the all
+         the distribute subvolumes are not up, it can cause ENOTCONN
+         error, when lookup on file comes and file is on the subvol
+         that is down.
+
+solution: Added a Virtual Xattr "dht.subvol.status" which returns "1"
+          if all subvols are up and "0" if all subvols are not up.
+          Geo-rep then uses this virtual xattr after a fresh mount, to
+          check whether all subvols are up or not and then starts the
+          I/O.
+
+>fixes: bz#1664335
+>Change-Id: If3ad01d728b1372da7c08ccbe75a45bdc1ab2a91
+>Signed-off-by: Harpreet Kaur <hlalwani@redhat.com>
+>Signed-off-by: Kotresh HR <khiremat@redhat.com>
+
+backport of https://review.gluster.org/#/c/glusterfs/+/22001/
+BUG: 1640573
+Change-Id: If3ad01d728b1372da7c08ccbe75a45bdc1ab2a91
+Signed-off-by: Shwetha K Acharya <sacharya@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202554
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ geo-replication/syncdaemon/resource.py   | 11 ++++++
+ geo-replication/syncdaemon/syncdutils.py | 20 +++++++++--
+ xlators/cluster/dht/src/dht-common.c     | 59 ++++++++++++++++++++++++++++++++
+ xlators/cluster/dht/src/dht-common.h     |  4 +++
+ 4 files changed, 91 insertions(+), 3 deletions(-)
+
+diff --git a/geo-replication/syncdaemon/resource.py b/geo-replication/syncdaemon/resource.py
+index 189d8a1..0c61de9 100644
+--- a/geo-replication/syncdaemon/resource.py
++++ b/geo-replication/syncdaemon/resource.py
+@@ -37,6 +37,7 @@ from syncdutils import ChangelogException, ChangelogHistoryNotAvailable
+ from syncdutils import get_changelog_log_level, get_rsync_version
+ from syncdutils import CHANGELOG_AGENT_CLIENT_VERSION
+ from syncdutils import GX_GFID_CANONICAL_LEN
++from syncdutils import gf_mount_ready
+ from gsyncdstatus import GeorepStatus
+ from syncdutils import lf, Popen, sup
+ from syncdutils import Xattr, matching_disk_gfid, get_gfid_from_mnt
+@@ -950,6 +951,16 @@ class Mounter(object):
+                 logging.exception('mount cleanup failure:')
+                 rv = 200
+             os._exit(rv)
++
++        #Polling the dht.subvol.status value.
++        RETRIES = 10
++        while not gf_mount_ready():
++            if RETRIES < 0:
++                logging.error('Subvols are not up')
++                break
++            RETRIES -= 1
++            time.sleep(0.2)
++
+         logging.debug('auxiliary glusterfs mount prepared')
+ 
+ 
+diff --git a/geo-replication/syncdaemon/syncdutils.py b/geo-replication/syncdaemon/syncdutils.py
+index b08098e..7560fa1 100644
+--- a/geo-replication/syncdaemon/syncdutils.py
++++ b/geo-replication/syncdaemon/syncdutils.py
+@@ -21,8 +21,8 @@ import subprocess
+ import socket
+ from subprocess import PIPE
+ from threading import Lock, Thread as baseThread
+-from errno import EACCES, EAGAIN, EPIPE, ENOTCONN, ECONNABORTED
+-from errno import EINTR, ENOENT, ESTALE, EBUSY, errorcode
++from errno import EACCES, EAGAIN, EPIPE, ENOTCONN, ENOMEM, ECONNABORTED
++from errno import EINTR, ENOENT, ESTALE, EBUSY, ENODATA, errorcode
+ from signal import signal, SIGTERM
+ import select as oselect
+ from os import waitpid as owaitpid
+@@ -55,6 +55,8 @@ from rconf import rconf
+ 
+ from hashlib import sha256 as sha256
+ 
++ENOTSUP = getattr(errno, 'ENOTSUP', 'EOPNOTSUPP')
++
+ # auxiliary gfid based access prefix
+ _CL_AUX_GFID_PFX = ".gfid/"
+ ROOT_GFID = "00000000-0000-0000-0000-000000000001"
+@@ -100,6 +102,19 @@ def unescape_space_newline(s):
+             .replace(NEWLINE_ESCAPE_CHAR, "\n")\
+             .replace(PERCENTAGE_ESCAPE_CHAR, "%")
+ 
++# gf_mount_ready() returns 1 if all subvols are up, else 0
++def gf_mount_ready():
++    ret = errno_wrap(Xattr.lgetxattr,
++                     ['.', 'dht.subvol.status', 16],
++                     [ENOENT, ENOTSUP, ENODATA], [ENOMEM])
++
++    if isinstance(ret, int):
++       logging.error("failed to get the xattr value")
++       return 1
++    ret = ret.rstrip('\x00')
++    if ret == "1":
++       return 1
++    return 0
+ 
+ def norm(s):
+     if s:
+@@ -564,7 +579,6 @@ def errno_wrap(call, arg=[], errnos=[], retry_errnos=[]):
+ def lstat(e):
+     return errno_wrap(os.lstat, [e], [ENOENT], [ESTALE, EBUSY])
+ 
+-
+ def get_gfid_from_mnt(gfidpath):
+     return errno_wrap(Xattr.lgetxattr,
+                       [gfidpath, 'glusterfs.gfid.string',
+diff --git a/xlators/cluster/dht/src/dht-common.c b/xlators/cluster/dht/src/dht-common.c
+index 6aa18f3..23cc80c 100644
+--- a/xlators/cluster/dht/src/dht-common.c
++++ b/xlators/cluster/dht/src/dht-common.c
+@@ -4858,6 +4858,60 @@ out:
+     return 0;
+ }
+ 
++/* Virtual Xattr which returns 1 if all subvols are up,
++   else returns 0. Geo-rep then uses this virtual xattr
++   after a fresh mount and starts the I/O.
++*/
++
++enum dht_vxattr_subvol {
++    DHT_VXATTR_SUBVOLS_UP = 1,
++    DHT_VXATTR_SUBVOLS_DOWN = 0,
++};
++
++int
++dht_vgetxattr_subvol_status(call_frame_t *frame, xlator_t *this,
++                            const char *key)
++{
++    dht_local_t *local = NULL;
++    int ret = -1;
++    int op_errno = ENODATA;
++    int value = DHT_VXATTR_SUBVOLS_UP;
++    int i = 0;
++    dht_conf_t *conf = NULL;
++
++    conf = this->private;
++    local = frame->local;
++
++    if (!key) {
++        op_errno = EINVAL;
++        goto out;
++    }
++    local->xattr = dict_new();
++    if (!local->xattr) {
++        op_errno = ENOMEM;
++        goto out;
++    }
++    for (i = 0; i < conf->subvolume_cnt; i++) {
++        if (!conf->subvolume_status[i]) {
++            value = DHT_VXATTR_SUBVOLS_DOWN;
++            gf_msg_debug(this->name, 0, "subvol %s is down ",
++                         conf->subvolumes[i]->name);
++            break;
++        }
++    }
++    ret = dict_set_int8(local->xattr, (char *)key, value);
++    if (ret < 0) {
++        op_errno = -ret;
++        ret = -1;
++        goto out;
++    }
++    ret = 0;
++
++out:
++    DHT_STACK_UNWIND(getxattr, frame, ret, op_errno, local->xattr, NULL);
++    return 0;
++}
++
+ int
+ dht_getxattr(call_frame_t *frame, xlator_t *this, loc_t *loc, const char *key,
+              dict_t *xdata)
+@@ -4915,6 +4969,11 @@ dht_getxattr(call_frame_t *frame, xlator_t *this, loc_t *loc, const char *key,
+         goto err;
+     }
+ 
++    if (strncmp(key, DHT_SUBVOL_STATUS_KEY, SLEN(DHT_SUBVOL_STATUS_KEY)) == 0) {
++        dht_vgetxattr_subvol_status(frame, this, key);
++        return 0;
++    }
++
+     /* skip over code which is irrelevant if !DHT_IS_DIR(layout) */
+     if (!DHT_IS_DIR(layout))
+         goto no_dht_is_dir;
+diff --git a/xlators/cluster/dht/src/dht-common.h b/xlators/cluster/dht/src/dht-common.h
+index 1b3e826..9ec5b51 100644
+--- a/xlators/cluster/dht/src/dht-common.h
++++ b/xlators/cluster/dht/src/dht-common.h
+@@ -45,6 +45,10 @@
+ #define DHT_DIR_STAT_BLOCKS 8
+ #define DHT_DIR_STAT_SIZE 4096
+ 
++/* Virtual xattr for subvols status */
++
++#define DHT_SUBVOL_STATUS_KEY "dht.subvol.status"
++
+ /* Virtual xattrs for debugging */
+ 
+ #define DHT_DBG_HASHED_SUBVOL_PATTERN "dht.file.hashed-subvol.*"
+-- 
+1.8.3.1
+

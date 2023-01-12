@@ -1,0 +1,191 @@
+From 708c17a8a69b2657f384affaedfcf4ba0a123893 Mon Sep 17 00:00:00 2001
+From: karthik-us <ksubrahm@redhat.com>
+Date: Wed, 23 Dec 2020 14:45:07 +0530
+Subject: [PATCH 513/517] afr: mark pending xattrs as a part of metadata heal
+
+...if pending xattrs are zero for all children.
+
+Problem:
+If there are no pending xattrs and a metadata heal needs to be
+performed, it can be possible that we end up with xattrs inadvertendly
+deleted from all bricks, as explained in the  BZ.
+
+Fix:
+After picking one among the sources as the good copy, mark pending xattrs on
+all sources to blame the sinks. Now even if this metadata heal fails midway,
+a subsequent heal will still choose one of the valid sources that it
+picked previously.
+
+Upstream patch details:
+> Fixes: #1067
+> Change-Id: If1b050b70b0ad911e162c04db4d89b263e2b8d7b
+> Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+Upstream patch: https://review.gluster.org/#/c/glusterfs/+/21922/
+
+BUG: 1640148
+Change-Id: If1b050b70b0ad911e162c04db4d89b263e2b8d7b
+Signed-off-by: karthik-us <ksubrahm@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/222073
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Ravishankar Narayanankutty <ravishankar@redhat.com>
+---
+ tests/bugs/replicate/mdata-heal-no-xattrs.t      | 59 ++++++++++++++++++++++
+ xlators/cluster/afr/src/afr-self-heal-metadata.c | 62 +++++++++++++++++++++++-
+ 2 files changed, 120 insertions(+), 1 deletion(-)
+ create mode 100644 tests/bugs/replicate/mdata-heal-no-xattrs.t
+
+diff --git a/tests/bugs/replicate/mdata-heal-no-xattrs.t b/tests/bugs/replicate/mdata-heal-no-xattrs.t
+new file mode 100644
+index 0000000..d3b0c50
+--- /dev/null
++++ b/tests/bugs/replicate/mdata-heal-no-xattrs.t
+@@ -0,0 +1,59 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++cleanup;
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 replica 3 $H0:$B0/${V0}{0,1,2};
++TEST $CLI volume set $V0 cluster.self-heal-daemon off
++TEST $CLI volume start $V0
++
++TEST glusterfs --volfile-id=/$V0 --volfile-server=$H0 $M0 --attribute-timeout=0 --entry-timeout=0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 2
++echo "Data">$M0/FILE
++ret=$?
++TEST [ $ret -eq 0 ]
++
++# Change permission on brick-0: simulates the case where there is metadata
++# mismatch but no pending xattrs. This brick will become the source for heal.
++TEST chmod +x $B0/$V0"0"/FILE
++
++# Add gfid to xattrop
++xattrop_b0=$(afr_get_index_path $B0/$V0"0")
++base_entry_b0=`ls $xattrop_b0`
++gfid_str_FILE=$(gf_gfid_xattr_to_str $(gf_get_gfid_xattr $B0/$V0"0"/FILE))
++TEST ln $xattrop_b0/$base_entry_b0 $xattrop_b0/$gfid_str_FILE
++EXPECT_WITHIN $HEAL_TIMEOUT "^1$" get_pending_heal_count $V0
++
++TEST $CLI volume set $V0 cluster.self-heal-daemon on
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 1
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 2
++TEST $CLI volume heal $V0
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" get_pending_heal_count $V0
++
++# Brick-0 should contain xattrs blaming other 2 bricks.
++# The values will be zero because heal is over.
++EXPECT "000000000000000000000000" get_hex_xattr trusted.afr.$V0-client-1 $B0/${V0}0/FILE
++EXPECT "000000000000000000000000" get_hex_xattr trusted.afr.$V0-client-2 $B0/${V0}0/FILE
++TEST ! getfattr -n trusted.afr.$V0-client-0 $B0/${V0}0/FILE
++
++# Brick-1 and Brick-2 must not contain any afr xattrs.
++TEST ! getfattr -n trusted.afr.$V0-client-0 $B0/${V0}1/FILE
++TEST ! getfattr -n trusted.afr.$V0-client-1 $B0/${V0}1/FILE
++TEST ! getfattr -n trusted.afr.$V0-client-2 $B0/${V0}1/FILE
++TEST ! getfattr -n trusted.afr.$V0-client-0 $B0/${V0}2/FILE
++TEST ! getfattr -n trusted.afr.$V0-client-1 $B0/${V0}2/FILE
++TEST ! getfattr -n trusted.afr.$V0-client-2 $B0/${V0}2/FILE
++
++# check permission bits.
++EXPECT '755' stat -c %a $B0/${V0}0/FILE
++EXPECT '755' stat -c %a $B0/${V0}1/FILE
++EXPECT '755' stat -c %a $B0/${V0}2/FILE
++
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
++cleanup;
+diff --git a/xlators/cluster/afr/src/afr-self-heal-metadata.c b/xlators/cluster/afr/src/afr-self-heal-metadata.c
+index f4e31b6..03f43ba 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-metadata.c
++++ b/xlators/cluster/afr/src/afr-self-heal-metadata.c
+@@ -190,6 +190,59 @@ out:
+     return ret;
+ }
+ 
++static int
++__afr_selfheal_metadata_mark_pending_xattrs(call_frame_t *frame, xlator_t *this,
++                                            inode_t *inode,
++                                            struct afr_reply *replies,
++                                            unsigned char *sources)
++{
++    int ret = 0;
++    int i = 0;
++    int m_idx = 0;
++    afr_private_t *priv = NULL;
++    int raw[AFR_NUM_CHANGE_LOGS] = {0};
++    dict_t *xattr = NULL;
++
++    priv = this->private;
++    m_idx = afr_index_for_transaction_type(AFR_METADATA_TRANSACTION);
++    raw[m_idx] = 1;
++
++    xattr = dict_new();
++    if (!xattr)
++        return -ENOMEM;
++
++    for (i = 0; i < priv->child_count; i++) {
++        if (sources[i])
++            continue;
++        ret = dict_set_static_bin(xattr, priv->pending_key[i], raw,
++                                  sizeof(int) * AFR_NUM_CHANGE_LOGS);
++        if (ret) {
++            ret = -1;
++            goto out;
++        }
++    }
++
++    for (i = 0; i < priv->child_count; i++) {
++        if (!sources[i])
++            continue;
++        ret = afr_selfheal_post_op(frame, this, inode, i, xattr, NULL);
++        if (ret < 0) {
++            gf_msg(this->name, GF_LOG_INFO, -ret, AFR_MSG_SELF_HEAL_INFO,
++                   "Failed to set pending metadata xattr on child %d for %s", i,
++                   uuid_utoa(inode->gfid));
++            goto out;
++        }
++    }
++
++    afr_replies_wipe(replies, priv->child_count);
++    ret = afr_selfheal_unlocked_discover(frame, inode, inode->gfid, replies);
++
++out:
++    if (xattr)
++        dict_unref(xattr);
++    return ret;
++}
++
+ /*
+  * Look for mismatching uid/gid or mode or user xattrs even if
+  * AFR xattrs don't say so, and pick one arbitrarily as winner. */
+@@ -210,6 +263,7 @@ __afr_selfheal_metadata_finalize_source(call_frame_t *frame, xlator_t *this,
+     };
+     int source = -1;
+     int sources_count = 0;
++    int ret = 0;
+ 
+     priv = this->private;
+ 
+@@ -300,7 +354,13 @@ __afr_selfheal_metadata_finalize_source(call_frame_t *frame, xlator_t *this,
+             healed_sinks[i] = 1;
+         }
+     }
+-
++    if ((sources_count == priv->child_count) && (source > -1) &&
++        (AFR_COUNT(healed_sinks, priv->child_count) != 0)) {
++        ret = __afr_selfheal_metadata_mark_pending_xattrs(frame, this, inode,
++                                                          replies, sources);
++        if (ret < 0)
++            return ret;
++    }
+ out:
+     afr_mark_active_sinks(this, sources, locked_on, healed_sinks);
+     return source;
+-- 
+1.8.3.1
+

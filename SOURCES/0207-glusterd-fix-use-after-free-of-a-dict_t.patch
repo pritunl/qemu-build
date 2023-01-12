@@ -1,0 +1,44 @@
+From a7a7d497af4230430f8a0cc54d8b49cfea260039 Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez <xhernandez@redhat.com>
+Date: Tue, 25 Jun 2019 18:00:06 +0200
+Subject: [PATCH 207/221] glusterd: fix use-after-free of a dict_t
+
+A dict was passed to a function that calls dict_unref() without taking
+any additional reference. Given that the same dict is also used after
+the function returns, this was causing a use-after-free situation.
+
+To fix the issue, we simply take an additional reference before calling
+the function.
+
+Upstream patch:
+> BUG: 1723890
+> Upstream patch link: https://review.gluster.org/c/glusterfs/+/22943
+> Change-Id: I98c6b76b08fe3fa6224edf281a26e9ba1ffe3017
+> Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+
+Change-Id: I98c6b76b08fe3fa6224edf281a26e9ba1ffe3017
+Updates: bz#1722801
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/174656
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-utils.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index c6e9bb0..4c487d0 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -3697,7 +3697,7 @@ glusterd_add_volumes_to_export_dict(dict_t *peer_data, char **buf,
+     if (totthread) {
+         gf_log(this->name, GF_LOG_INFO,
+                "Finished merger of all dictionraies into single one");
+-        dict_arr[totthread++] = peer_data;
++        dict_arr[totthread++] = dict_ref(peer_data);
+         ret = glusterd_dict_arr_serialize(dict_arr, totthread, buf, length);
+         gf_log(this->name, GF_LOG_INFO,
+                "Serialize dictionary data return is %d", ret);
+-- 
+1.8.3.1
+

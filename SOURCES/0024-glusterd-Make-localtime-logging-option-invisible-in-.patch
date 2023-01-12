@@ -1,0 +1,50 @@
+From 79c19f0c6d02228aa8cf4b9299afeb7e0b2ad0da Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Mon, 16 Apr 2018 17:44:19 +0530
+Subject: [PATCH 24/52] glusterd: Make localtime-logging option invisible in
+ downstream
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Ie631edebb7e19152392bfd3c369a96e88796bd75
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/135754
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-op-sm.c      | 2 +-
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c | 3 ++-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-op-sm.c b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+index dd3f9eb..cbbb5d9 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-op-sm.c
++++ b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+@@ -86,7 +86,7 @@ glusterd_all_vol_opts valid_all_vol_opts[] = {
+      * TBD: Discuss the default value for this. Maybe this should be a
+      * dynamic value depending on the memory specifications per node */
+     {GLUSTERD_BRICKMUX_LIMIT_KEY, GLUSTERD_BRICKMUX_LIMIT_DFLT_VALUE},
+-    {GLUSTERD_LOCALTIME_LOGGING_KEY, "disable"},
++    /*{GLUSTERD_LOCALTIME_LOGGING_KEY, "disable"},*/
+     {GLUSTERD_DAEMON_LOG_LEVEL_KEY, "INFO"},
+     {NULL},
+ };
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index 9a6fe9f..fed2864 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -2850,10 +2850,11 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+                     "to have enabled when clients and/or bricks support "
+                     "SELinux."},
+     {.key = GLUSTERD_LOCALTIME_LOGGING_KEY,
++    /*{.key = GLUSTERD_LOCALTIME_LOGGING_KEY,
+      .voltype = "mgmt/glusterd",
+      .type = GLOBAL_DOC,
+      .op_version = GD_OP_VERSION_3_12_0,
+-     .validate_fn = validate_boolean},
++     .validate_fn = validate_boolean},*/
+     {.key = GLUSTERD_DAEMON_LOG_LEVEL_KEY,
+      .voltype = "mgmt/glusterd",
+      .type = GLOBAL_NO_DOC,
+-- 
+1.8.3.1
+

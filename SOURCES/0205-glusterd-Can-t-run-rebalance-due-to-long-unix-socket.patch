@@ -1,0 +1,195 @@
+From b1a4947e382c5e2ba1137ed606ecffc69fcf00e9 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawa@redhat.com>
+Date: Tue, 25 Jun 2019 17:30:17 +0530
+Subject: [PATCH 205/221] glusterd: Can't run rebalance due to long unix socket
+
+Problem: glusterd populate unix socket file name based
+         on volname and if volname is lengthy socket
+         system call's are failed due to breach maximum length
+         is defined in the kernel.
+
+Solution:Convert unix socket name to hash to resolve the issue
+
+> Change-Id: I5072e8184013095587537dbfa4767286307fff65
+> fixes: bz#1720566
+> (Cherry pick from commit 2d7b77eb971700c1073db2b74f5877c1ae8293fc)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/22869/)
+
+BUG: 1720192
+Change-Id: I5072e8184013095587537dbfa4767286307fff65
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/174557
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ tests/bugs/glusterd/bug-1720566.t              | 50 ++++++++++++++++++++++++++
+ xlators/mgmt/glusterd/src/glusterd-rebalance.c | 38 +-------------------
+ xlators/mgmt/glusterd/src/glusterd.h           | 23 +++++-------
+ 3 files changed, 59 insertions(+), 52 deletions(-)
+ create mode 100644 tests/bugs/glusterd/bug-1720566.t
+
+diff --git a/tests/bugs/glusterd/bug-1720566.t b/tests/bugs/glusterd/bug-1720566.t
+new file mode 100644
+index 0000000..99bcf6f
+--- /dev/null
++++ b/tests/bugs/glusterd/bug-1720566.t
+@@ -0,0 +1,50 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../cluster.rc
++. $(dirname $0)/../../volume.rc
++
++
++cleanup;
++V0="TestLongVolnamec363b7b536700ff06eedeae0dd9037fec363b7b536700ff06eedeae0dd9037fec363b7b536700ff06eedeae0dd9abcd"
++V1="TestLongVolname3102bd28a16c49440bd5210e4ec4d5d93102bd28a16c49440bd5210e4ec4d5d933102bd28a16c49440bd5210e4ebbcd"
++TEST launch_cluster 2;
++TEST $CLI_1 peer probe $H2;
++
++EXPECT_WITHIN $PROBE_TIMEOUT 1 peer_count
++
++$CLI_1 volume create $V0 $H1:$B1/$V0  $H2:$B2/$V0
++EXPECT 'Created' cluster_volinfo_field 1 $V0 'Status';
++$CLI_1 volume create $V1 $H1:$B1/$V1  $H2:$B2/$V1
++EXPECT 'Created' cluster_volinfo_field 1 $V1 'Status';
++
++$CLI_1 volume start $V0
++EXPECT 'Started' cluster_volinfo_field 1 $V0 'Status';
++
++$CLI_1 volume start $V1
++EXPECT 'Started' cluster_volinfo_field 1 $V1 'Status';
++
++#Mount FUSE
++TEST glusterfs -s $H1 --volfile-id=$V0 $M0;
++
++
++#Mount FUSE
++TEST glusterfs -s $H1 --volfile-id=$V1 $M1;
++
++TEST mkdir $M0/dir{1..4};
++TEST touch $M0/dir{1..4}/files{1..4};
++
++TEST mkdir $M1/dir{1..4};
++TEST touch $M1/dir{1..4}/files{1..4};
++
++TEST $CLI_1 volume add-brick $V0 $H1:$B1/${V0}_1 $H2:$B2/${V0}_1
++TEST $CLI_1 volume add-brick $V1 $H1:$B1/${V1}_1 $H2:$B2/${V1}_1
++
++
++TEST $CLI_1 volume rebalance $V0 start
++TEST $CLI_1 volume rebalance $V1  start
++
++EXPECT_WITHIN $REBALANCE_TIMEOUT "completed" cluster_rebalance_status_field 1 $V0
++EXPECT_WITHIN $REBALANCE_TIMEOUT "completed" cluster_rebalance_status_field 1  $V1
++
++cleanup;
+diff --git a/xlators/mgmt/glusterd/src/glusterd-rebalance.c b/xlators/mgmt/glusterd/src/glusterd-rebalance.c
+index cbed9a9..b419a89 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-rebalance.c
++++ b/xlators/mgmt/glusterd/src/glusterd-rebalance.c
+@@ -266,18 +266,7 @@ glusterd_handle_defrag_start(glusterd_volinfo_t *volinfo, char *op_errstr,
+ 
+     if (dict_get_strn(this->options, "transport.socket.bind-address",
+                       SLEN("transport.socket.bind-address"),
+-                      &volfileserver) == 0) {
+-        /*In the case of running multiple glusterds on a single machine,
+-         *we should ensure that log file and unix socket file should be
+-         *unique in given cluster */
+-
+-        GLUSTERD_GET_DEFRAG_SOCK_FILE_OLD(sockfile, volinfo, priv);
+-        snprintf(logfile, PATH_MAX, "%s/%s-%s-%s.log",
+-                 DEFAULT_LOG_FILE_DIRECTORY, volinfo->volname,
+-                 (cmd == GF_DEFRAG_CMD_START_TIER ? "tier" : "rebalance"),
+-                 uuid_utoa(MY_UUID));
+-
+-    } else {
++                      &volfileserver) != 0) {
+         volfileserver = "localhost";
+     }
+ 
+@@ -378,9 +367,6 @@ glusterd_rebalance_rpc_create(glusterd_volinfo_t *volinfo)
+     glusterd_defrag_info_t *defrag = volinfo->rebal.defrag;
+     glusterd_conf_t *priv = NULL;
+     xlator_t *this = NULL;
+-    struct stat buf = {
+-        0,
+-    };
+ 
+     this = THIS;
+     GF_ASSERT(this);
+@@ -396,28 +382,6 @@ glusterd_rebalance_rpc_create(glusterd_volinfo_t *volinfo)
+         goto out;
+ 
+     GLUSTERD_GET_DEFRAG_SOCK_FILE(sockfile, volinfo);
+-    /* Check if defrag sockfile exists in the new location
+-     * in /var/run/ , if it does not try the old location
+-     */
+-    ret = sys_stat(sockfile, &buf);
+-    /* TODO: Remove this once we don't need backward compatibility
+-     * with the older path
+-     */
+-    if (ret && (errno == ENOENT)) {
+-        gf_msg(this->name, GF_LOG_WARNING, errno, GD_MSG_FILE_OP_FAILED,
+-               "Rebalance sockfile "
+-               "%s does not exist. Trying old path.",
+-               sockfile);
+-        GLUSTERD_GET_DEFRAG_SOCK_FILE_OLD(sockfile, volinfo, priv);
+-        ret = sys_stat(sockfile, &buf);
+-        if (ret && (ENOENT == errno)) {
+-            gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_REBAL_NO_SOCK_FILE,
+-                   "Rebalance "
+-                   "sockfile %s does not exist",
+-                   sockfile);
+-            goto out;
+-        }
+-    }
+ 
+     /* Setting frame-timeout to 10mins (600seconds).
+      * Unix domain sockets ensures that the connection is reliable. The
+diff --git a/xlators/mgmt/glusterd/src/glusterd.h b/xlators/mgmt/glusterd/src/glusterd.h
+index f96bca3..7d07d33 100644
+--- a/xlators/mgmt/glusterd/src/glusterd.h
++++ b/xlators/mgmt/glusterd/src/glusterd.h
+@@ -910,30 +910,23 @@ typedef ssize_t (*gd_serialize_t)(struct iovec outmsg, void *args);
+         }                                                                      \
+     } while (0)
+ 
+-#define GLUSTERD_GET_DEFRAG_SOCK_FILE_OLD(path, volinfo, priv)                 \
+-    do {                                                                       \
+-        char defrag_path[PATH_MAX];                                            \
+-        int32_t _sockfile_old_len;                                             \
+-        GLUSTERD_GET_DEFRAG_DIR(defrag_path, volinfo, priv);                   \
+-        _sockfile_old_len = snprintf(path, PATH_MAX, "%s/%s.sock",             \
+-                                     defrag_path, uuid_utoa(MY_UUID));         \
+-        if ((_sockfile_old_len < 0) || (_sockfile_old_len >= PATH_MAX)) {      \
+-            path[0] = 0;                                                       \
+-        }                                                                      \
+-    } while (0)
+-
+ #define GLUSTERD_GET_DEFRAG_SOCK_FILE(path, volinfo)                           \
+     do {                                                                       \
+         char operation[NAME_MAX];                                              \
++        char tmppath[PATH_MAX] = {                                             \
++            0,                                                                 \
++        };                                                                     \
+         int32_t _defrag_sockfile_len;                                          \
+         GLUSTERD_GET_DEFRAG_PROCESS(operation, volinfo);                       \
+         _defrag_sockfile_len = snprintf(                                       \
+-            path, UNIX_PATH_MAX,                                               \
+-            DEFAULT_VAR_RUN_DIRECTORY "/gluster-%s-%s.sock", operation,        \
+-            uuid_utoa(volinfo->volume_id));                                    \
++            tmppath, PATH_MAX,                                                 \
++            DEFAULT_VAR_RUN_DIRECTORY "/gluster-%s-%s-%s.sock", operation,     \
++            volinfo->volname, uuid_utoa(MY_UUID));                             \
+         if ((_defrag_sockfile_len < 0) ||                                      \
+             (_defrag_sockfile_len >= PATH_MAX)) {                              \
+             path[0] = 0;                                                       \
++        } else {                                                               \
++            glusterd_set_socket_filepath(tmppath, path, sizeof(path));         \
+         }                                                                      \
+     } while (0)
+ 
+-- 
+1.8.3.1
+

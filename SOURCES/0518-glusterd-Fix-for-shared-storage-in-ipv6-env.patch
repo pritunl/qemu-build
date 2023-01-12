@@ -1,0 +1,41 @@
+From 818025e467ea98b32a855c92ba6aef6e172e029f Mon Sep 17 00:00:00 2001
+From: Nikhil Ladha <nladha@redhat.com>
+Date: Fri, 8 Jan 2021 13:12:46 +0530
+Subject: [PATCH 518/526] glusterd: Fix for shared storage in ipv6 env
+
+Issue:
+Mounting shared storage volume was failing in ipv6 env if the hostnames were FQDNs.
+The brickname for the volume was being cut off, as a result, volume creation was failing.
+
+>Change-Id: Ib38993724c709b35b603f9ac666630c50c932c3e
+>Fixes: #1406
+>Signed-off-by: nik-redhat <nladha@redhat.com>
+Upstream patch: https://github.com/gluster/glusterfs/pull/1972
+
+BUG: 1856574
+
+Change-Id: Ib38993724c709b35b603f9ac666630c50c932c3e
+Signed-off-by: nik-redhat <nladha@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/223248
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Ravishankar Narayanankutty <ravishankar@redhat.com>
+---
+ extras/hook-scripts/set/post/S32gluster_enable_shared_storage.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/extras/hook-scripts/set/post/S32gluster_enable_shared_storage.sh b/extras/hook-scripts/set/post/S32gluster_enable_shared_storage.sh
+index 9597503..e9261af 100755
+--- a/extras/hook-scripts/set/post/S32gluster_enable_shared_storage.sh
++++ b/extras/hook-scripts/set/post/S32gluster_enable_shared_storage.sh
+@@ -46,7 +46,7 @@ do
+ 
+     key=`echo $line | cut -d ':' -f 1`
+     if [ "$key" == "Hostname" ]; then
+-        hostname=`echo $line | cut -d ':' -f 2 | xargs`
++        hostname=`echo $line | cut -d ' ' -f 2 | xargs`
+     fi
+ 
+     if [ "$key" == "State" ]; then
+-- 
+1.8.3.1
+

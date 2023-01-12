@@ -1,0 +1,613 @@
+From aff18f761ef64d55635daa9a1d2140fe35632820 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Fri, 29 Mar 2019 11:48:32 +0530
+Subject: [PATCH 109/124] glusterd: Optimize glusterd handshaking code path
+
+Problem: At the time of handshaking glusterd populate volume
+         data in a dictionary.While no. of volumes are configured
+         more than 1500 glusterd takes more than 10 min to generated
+         the data.Due to taking more time rpc request times out and
+         rpc start bailing of call frames.
+
+Solution: To optimize the code done below changes
+          1) Spawn multiple threads to populate volumes data in bulk
+             in separate dictionary and introduce an option
+             glusterd.brick-dict-thread-count to configure no. of threads
+             to populate volume data.
+          2) Populate tier data only while volume type is tier
+          3) Compare snap data only while snap_count is non zero
+
+> Fixes: bz#1699339
+> Change-Id: I38dc71970c049217f9d1a06fc0aaf4c26eab18f5
+> Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+> (Cherry picked from commit 26a19d9da3ab5604db02d4ca02ce868fb57193a4)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/22556/)
+
+Bug: 1652461
+Change-Id: Ia81671a7e1f173bcb32da9dc439be9e61c18bde1
+Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167981
+Tested-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ libglusterfs/src/glusterfs/globals.h               |   4 +-
+ tests/bugs/glusterd/bug-1699339.t                  |  69 ++++++
+ xlators/mgmt/glusterd/src/glusterd-op-sm.c         |   1 +
+ .../mgmt/glusterd/src/glusterd-snapshot-utils.c    |   3 +
+ xlators/mgmt/glusterd/src/glusterd-utils.c         | 269 +++++++++++++++++----
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c    |  55 +++++
+ xlators/mgmt/glusterd/src/glusterd.h               |  10 +
+ 7 files changed, 362 insertions(+), 49 deletions(-)
+ create mode 100644 tests/bugs/glusterd/bug-1699339.t
+
+diff --git a/libglusterfs/src/glusterfs/globals.h b/libglusterfs/src/glusterfs/globals.h
+index 6642ba0..e45db14 100644
+--- a/libglusterfs/src/glusterfs/globals.h
++++ b/libglusterfs/src/glusterfs/globals.h
+@@ -50,7 +50,7 @@
+     1 /* MIN is the fresh start op-version, mostly                             \
+          should not change */
+ #define GD_OP_VERSION_MAX                                                      \
+-    GD_OP_VERSION_6_0 /* MAX VERSION is the maximum                            \
++    GD_OP_VERSION_7_0 /* MAX VERSION is the maximum                            \
+                          count in VME table, should                            \
+                          keep changing with                                    \
+                          introduction of newer                                 \
+@@ -134,6 +134,8 @@
+ 
+ #define GD_OP_VERSION_6_0 60000 /* Op-version for GlusterFS 6.0 */
+ 
++#define GD_OP_VERSION_7_0 70000 /* Op-version for GlusterFS 7.0 */
++
+ #include "glusterfs/xlator.h"
+ #include "glusterfs/options.h"
+ 
+diff --git a/tests/bugs/glusterd/bug-1699339.t b/tests/bugs/glusterd/bug-1699339.t
+new file mode 100644
+index 0000000..3e950f4
+--- /dev/null
++++ b/tests/bugs/glusterd/bug-1699339.t
+@@ -0,0 +1,69 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../cluster.rc
++
++cleanup;
++
++NUM_VOLS=15
++
++
++get_brick_base () {
++	printf "%s/vol%02d" $B0 $1
++}
++
++function count_up_bricks {
++        vol=$1;
++        $CLI_1 --xml volume status $vol | grep '<status>1' | wc -l
++}
++
++create_volume () {
++
++	local vol_name=$(printf "%s-vol%02d" $V0 $1)
++
++        TEST $CLI_1 volume create $vol_name replica 3 $H1:$B1/${vol_name} $H2:$B2/${vol_name} $H3:$B3/${vol_name}
++	TEST $CLI_1 volume start $vol_name
++}
++
++TEST launch_cluster 3
++TEST $CLI_1 volume set all cluster.brick-multiplex on
++
++# The option accepts the value in the range from 5 to 200
++TEST ! $CLI_1 volume set all glusterd.vol_count_per_thread 210
++TEST ! $CLI_1 volume set all glusterd.vol_count_per_thread 4
++
++TEST $CLI_1 volume set all glusterd.vol_count_per_thread 5
++
++TEST $CLI_1 peer probe $H2;
++EXPECT_WITHIN $PROBE_TIMEOUT 1 peer_count
++
++TEST $CLI_1 peer probe $H3;
++EXPECT_WITHIN $PROBE_TIMEOUT 2 peer_count
++
++# Our infrastructure can't handle an arithmetic expression here.  The formula
++# is (NUM_VOLS-1)*5 because it sees each TEST/EXPECT once but needs the other
++# NUM_VOLS-1 and there are 5 such statements in each iteration.
++TESTS_EXPECTED_IN_LOOP=28
++for i in $(seq 1 $NUM_VOLS); do
++        starttime="$(date +%s)";
++	create_volume $i
++done
++
++TEST kill_glusterd 1
++
++vol1=$(printf "%s-vol%02d" $V0 1)
++TEST $CLI_2 volume set $vol1 performance.readdir-ahead on
++vol2=$(printf "%s-vol%02d" $V0 2)
++TEST $CLI_2 volume set $vol2 performance.readdir-ahead on
++
++# Bring back 1st glusterd
++TEST $glusterd_1
++EXPECT_WITHIN $PROBE_TIMEOUT 2 peer_count
++
++EXPECT_WITHIN $PROBE_TIMEOUT "on" volinfo_field_1 $vol1 performance.readdir-ahead
++
++vol_name=$(printf "%s-vol%02d" $V0 2)
++EXPECT_WITHIN $PROBE_TIMEOUT "on" volinfo_field_1 $vol2 performance.readdir-ahead
++
++cleanup
+diff --git a/xlators/mgmt/glusterd/src/glusterd-op-sm.c b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+index 95f9707..94a5e1f 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-op-sm.c
++++ b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+@@ -87,6 +87,7 @@ glusterd_all_vol_opts valid_all_vol_opts[] = {
+      * TBD: Discuss the default value for this. Maybe this should be a
+      * dynamic value depending on the memory specifications per node */
+     {GLUSTERD_BRICKMUX_LIMIT_KEY, GLUSTERD_BRICKMUX_LIMIT_DFLT_VALUE},
++    {GLUSTERD_VOL_CNT_PER_THRD, GLUSTERD_VOL_CNT_PER_THRD_DEFAULT_VALUE},
+     /*{GLUSTERD_LOCALTIME_LOGGING_KEY, "disable"},*/
+     {GLUSTERD_DAEMON_LOG_LEVEL_KEY, "INFO"},
+     {NULL},
+diff --git a/xlators/mgmt/glusterd/src/glusterd-snapshot-utils.c b/xlators/mgmt/glusterd/src/glusterd-snapshot-utils.c
+index b3c4158..d225854 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-snapshot-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-snapshot-utils.c
+@@ -2099,6 +2099,9 @@ glusterd_compare_friend_snapshots(dict_t *peer_data, char *peername,
+         goto out;
+     }
+ 
++    if (!snap_count)
++        goto out;
++
+     for (i = 1; i <= snap_count; i++) {
+         /* Compare one snapshot from peer_data at a time */
+         ret = glusterd_compare_snap(peer_data, i, peername, peerid);
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index fdd7d91..ff6102b 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -155,6 +155,47 @@ out:
+     return ret;
+ }
+ 
++int
++get_gd_vol_thread_limit(int *thread_limit)
++{
++    char *value = NULL;
++    int ret = -1;
++    int vol_per_thread_limit = 0;
++    xlator_t *this = NULL;
++    glusterd_conf_t *priv = NULL;
++
++    this = THIS;
++    GF_VALIDATE_OR_GOTO("glusterd", this, out);
++
++    priv = this->private;
++    GF_VALIDATE_OR_GOTO(this->name, priv, out);
++
++    if (!is_brick_mx_enabled()) {
++        vol_per_thread_limit = 1;
++        ret = 0;
++        goto out;
++    }
++
++    ret = dict_get_strn(priv->opts, GLUSTERD_VOL_CNT_PER_THRD,
++                        SLEN(GLUSTERD_VOL_CNT_PER_THRD), &value);
++    if (ret) {
++        value = GLUSTERD_VOL_CNT_PER_THRD_DEFAULT_VALUE;
++    }
++    ret = gf_string2int(value, &vol_per_thread_limit);
++    if (ret)
++        goto out;
++
++out:
++    *thread_limit = vol_per_thread_limit;
++
++    gf_msg_debug("glusterd", 0,
++                 "Per Thread volume limit set to %d glusterd to populate dict "
++                 "data parallel",
++                 *thread_limit);
++
++    return ret;
++}
++
+ extern struct volopt_map_entry glusterd_volopt_map[];
+ extern glusterd_all_vol_opts valid_all_vol_opts[];
+ 
+@@ -3070,50 +3111,55 @@ glusterd_add_volume_to_dict(glusterd_volinfo_t *volinfo, dict_t *dict,
+ 
+     /* tiering related variables */
+ 
+-    snprintf(key, sizeof(key), "%s%d.cold_brick_count", prefix, count);
+-    ret = dict_set_uint32(dict, key, volinfo->tier_info.cold_brick_count);
+-    if (ret)
+-        goto out;
++    if (volinfo->type == GF_CLUSTER_TYPE_TIER) {
++        snprintf(key, sizeof(key), "%s%d.cold_brick_count", prefix, count);
++        ret = dict_set_uint32(dict, key, volinfo->tier_info.cold_brick_count);
++        if (ret)
++            goto out;
+ 
+-    snprintf(key, sizeof(key), "%s%d.cold_type", prefix, count);
+-    ret = dict_set_uint32(dict, key, volinfo->tier_info.cold_type);
+-    if (ret)
+-        goto out;
++        snprintf(key, sizeof(key), "%s%d.cold_type", prefix, count);
++        ret = dict_set_uint32(dict, key, volinfo->tier_info.cold_type);
++        if (ret)
++            goto out;
+ 
+-    snprintf(key, sizeof(key), "%s%d.cold_replica_count", prefix, count);
+-    ret = dict_set_uint32(dict, key, volinfo->tier_info.cold_replica_count);
+-    if (ret)
+-        goto out;
++        snprintf(key, sizeof(key), "%s%d.cold_replica_count", prefix, count);
++        ret = dict_set_uint32(dict, key, volinfo->tier_info.cold_replica_count);
++        if (ret)
++            goto out;
+ 
+-    snprintf(key, sizeof(key), "%s%d.cold_disperse_count", prefix, count);
+-    ret = dict_set_uint32(dict, key, volinfo->tier_info.cold_disperse_count);
+-    if (ret)
+-        goto out;
++        snprintf(key, sizeof(key), "%s%d.cold_disperse_count", prefix, count);
++        ret = dict_set_uint32(dict, key,
++                              volinfo->tier_info.cold_disperse_count);
++        if (ret)
++            goto out;
+ 
+-    snprintf(key, sizeof(key), "%s%d.cold_redundancy_count", prefix, count);
+-    ret = dict_set_uint32(dict, key, volinfo->tier_info.cold_redundancy_count);
+-    if (ret)
+-        goto out;
++        snprintf(key, sizeof(key), "%s%d.cold_redundancy_count", prefix, count);
++        ret = dict_set_uint32(dict, key,
++                              volinfo->tier_info.cold_redundancy_count);
++        if (ret)
++            goto out;
+ 
+-    snprintf(key, sizeof(key), "%s%d.cold_dist_count", prefix, count);
+-    ret = dict_set_uint32(dict, key, volinfo->tier_info.cold_dist_leaf_count);
+-    if (ret)
+-        goto out;
++        snprintf(key, sizeof(key), "%s%d.cold_dist_count", prefix, count);
++        ret = dict_set_uint32(dict, key,
++                              volinfo->tier_info.cold_dist_leaf_count);
++        if (ret)
++            goto out;
+ 
+-    snprintf(key, sizeof(key), "%s%d.hot_brick_count", prefix, count);
+-    ret = dict_set_uint32(dict, key, volinfo->tier_info.hot_brick_count);
+-    if (ret)
+-        goto out;
++        snprintf(key, sizeof(key), "%s%d.hot_brick_count", prefix, count);
++        ret = dict_set_uint32(dict, key, volinfo->tier_info.hot_brick_count);
++        if (ret)
++            goto out;
+ 
+-    snprintf(key, sizeof(key), "%s%d.hot_type", prefix, count);
+-    ret = dict_set_uint32(dict, key, volinfo->tier_info.hot_type);
+-    if (ret)
+-        goto out;
++        snprintf(key, sizeof(key), "%s%d.hot_type", prefix, count);
++        ret = dict_set_uint32(dict, key, volinfo->tier_info.hot_type);
++        if (ret)
++            goto out;
+ 
+-    snprintf(key, sizeof(key), "%s%d.hot_replica_count", prefix, count);
+-    ret = dict_set_uint32(dict, key, volinfo->tier_info.hot_replica_count);
+-    if (ret)
+-        goto out;
++        snprintf(key, sizeof(key), "%s%d.hot_replica_count", prefix, count);
++        ret = dict_set_uint32(dict, key, volinfo->tier_info.hot_replica_count);
++        if (ret)
++            goto out;
++    }
+ 
+     snprintf(key, sizeof(key), "%s%d", prefix, count);
+     ret = gd_add_vol_snap_details_to_dict(dict, key, volinfo);
+@@ -3363,33 +3409,40 @@ out:
+     return ret;
+ }
+ 
+-int32_t
+-glusterd_add_volumes_to_export_dict(dict_t **peer_data)
++void *
++glusterd_add_bulk_volumes_create_thread(void *data)
+ {
+     int32_t ret = -1;
+-    dict_t *dict = NULL;
+     glusterd_conf_t *priv = NULL;
+     glusterd_volinfo_t *volinfo = NULL;
+     int32_t count = 0;
+-    glusterd_dict_ctx_t ctx = {0};
+     xlator_t *this = NULL;
++    glusterd_add_dict_args_t *arg = NULL;
++    dict_t *dict = NULL;
++    int start = 0;
++    int end = 0;
+ 
+-    this = THIS;
+-    GF_ASSERT(this);
++    GF_ASSERT(data);
++
++    arg = data;
++    dict = arg->voldict;
++    start = arg->start;
++    end = arg->end;
++    this = arg->this;
++    THIS = arg->this;
+     priv = this->private;
+     GF_ASSERT(priv);
+ 
+-    dict = dict_new();
+-    if (!dict)
+-        goto out;
+-
+     cds_list_for_each_entry(volinfo, &priv->volumes, vol_list)
+     {
+         count++;
++        if ((count < start) || (count > end))
++            continue;
++
+         ret = glusterd_add_volume_to_dict(volinfo, dict, count, "volume");
+         if (ret)
+             goto out;
+-        if (!glusterd_is_volume_quota_enabled(volinfo))
++        if (!dict_get_sizen(volinfo->dict, VKEY_FEATURES_QUOTA))
+             continue;
+         ret = glusterd_vol_add_quota_conf_to_dict(volinfo, dict, count,
+                                                   "volume");
+@@ -3397,7 +3450,122 @@ glusterd_add_volumes_to_export_dict(dict_t **peer_data)
+             goto out;
+     }
+ 
+-    ret = dict_set_int32n(dict, "count", SLEN("count"), count);
++out:
++    GF_ATOMIC_DEC(priv->thread_count);
++    free(arg);
++    return NULL;
++}
++
++int32_t
++glusterd_add_volumes_to_export_dict(dict_t **peer_data)
++{
++    int32_t ret = -1;
++    dict_t *dict = NULL;
++    dict_t *dict_arr[128] = {
++        0,
++    };
++    glusterd_conf_t *priv = NULL;
++    glusterd_volinfo_t *volinfo = NULL;
++    int32_t count = 0;
++    glusterd_dict_ctx_t ctx = {0};
++    xlator_t *this = NULL;
++    int totthread = 0;
++    int volcnt = 0;
++    int start = 1;
++    int endindex = 0;
++    int vol_per_thread_limit = 0;
++    glusterd_add_dict_args_t *arg = NULL;
++    pthread_t th_id = {
++        0,
++    };
++    int th_ret = 0;
++    int i = 0;
++
++    this = THIS;
++    GF_ASSERT(this);
++    priv = this->private;
++    GF_ASSERT(priv);
++
++    dict = dict_new();
++    if (!dict)
++        goto out;
++
++    /* Count the total number of volumes */
++    cds_list_for_each_entry(volinfo, &priv->volumes, vol_list) volcnt++;
++
++    get_gd_vol_thread_limit(&vol_per_thread_limit);
++
++    if ((vol_per_thread_limit == 1) || (vol_per_thread_limit > 100)) {
++        totthread = 0;
++    } else {
++        totthread = volcnt / vol_per_thread_limit;
++        endindex = volcnt % vol_per_thread_limit;
++        if (endindex)
++            totthread++;
++    }
++
++    if (totthread == 0) {
++        cds_list_for_each_entry(volinfo, &priv->volumes, vol_list)
++        {
++            count++;
++            ret = glusterd_add_volume_to_dict(volinfo, dict, count, "volume");
++            if (ret)
++                goto out;
++
++            if (!dict_get_sizen(volinfo->dict, VKEY_FEATURES_QUOTA))
++                continue;
++
++            ret = glusterd_vol_add_quota_conf_to_dict(volinfo, dict, count,
++                                                      "volume");
++            if (ret)
++                goto out;
++        }
++    } else {
++        for (i = 0; i < totthread; i++) {
++            arg = calloc(1, sizeof(*arg));
++            dict_arr[i] = dict_new();
++            arg->this = this;
++            arg->voldict = dict_arr[i];
++            arg->start = start;
++            if (!endindex) {
++                arg->end = ((i + 1) * vol_per_thread_limit);
++            } else {
++                arg->end = (start + endindex);
++            }
++            th_ret = gf_thread_create_detached(
++                &th_id, glusterd_add_bulk_volumes_create_thread, arg,
++                "bulkvoldict");
++            if (th_ret) {
++                gf_log(this->name, GF_LOG_ERROR,
++                       "glusterd_add_bulk_volume %s"
++                       " thread creation failed",
++                       "bulkvoldict");
++                free(arg);
++                goto out;
++            }
++
++            start = start + vol_per_thread_limit;
++            GF_ATOMIC_INC(priv->thread_count);
++            gf_log(this->name, GF_LOG_INFO,
++                   "Create thread %d to populate dict data for volume"
++                   " start index is %d end index is %d",
++                   (i + 1), arg->start, arg->end);
++        }
++        while (GF_ATOMIC_GET(priv->thread_count)) {
++            sleep(1);
++        }
++
++        gf_log(this->name, GF_LOG_INFO,
++               "Finished dictionary popluation in all threads");
++        for (i = 0; i < totthread; i++) {
++            dict_copy_with_ref(dict_arr[i], dict);
++            dict_unref(dict_arr[i]);
++        }
++        gf_log(this->name, GF_LOG_INFO,
++               "Finished merger of all dictionraies into single one");
++    }
++
++    ret = dict_set_int32n(dict, "count", SLEN("count"), volcnt);
+     if (ret)
+         goto out;
+ 
+@@ -3499,6 +3667,9 @@ glusterd_compare_friend_volume(dict_t *peer_data, int32_t count,
+         goto out;
+     }
+ 
++    if (!dict_get_sizen(volinfo->dict, VKEY_FEATURES_QUOTA))
++        goto skip_quota;
++
+     snprintf(key, sizeof(key), "volume%d.quota-version", count);
+     ret = dict_get_uint32(peer_data, key, &quota_version);
+     if (ret) {
+@@ -3550,6 +3721,8 @@ glusterd_compare_friend_volume(dict_t *peer_data, int32_t count,
+             goto out;
+         }
+     }
++
++skip_quota:
+     *status = GLUSTERD_VOL_COMP_SCS;
+ 
+ out:
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index 42ca9bb..10aa2ae 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -1058,6 +1058,51 @@ out:
+ }
+ 
+ static int
++validate_volume_per_thread_limit(glusterd_volinfo_t *volinfo, dict_t *dict,
++                                 char *key, char *value, char **op_errstr)
++{
++    xlator_t *this = NULL;
++    uint val = 0;
++    int ret = -1;
++
++    this = THIS;
++    GF_VALIDATE_OR_GOTO("glusterd", this, out);
++
++    if (!is_brick_mx_enabled()) {
++        gf_asprintf(op_errstr,
++                    "Brick-multiplexing is not enabled. "
++                    "Please enable brick multiplexing before trying "
++                    "to set this option.");
++        gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_WRONG_OPTS_SETTING, "%s",
++               *op_errstr);
++        goto out;
++    }
++
++    ret = gf_string2uint(value, &val);
++    if (ret) {
++        gf_asprintf(op_errstr,
++                    "%s is not a valid count. "
++                    "%s expects an unsigned integer.",
++                    value, key);
++        gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_INVALID_ENTRY, "%s",
++               *op_errstr);
++    }
++
++    if ((val < 5) || (val > 200)) {
++        gf_asprintf(
++            op_errstr,
++            "Please set this option to a greater than 5 or less than 200 "
++            "to optimize dict generated while no. of volumes are more");
++        ret = -1;
++        goto out;
++    }
++out:
++    gf_msg_debug("glusterd", 0, "Returning %d", ret);
++
++    return ret;
++}
++
++static int
+ validate_boolean(glusterd_volinfo_t *volinfo, dict_t *dict, char *key,
+                  char *value, char **op_errstr)
+ {
+@@ -3520,6 +3565,16 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+                     "brick multiplexing. Brick multiplexing ensures that "
+                     "compatible brick instances can share one single "
+                     "brick process."},
++    {.key = GLUSTERD_VOL_CNT_PER_THRD,
++     .voltype = "mgmt/glusterd",
++     .value = GLUSTERD_VOL_CNT_PER_THRD_DEFAULT_VALUE,
++     .op_version = GD_OP_VERSION_7_0,
++     .validate_fn = validate_volume_per_thread_limit,
++     .type = GLOBAL_NO_DOC,
++     .description =
++         "This option can be used to limit the number of volumes "
++         "handled by per thread to populate peer data.The option accepts "
++         " the value in the range of 5 to 200"},
+     {.key = GLUSTERD_BRICKMUX_LIMIT_KEY,
+      .voltype = "mgmt/glusterd",
+      .value = GLUSTERD_BRICKMUX_LIMIT_DFLT_VALUE,
+diff --git a/xlators/mgmt/glusterd/src/glusterd.h b/xlators/mgmt/glusterd/src/glusterd.h
+index 0ac6e63..bd9f509 100644
+--- a/xlators/mgmt/glusterd/src/glusterd.h
++++ b/xlators/mgmt/glusterd/src/glusterd.h
+@@ -57,8 +57,10 @@
+ #define GLUSTER_SHARED_STORAGE "gluster_shared_storage"
+ #define GLUSTERD_SHARED_STORAGE_KEY "cluster.enable-shared-storage"
+ #define GLUSTERD_BRICK_MULTIPLEX_KEY "cluster.brick-multiplex"
++#define GLUSTERD_VOL_CNT_PER_THRD "glusterd.vol_count_per_thread"
+ #define GLUSTERD_BRICKMUX_LIMIT_KEY "cluster.max-bricks-per-process"
+ #define GLUSTERD_BRICKMUX_LIMIT_DFLT_VALUE "250"
++#define GLUSTERD_VOL_CNT_PER_THRD_DEFAULT_VALUE "100"
+ #define GLUSTERD_LOCALTIME_LOGGING_KEY "cluster.localtime-logging"
+ #define GLUSTERD_DAEMON_LOG_LEVEL_KEY "cluster.daemon-log-level"
+ 
+@@ -225,8 +227,16 @@ typedef struct {
+                                     which might lead the modification of volinfo
+                                     list.
+                                  */
++    gf_atomic_t thread_count;
+ } glusterd_conf_t;
+ 
++typedef struct glusterd_add_dict_args {
++    xlator_t *this;
++    dict_t *voldict;
++    int start;
++    int end;
++} glusterd_add_dict_args_t;
++
+ typedef enum gf_brick_status {
+     GF_BRICK_STOPPED,
+     GF_BRICK_STARTED,
+-- 
+1.8.3.1
+

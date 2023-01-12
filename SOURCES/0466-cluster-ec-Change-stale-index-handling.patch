@@ -1,0 +1,68 @@
+From b603170ae5f583037b8177a9d19e56c7821edf0b Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Tue, 25 Aug 2020 04:19:54 +0530
+Subject: [PATCH 466/466] cluster/ec: Change stale index handling
+
+Problem:
+Earlier approach is setting dirty bit which requires extra heal
+
+Fix:
+Send zero-xattrop which deletes stale index without any need
+for extra heal.
+
+ > Fixes: #1385
+ > Upstream-patch: https://review.gluster.org/c/glusterfs/+/24911/
+
+BUG: 1785714
+Change-Id: I7e97a1d8b5516f7be47cae55d0e56b14332b6cae
+Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/209904
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Tested-by: Ashish Pandey <aspandey@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/ec/src/ec-heal.c | 14 +++++---------
+ 1 file changed, 5 insertions(+), 9 deletions(-)
+
+diff --git a/xlators/cluster/ec/src/ec-heal.c b/xlators/cluster/ec/src/ec-heal.c
+index 6e6948b..06bafa5 100644
+--- a/xlators/cluster/ec/src/ec-heal.c
++++ b/xlators/cluster/ec/src/ec-heal.c
+@@ -2490,7 +2490,7 @@ out:
+ }
+ 
+ int
+-ec_heal_set_dirty_without_lock(call_frame_t *frame, ec_t *ec, inode_t *inode)
++ec_heal_purge_stale_index(call_frame_t *frame, ec_t *ec, inode_t *inode)
+ {
+     int i = 0;
+     int ret = 0;
+@@ -2520,7 +2520,6 @@ ec_heal_set_dirty_without_lock(call_frame_t *frame, ec_t *ec, inode_t *inode)
+         xattr[i] = dict;
+         on[i] = 1;
+     }
+-    dirty_xattr[EC_METADATA_TXN] = hton64(1);
+     ret = dict_set_static_bin(dict, EC_XATTR_DIRTY, dirty_xattr,
+                               (sizeof(*dirty_xattr) * EC_VERSION_SIZE));
+     if (ret < 0) {
+@@ -2621,13 +2620,10 @@ ec_heal_do(xlator_t *this, void *data, loc_t *loc, int32_t partial)
+             gf_msg(ec->xl->name, GF_LOG_INFO, 0, EC_MSG_HEAL_FAIL,
+                    "Index entry needs to be purged for: %s ",
+                    uuid_utoa(loc->gfid));
+-            /* We need to send xattrop to set dirty flag so that it can be
+-             * healed and index entry could be removed. We need not to take lock
+-             * on this entry to do so as we are just setting dirty flag which
+-             * actually increases the trusted.ec.dirty count and does not set
+-             * the new value.
+-             * This will make sure that it is not interfering in other fops.*/
+-            ec_heal_set_dirty_without_lock(frame, ec, loc->inode);
++            /* We need to send zero-xattrop so that stale index entry could be
++             * removed. We need not take lock on this entry to do so as
++             * xattrop on a brick is atomic. */
++            ec_heal_purge_stale_index(frame, ec, loc->inode);
+         } else if (need_heal == EC_HEAL_NONEED) {
+             gf_msg(ec->xl->name, GF_LOG_DEBUG, 0, EC_MSG_HEAL_FAIL,
+                    "Heal is not required for : %s ", uuid_utoa(loc->gfid));
+-- 
+1.8.3.1
+

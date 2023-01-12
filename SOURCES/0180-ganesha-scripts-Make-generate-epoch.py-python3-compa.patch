@@ -1,0 +1,44 @@
+From 30b6d3452df0ef6621592a786f0c4347e09aa8f2 Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Tue, 11 Jun 2019 12:00:25 +0530
+Subject: [PATCH 180/192] ganesha/scripts : Make generate-epoch.py python3
+ compatible
+
+This would help in building RHEL8 glusterfs server build. We don't need
+to validate this fix as such given RHEL8 glusterfs server support at
+RHGS 3.5.0 is an internal milestone.
+
+Label : DOWNSTREAM ONLY
+
+Change-Id: I738219613680406de5c86a452446035c72a52bc4
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172974
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ extras/ganesha/scripts/generate-epoch.py | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/extras/ganesha/scripts/generate-epoch.py b/extras/ganesha/scripts/generate-epoch.py
+index 5db5e56..61ccda9 100755
+--- a/extras/ganesha/scripts/generate-epoch.py
++++ b/extras/ganesha/scripts/generate-epoch.py
+@@ -36,13 +36,13 @@ def epoch_uuid():
+ 
+         uuid_bin = binascii.unhexlify(glusterd_uuid.replace("-",""))
+ 
+-        epoch_uuid = int(uuid_bin.encode('hex'), 32) & 0xFFFF0000
++        epoch_uuid = int(binascii.hexlify(uuid_bin), 32) & 0xFFFF0000
+         return epoch_uuid
+ 
+ # Construct epoch as follows -
+ #        first 32-bit contains the now() time
+ #        rest 32-bit value contains the local glusterd node uuid
+ epoch = (epoch_now() | epoch_uuid())
+-print str(epoch)
++print(str(epoch))
+ 
+ exit(0)
+-- 
+1.8.3.1
+

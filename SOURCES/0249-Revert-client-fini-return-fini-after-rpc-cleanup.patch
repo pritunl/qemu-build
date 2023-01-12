@@ -1,0 +1,95 @@
+From 1864a4f382f3031915e8126440a1561035487e49 Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Thu, 11 Jul 2019 12:53:20 +0530
+Subject: [PATCH 249/255] Revert "client/fini: return fini after rpc cleanup"
+
+This reverts commit d79cb2cdff6fe8d962c9ac095a7541ddf500302b.
+
+BUG: 1471742
+Change-Id: I15e6544d47fb7b6002c3b44de3fe0b2a13c84f51
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/175958
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/protocol/client/src/client.c | 25 +++++--------------------
+ xlators/protocol/client/src/client.h |  6 ------
+ 2 files changed, 5 insertions(+), 26 deletions(-)
+
+diff --git a/xlators/protocol/client/src/client.c b/xlators/protocol/client/src/client.c
+index 95e4be5..532ef35 100644
+--- a/xlators/protocol/client/src/client.c
++++ b/xlators/protocol/client/src/client.c
+@@ -49,12 +49,11 @@ client_fini_complete(xlator_t *this)
+     if (!conf->destroy)
+         return 0;
+ 
+-    pthread_mutex_lock(&conf->lock);
+-    {
+-        conf->fini_completed = _gf_true;
+-        pthread_cond_broadcast(&conf->fini_complete_cond);
+-    }
+-    pthread_mutex_unlock(&conf->lock);
++    this->private = NULL;
++
++    pthread_spin_destroy(&conf->fd_lock);
++    pthread_mutex_destroy(&conf->lock);
++    GF_FREE(conf);
+ 
+ out:
+     return 0;
+@@ -2730,7 +2729,6 @@ init(xlator_t *this)
+         goto out;
+ 
+     pthread_mutex_init(&conf->lock, NULL);
+-    pthread_cond_init(&conf->fini_complete_cond, NULL);
+     pthread_spin_init(&conf->fd_lock, 0);
+     INIT_LIST_HEAD(&conf->saved_fds);
+ 
+@@ -2789,7 +2787,6 @@ fini(xlator_t *this)
+     if (!conf)
+         return;
+ 
+-    conf->fini_completed = _gf_false;
+     conf->destroy = 1;
+     if (conf->rpc) {
+         /* cleanup the saved-frames before last unref */
+@@ -2797,18 +2794,6 @@ fini(xlator_t *this)
+         rpc_clnt_unref(conf->rpc);
+     }
+ 
+-    pthread_mutex_lock(&conf->lock);
+-    {
+-        while (!conf->fini_completed)
+-            pthread_cond_wait(&conf->fini_complete_cond, &conf->lock);
+-    }
+-    pthread_mutex_unlock(&conf->lock);
+-
+-    pthread_spin_destroy(&conf->fd_lock);
+-    pthread_mutex_destroy(&conf->lock);
+-    pthread_cond_destroy(&conf->fini_complete_cond);
+-    GF_FREE(conf);
+-
+     /* Saved Fds */
+     /* TODO: */
+ 
+diff --git a/xlators/protocol/client/src/client.h b/xlators/protocol/client/src/client.h
+index 8dcd72f..f12fa61 100644
+--- a/xlators/protocol/client/src/client.h
++++ b/xlators/protocol/client/src/client.h
+@@ -235,12 +235,6 @@ typedef struct clnt_conf {
+                                       * up, disconnects can be
+                                       * logged
+                                       */
+-
+-    gf_boolean_t old_protocol;         /* used only for old-protocol testing */
+-    pthread_cond_t fini_complete_cond; /* Used to wait till we finsh the fini
+-                                          compltely, ie client_fini_complete
+-                                          to return*/
+-    gf_boolean_t fini_completed;
+ } clnt_conf_t;
+ 
+ typedef struct _client_fd_ctx {
+-- 
+1.8.3.1
+

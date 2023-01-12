@@ -1,0 +1,295 @@
+From 4d82c7879387e6f7963b4d9c84c4ff8a1788055d Mon Sep 17 00:00:00 2001
+From: Sheetal Pamecha <sheetal.pamecha08@gmail.com>
+Date: Mon, 19 Nov 2018 22:15:25 +0530
+Subject: [PATCH 171/178] posix: add storage.reserve-size option
+
+storage.reserve-size option will take size as input
+instead of percentage. If set, priority will be given to
+storage.reserve-size over storage.reserve. Default value
+of this option is 0.
+
+> fixes: bz#1651445
+> Change-Id: I7a7342c68e436e8bf65bd39c567512ee04abbcea
+> Signed-off-by: Sheetal Pamecha <sheetal.pamecha08@gmail.com>
+> Cherry pick from commit 950726dfc8e3171bef625b563c0c6dbba1ec2928
+> Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/21686/
+
+BUG: 1573077
+Change-Id: I7a7342c68e436e8bf65bd39c567512ee04abbcea
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172709
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ tests/bugs/posix/bug-1651445.t                  | 58 +++++++++++++++++++++++++
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c | 33 ++++++++++++++
+ xlators/storage/posix/src/posix-common.c        | 34 ++++++++++++---
+ xlators/storage/posix/src/posix-helpers.c       | 13 ++++--
+ xlators/storage/posix/src/posix-inode-fd-ops.c  | 10 +++--
+ xlators/storage/posix/src/posix.h               |  3 +-
+ 6 files changed, 138 insertions(+), 13 deletions(-)
+ create mode 100644 tests/bugs/posix/bug-1651445.t
+
+diff --git a/tests/bugs/posix/bug-1651445.t b/tests/bugs/posix/bug-1651445.t
+new file mode 100644
+index 0000000..f6f1833
+--- /dev/null
++++ b/tests/bugs/posix/bug-1651445.t
+@@ -0,0 +1,58 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../snapshot.rc
++
++cleanup
++
++TEST verify_lvm_version
++TEST glusterd
++TEST pidof glusterd
++TEST init_n_bricks 3
++TEST setup_lvm 3
++
++TEST $CLI volume create $V0 replica 3 $H0:$L{1,2,3}
++TEST $CLI volume start $V0
++
++TEST glusterfs --volfile-id=/$V0 --volfile-server=$H0 $M0
++
++TEST $CLI volume set $V0 storage.reserve-size 10MB
++
++#No effect as priority to reserve-size
++TEST $CLI volume set $V0 storage.reserve 20
++
++TEST dd if=/dev/zero of=$M0/a bs=100M count=1
++sleep 5
++
++#Below dd confirms posix is giving priority to reserve-size
++TEST dd if=/dev/zero of=$M0/b bs=40M count=1
++
++sleep 5
++TEST ! dd if=/dev/zero of=$M0/c bs=5M count=1
++
++rm -rf $M0/*
++#Size will reserve from the previously set reserve option = 20%
++TEST $CLI volume set $V0 storage.reserve-size 0
++
++#Overwrite reserve option
++TEST $CLI volume set $V0 storage.reserve-size 40MB
++
++#wait 5s to reset disk_space_full flag
++sleep 5
++
++TEST dd if=/dev/zero of=$M0/a bs=100M count=1
++TEST dd if=/dev/zero of=$M0/b bs=10M count=1
++
++# Wait 5s to update disk_space_full flag because thread check disk space
++# after every 5s
++
++sleep 5
++# setup_lvm create lvm partition of 150M and 40M are reserve so after
++# consuming more than 110M next dd should fail
++TEST ! dd if=/dev/zero of=$M0/c bs=5M count=1
++
++TEST $CLI volume stop $V0
++TEST $CLI volume delete $V0
++
++cleanup
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index 7a83124..3a7ab83 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -1231,6 +1231,30 @@ out:
+ 
+     return ret;
+ }
++static int
++validate_size(glusterd_volinfo_t *volinfo, dict_t *dict, char *key, char *value,
++              char **op_errstr)
++{
++    xlator_t *this = NULL;
++    uint64_t size = 0;
++    int ret = -1;
++
++    this = THIS;
++    GF_VALIDATE_OR_GOTO("glusterd", this, out);
++    ret = gf_string2bytesize_uint64(value, &size);
++    if (ret < 0) {
++        gf_asprintf(op_errstr,
++                    "%s is not a valid size. %s "
++                    "expects a valid value in bytes",
++                    value, key);
++        gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_INVALID_ENTRY, "%s",
++               *op_errstr);
++    }
++out:
++    gf_msg_debug("glusterd", 0, "Returning %d", ret);
++
++    return ret;
++}
+ 
+ /* dispatch table for VOLUME SET
+  * -----------------------------
+@@ -2830,6 +2854,15 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+         .op_version = GD_OP_VERSION_3_13_0,
+     },
+     {
++        .key = "storage.reserve-size",
++        .voltype = "storage/posix",
++        .value = "0",
++        .validate_fn = validate_size,
++        .description = "If set, priority will be given to "
++                       "storage.reserve-size over storage.reserve",
++        .op_version = GD_OP_VERSION_7_0,
++    },
++    {
+         .option = "health-check-timeout",
+         .key = "storage.health-check-timeout",
+         .type = NO_DOC,
+diff --git a/xlators/storage/posix/src/posix-common.c b/xlators/storage/posix/src/posix-common.c
+index ed82e35..0f70af5 100644
+--- a/xlators/storage/posix/src/posix-common.c
++++ b/xlators/storage/posix/src/posix-common.c
+@@ -345,11 +345,18 @@ posix_reconfigure(xlator_t *this, dict_t *options)
+                " fallback to <hostname>:<export>");
+     }
+ 
+-    GF_OPTION_RECONF("reserve", priv->disk_reserve, options, uint32, out);
+-    if (priv->disk_reserve) {
++    GF_OPTION_RECONF("reserve-size", priv->disk_reserve_size, options, size,
++                     out);
++
++    GF_OPTION_RECONF("reserve", priv->disk_reserve_percent, options, uint32,
++                     out);
++    if (priv->disk_reserve_size || priv->disk_reserve_percent) {
+         ret = posix_spawn_disk_space_check_thread(this);
+-        if (ret)
++        if (ret) {
++            gf_msg(this->name, GF_LOG_INFO, 0, P_MSG_DISK_SPACE_CHECK_FAILED,
++                   "Getting disk space check from thread failed");
+             goto out;
++        }
+     }
+ 
+     GF_OPTION_RECONF("health-check-interval", priv->health_check_interval,
+@@ -968,11 +975,17 @@ posix_init(xlator_t *this)
+ 
+     _private->disk_space_check_active = _gf_false;
+     _private->disk_space_full = 0;
+-    GF_OPTION_INIT("reserve", _private->disk_reserve, uint32, out);
+-    if (_private->disk_reserve) {
++    GF_OPTION_INIT("reserve-size", _private->disk_reserve_size, size, out);
++
++    GF_OPTION_INIT("reserve", _private->disk_reserve_percent, uint32, out);
++
++    if (_private->disk_reserve_size || _private->disk_reserve_percent) {
+         ret = posix_spawn_disk_space_check_thread(this);
+-        if (ret)
++        if (ret) {
++            gf_msg(this->name, GF_LOG_INFO, 0, P_MSG_DISK_SPACE_CHECK_FAILED,
++                   "Getting disk space check from thread failed ");
+             goto out;
++        }
+     }
+ 
+     _private->health_check_active = _gf_false;
+@@ -1216,6 +1229,15 @@ struct volume_options posix_options[] = {
+                     " Set to 0 to disable",
+      .op_version = {GD_OP_VERSION_3_13_0},
+      .flags = OPT_FLAG_SETTABLE | OPT_FLAG_DOC},
++    {.key = {"reserve-size"},
++     .type = GF_OPTION_TYPE_SIZET,
++     .min = 0,
++     .default_value = "0",
++     .validate = GF_OPT_VALIDATE_MIN,
++     .description = "size in megabytes to be reserved for disk space."
++                    " Set to 0 to disable",
++     .op_version = {GD_OP_VERSION_7_0},
++     .flags = OPT_FLAG_SETTABLE | OPT_FLAG_DOC},
+     {.key = {"batch-fsync-mode"},
+      .type = GF_OPTION_TYPE_STR,
+      .default_value = "reverse-fsync",
+diff --git a/xlators/storage/posix/src/posix-helpers.c b/xlators/storage/posix/src/posix-helpers.c
+index d0fd45a..aecf4f8 100644
+--- a/xlators/storage/posix/src/posix-helpers.c
++++ b/xlators/storage/posix/src/posix-helpers.c
+@@ -2246,6 +2246,7 @@ posix_disk_space_check(xlator_t *this)
+     struct posix_private *priv = NULL;
+     char *subvol_path = NULL;
+     int op_ret = 0;
++    uint64_t size = 0;
+     int percent = 0;
+     struct statvfs buf = {0};
+     uint64_t totsz = 0;
+@@ -2256,7 +2257,14 @@ posix_disk_space_check(xlator_t *this)
+     GF_VALIDATE_OR_GOTO(this->name, priv, out);
+ 
+     subvol_path = priv->base_path;
+-    percent = priv->disk_reserve;
++
++    if (priv->disk_reserve_size) {
++        size = priv->disk_reserve_size;
++    } else {
++        percent = priv->disk_reserve_percent;
++        totsz = (buf.f_blocks * buf.f_bsize);
++        size = ((totsz * percent) / 100);
++    }
+ 
+     op_ret = sys_statvfs(subvol_path, &buf);
+ 
+@@ -2265,10 +2273,9 @@ posix_disk_space_check(xlator_t *this)
+                "statvfs failed on %s", subvol_path);
+         goto out;
+     }
+-    totsz = (buf.f_blocks * buf.f_bsize);
+     freesz = (buf.f_bfree * buf.f_bsize);
+ 
+-    if (freesz <= ((totsz * percent) / 100)) {
++    if (freesz <= size) {
+         priv->disk_space_full = 1;
+     } else {
+         priv->disk_space_full = 0;
+diff --git a/xlators/storage/posix/src/posix-inode-fd-ops.c b/xlators/storage/posix/src/posix-inode-fd-ops.c
+index 2c19ce1..7ca4d26 100644
+--- a/xlators/storage/posix/src/posix-inode-fd-ops.c
++++ b/xlators/storage/posix/src/posix-inode-fd-ops.c
+@@ -720,7 +720,7 @@ posix_do_fallocate(call_frame_t *frame, xlator_t *this, fd_t *fd, int32_t flags,
+        thread after every 5 sec sleep to working correctly storage.reserve
+        option behaviour
+     */
+-    if (priv->disk_reserve)
++    if (priv->disk_reserve_size || priv->disk_reserve_percent)
+         posix_disk_space_check(this);
+ 
+     DISK_SPACE_CHECK_AND_GOTO(frame, priv, xdata, ret, ret, out);
+@@ -2331,8 +2331,12 @@ posix_statfs(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *xdata)
+         goto out;
+     }
+ 
+-    percent = priv->disk_reserve;
+-    reserved_blocks = (buf.f_blocks * percent) / 100;
++    if (priv->disk_reserve_size) {
++        reserved_blocks = priv->disk_reserve_size / buf.f_bsize;
++    } else {
++        percent = priv->disk_reserve_percent;
++        reserved_blocks = (buf.f_blocks * percent) / 100;
++    }
+ 
+     if (buf.f_bfree > reserved_blocks) {
+         buf.f_bfree = (buf.f_bfree - reserved_blocks);
+diff --git a/xlators/storage/posix/src/posix.h b/xlators/storage/posix/src/posix.h
+index 1da4d01..4364b96 100644
+--- a/xlators/storage/posix/src/posix.h
++++ b/xlators/storage/posix/src/posix.h
+@@ -225,7 +225,8 @@ struct posix_private {
+     pthread_t health_check;
+     gf_boolean_t health_check_active;
+ 
+-    uint32_t disk_reserve;
++    uint32_t disk_reserve_percent;
++    uint64_t disk_reserve_size;
+     uint32_t disk_space_full;
+     pthread_t disk_space_check;
+     gf_boolean_t disk_space_check_active;
+-- 
+1.8.3.1
+

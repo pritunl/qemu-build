@@ -1,0 +1,33 @@
+From 6fed6cfcb26e6ed3c9640c5f889629315bbd83c2 Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Mon, 31 Aug 2020 12:22:05 +0530
+Subject: [PATCH 469/469] cluster/ec: Don't trigger heal for stale index
+
+     > Fixes: #1385
+     > Upstream-patch: https://review.gluster.org/c/glusterfs/+/24930
+
+BUG: 1785714
+Change-Id: I3609dd2e1f63c4bd6a19d528b935bf5b05443824
+Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/210731
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/ec/src/ec-heal.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/xlators/cluster/ec/src/ec-heal.c b/xlators/cluster/ec/src/ec-heal.c
+index 06bafa5..f6376cd 100644
+--- a/xlators/cluster/ec/src/ec-heal.c
++++ b/xlators/cluster/ec/src/ec-heal.c
+@@ -2624,6 +2624,7 @@ ec_heal_do(xlator_t *this, void *data, loc_t *loc, int32_t partial)
+              * removed. We need not take lock on this entry to do so as
+              * xattrop on a brick is atomic. */
+             ec_heal_purge_stale_index(frame, ec, loc->inode);
++            goto out;
+         } else if (need_heal == EC_HEAL_NONEED) {
+             gf_msg(ec->xl->name, GF_LOG_DEBUG, 0, EC_MSG_HEAL_FAIL,
+                    "Heal is not required for : %s ", uuid_utoa(loc->gfid));
+-- 
+1.8.3.1
+

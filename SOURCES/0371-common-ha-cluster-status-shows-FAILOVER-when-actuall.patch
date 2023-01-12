@@ -1,0 +1,53 @@
+From 05bd0226716516d37ead173c7d6924225bd474db Mon Sep 17 00:00:00 2001
+From: "Kaleb S. KEITHLEY" <kkeithle@redhat.com>
+Date: Wed, 6 May 2020 07:24:38 -0400
+Subject: [PATCH 371/375] common-ha: cluster status shows "FAILOVER" when
+ actually HEALTHY
+
+pacemaker devs change the format of the ouput of `pcs status`
+
+Expected to find a line in the format:
+
+    Online: ....
+
+but now it's
+
+    * Online: ...
+
+And the `grep -E "^Online:" no longer finds the list of nodes that
+are online.
+
+Also other lines now have '*' in first few characters of the line
+throwing off `grep -x ...`
+
+https://review.gluster.org/#/c/glusterfs/+/24403/
+
+Change-Id: Ia04a89e76914f2a455a755f0a93fa415f60aefd0
+BUG: 1823706
+Signed-off-by: Kaleb S. KEITHLEY <kkeithle@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/199442
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/ganesha/scripts/ganesha-ha.sh | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/extras/ganesha/scripts/ganesha-ha.sh b/extras/ganesha/scripts/ganesha-ha.sh
+index df333a1..4ecf91b 100644
+--- a/extras/ganesha/scripts/ganesha-ha.sh
++++ b/extras/ganesha/scripts/ganesha-ha.sh
+@@ -919,8 +919,9 @@ status()
+     local index=1
+     local nodes
+ 
+-    # change tabs to spaces, strip leading spaces
+-    pcs status | sed -e "s/\t/ /g" -e "s/^[ ]*//" > ${scratch}
++    # change tabs to spaces, strip leading spaces, including any 
++    # new '*' at the beginning of a line introduced in pcs-0.10.x
++    pcs status | sed -e "s/\t/ /g" -e "s/^[ ]*\*//" -e "s/^[ ]*//" > ${scratch}
+ 
+     nodes[0]=${1}; shift
+ 
+-- 
+1.8.3.1
+

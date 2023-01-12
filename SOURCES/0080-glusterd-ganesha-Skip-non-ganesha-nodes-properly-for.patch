@@ -1,0 +1,62 @@
+From c5c6720c5186741a3b01a5ba2b34633fc1a00fc5 Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Mon, 30 Apr 2018 12:35:01 +0530
+Subject: [PATCH 080/124] glusterd/ganesha : Skip non-ganesha nodes properly
+ for ganesha HA set up
+
+Label: DOWNSTREAM ONLY
+
+Upstream reference:
+>Patch unlink https://review.gluster.org/#/c/19949/
+>Change-Id: Iff7bc3ead43e97847219c5a5cc8b967bf0967903
+>BUG: 1573078
+>Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+
+Change-Id: Iff7bc3ead43e97847219c5a5cc8b967bf0967903
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167165
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-ganesha.c | 23 +++++++++++++----------
+ 1 file changed, 13 insertions(+), 10 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-ganesha.c b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+index ff36476..d882105 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-ganesha.c
++++ b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+@@ -842,17 +842,20 @@ static int
+ pre_setup(gf_boolean_t run_setup, char **op_errstr)
+ {
+     int ret = 0;
+-
+-    if (check_host_list()) {
+-        ret = setup_cluster(run_setup);
+-        if (ret == -1)
++    if (run_setup) {
++        if (!check_host_list()) {
+             gf_asprintf(op_errstr,
+-                        "Failed to set up HA "
+-                        "config for NFS-Ganesha. "
+-                        "Please check the log file for details");
+-    } else
+-        ret = -1;
+-
++                        "Running nfs-ganesha setup command "
++                        "from node which is not part of ganesha cluster");
++            return -1;
++        }
++    }
++    ret = setup_cluster(run_setup);
++    if (ret == -1)
++        gf_asprintf(op_errstr,
++                    "Failed to set up HA "
++                    "config for NFS-Ganesha. "
++                    "Please check the log file for details");
+     return ret;
+ }
+ 
+-- 
+1.8.3.1
+

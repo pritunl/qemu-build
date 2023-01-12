@@ -1,0 +1,100 @@
+From bf5906cbc9bf986c7495db792d098001e28c47e3 Mon Sep 17 00:00:00 2001
+From: Niels de Vos <ndevos@redhat.com>
+Date: Wed, 22 Apr 2015 15:39:59 +0200
+Subject: [PATCH 10/52] spec: fix/add pre-transaction scripts for geo-rep and
+ cli packages
+
+The cli subpackage never had a %pretrans script, this has been added
+now.
+
+The %pretrans script for ge-repliaction was never included in the RPM
+package because it was disable by a undefined macro (_can_georeplicate).
+This macro is not used/set anywhere else and _without_georeplication
+should take care of it anyway.
+
+Note: This is a Red Hat Gluster Storage specific patch. Upstream
+      packaging guidelines do not allow these kind of 'features'.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I16aab5bba72f1ed178f3bcac47f9d8ef767cfcef
+Signed-off-by: Niels de Vos <ndevos@redhat.com>
+Signed-off-by: Bala.FA <barumuga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/50491
+Reviewed-on: https://code.engineering.redhat.com/gerrit/60138
+Tested-by: Milind Changire <mchangir@redhat.com>
+---
+ glusterfs.spec.in | 43 +++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 41 insertions(+), 2 deletions(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 8a31a98..b70dbfc 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -1626,6 +1626,47 @@ end
+ 
+ 
+ 
++%pretrans cli -p <lua>
++if not posix.access("/bin/bash", "x") then
++    -- initial installation, no shell, no running glusterfsd
++    return 0
++end
++
++-- TODO: move this completely to a lua script
++-- For now, we write a temporary bash script and execute that.
++
++script = [[#!/bin/sh
++pidof -c -o %PPID -x glusterfsd &>/dev/null
++
++if [ $? -eq 0 ]; then
++   pushd . > /dev/null 2>&1
++   for volume in /var/lib/glusterd/vols/*; do cd $volume;
++       vol_type=`grep '^type=' info | awk -F'=' '{print $2}'`
++       volume_started=`grep '^status=' info | awk -F'=' '{print $2}'`
++       if [ $vol_type -eq 0 ] && [ $volume_started -eq 1 ] ; then
++          exit 1;
++       fi
++   done
++
++   popd > /dev/null 2>&1
++   exit 1;
++fi
++]]
++
++-- rpm in RHEL5 does not have os.tmpname()
++-- io.tmpfile() can not be resolved to a filename to pass to bash :-/
++tmpname = "/tmp/glusterfs-cli_pretrans_" .. os.date("%s")
++tmpfile = io.open(tmpname, "w")
++tmpfile:write(script)
++tmpfile:close()
++ok, how, val = os.execute("/bin/bash " .. tmpname)
++os.remove(tmpname)
++if not (ok == 0) then
++   error("Detected running glusterfs processes", ok)
++end
++
++
++
+ %pretrans devel -p <lua>
+ if not posix.access("/bin/bash", "x") then
+     -- initial installation, no shell, no running glusterfsd
+@@ -1708,7 +1749,6 @@ end
+ 
+ 
+ 
+-%if 0%{?_can_georeplicate}
+ %if ( 0%{!?_without_georeplication:1} )
+ %pretrans geo-replication -p <lua>
+ if not posix.access("/bin/bash", "x") then
+@@ -1749,7 +1789,6 @@ if not (ok == 0) then
+    error("Detected running glusterfs processes", ok)
+ end
+ %endif
+-%endif
+ 
+ 
+ 
+-- 
+1.8.3.1
+

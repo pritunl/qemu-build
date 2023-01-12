@@ -1,0 +1,92 @@
+From 1c55f3633f748629cd0484f79b6c49101eb2df82 Mon Sep 17 00:00:00 2001
+From: Sunny Kumar <sunkumar@redhat.com>
+Date: Mon, 8 Jul 2019 11:47:28 +0530
+Subject: [PATCH 226/255] geo-rep : fix gluster command path for non-root
+ session
+
+Problem:
+gluster command not found.
+
+Cause:
+In Volinfo class we issue command 'gluster vol info' to get information
+about volume like getting brick_root to perform various operation.
+When geo-rep session is configured for non-root user Volinfo class
+fails to issue gluster command due to unavailability of gluster
+binary path for non-root user.
+
+Solution:
+Use config value 'slave-gluster-command-dir'/'gluster-command-dir' to get path
+for gluster command based on caller.
+
+>Backport of:
+>Upstream Patch: https://review.gluster.org/#/c/glusterfs/+/22920/.
+>fixes: bz#1722740
+>Change-Id: I4ec46373da01f5d00ecd160c4e8c6239da8b3859
+>Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+
+BUG: 1712591
+Change-Id: Ifea2927253a9521fa459fea6de8a60085c3413f6
+Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/175485
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ geo-replication/syncdaemon/monitor.py    |  4 ++--
+ geo-replication/syncdaemon/syncdutils.py | 12 +++++++++---
+ 2 files changed, 11 insertions(+), 5 deletions(-)
+
+diff --git a/geo-replication/syncdaemon/monitor.py b/geo-replication/syncdaemon/monitor.py
+index c45ef24..234f3f1 100644
+--- a/geo-replication/syncdaemon/monitor.py
++++ b/geo-replication/syncdaemon/monitor.py
+@@ -369,7 +369,7 @@ def distribute(master, slave):
+     if rconf.args.use_gconf_volinfo:
+         mvol = VolinfoFromGconf(master.volume, master=True)
+     else:
+-        mvol = Volinfo(master.volume, master.host)
++        mvol = Volinfo(master.volume, master.host, master=True)
+     logging.debug('master bricks: ' + repr(mvol.bricks))
+     prelude = []
+     slave_host = None
+@@ -385,7 +385,7 @@ def distribute(master, slave):
+     if rconf.args.use_gconf_volinfo:
+         svol = VolinfoFromGconf(slave.volume, master=False)
+     else:
+-        svol = Volinfo(slave.volume, "localhost", prelude)
++        svol = Volinfo(slave.volume, "localhost", prelude, master=False)
+ 
+     sbricks = svol.bricks
+     suuid = svol.uuid
+diff --git a/geo-replication/syncdaemon/syncdutils.py b/geo-replication/syncdaemon/syncdutils.py
+index 3f41b5f..2ee10ac 100644
+--- a/geo-replication/syncdaemon/syncdutils.py
++++ b/geo-replication/syncdaemon/syncdutils.py
+@@ -672,7 +672,7 @@ def get_slv_dir_path(slv_host, slv_volume, gfid):
+     dir_path = ENOENT
+ 
+     if not slv_bricks:
+-        slv_info = Volinfo(slv_volume, slv_host)
++        slv_info = Volinfo(slv_volume, slv_host, master=False)
+         slv_bricks = slv_info.bricks
+     # Result of readlink would be of format as below.
+     # readlink = "../../pgfid[0:2]/pgfid[2:4]/pgfid/basename"
+@@ -854,8 +854,14 @@ class Popen(subprocess.Popen):
+ 
+ class Volinfo(object):
+ 
+-    def __init__(self, vol, host='localhost', prelude=[]):
+-        po = Popen(prelude + ['gluster', '--xml', '--remote-host=' + host,
++    def __init__(self, vol, host='localhost', prelude=[], master=True):
++        if master:
++            gluster_cmd_dir = gconf.get("gluster-command-dir")
++        else:
++            gluster_cmd_dir = gconf.get("slave-gluster-command-dir")
++
++        gluster_cmd = os.path.join(gluster_cmd_dir, 'gluster')
++        po = Popen(prelude + [gluster_cmd, '--xml', '--remote-host=' + host,
+                               'volume', 'info', vol],
+                    stdout=PIPE, stderr=PIPE, universal_newlines=True)
+         vix = po.stdout.read()
+-- 
+1.8.3.1
+

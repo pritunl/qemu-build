@@ -1,0 +1,96 @@
+From 916a79ea78db264ceedd4ebdba794e488b82eceb Mon Sep 17 00:00:00 2001
+From: "Kaleb S. KEITHLEY" <kkeithle@redhat.com>
+Date: Wed, 21 Jun 2017 10:01:20 -0400
+Subject: [PATCH 069/124] common-ha: enable and disable selinux
+ ganesha_use_fusefs
+
+Starting in Fedora 26 and RHEL 7.4 there are new targeted policies
+in selinux which include a tuneable to allow ganesha.nfsd to access
+the gluster (FUSE) shared_storage volume where ganesha maintains its
+state.
+
+N.B. rpm doesn't have a way to distinguish between RHEL 7.3 or 7.4
+so it can't be enabled for RHEL at this time. /usr/sbin/semanage is
+in policycoreutils-python in RHEL (versus policycoreutils-python-utils
+in Fedora.) Once RHEL 7.4 GAs we may also wish to specify the version
+for RHEL 7 explicitly, i.e.
+  Requires: selinux-policy >= 3.13.1-160.
+But beware, the corresponding version in Fedora 26 seems to be
+selinux-policy-3.13.1.258 or so. (Maybe earlier versions, but that's
+what's currently in the F26 beta.
+
+release-3.10 is the upstream master branch for glusterfs-ganesha. For
+release-3.11 and later storhaug needs a similar change, which is
+tracked by https://github.com/linux-ha-storage/storhaug/issues/11
+
+Maybe at some point we would want to consider migrating the targeted
+policies for glusterfs (and nfs-ganesha) from selinux-policy to a
+glusterfs-selinux (and nfs-ganesha-selinux) subpackage?
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I04a5443edd00636cbded59a2baddfa98095bf7ac
+Signed-off-by: Kaleb S. KEITHLEY <kkeithle@redhat.com>
+Reviewed-on: https://review.gluster.org/17597
+Smoke: Gluster Build System <jenkins@build.gluster.org>
+Reviewed-by: Niels de Vos <ndevos@redhat.com>
+Reviewed-by: jiffin tony Thottan <jthottan@redhat.com>
+CentOS-regression: Gluster Build System <jenkins@build.gluster.org>
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167154
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfs.spec.in | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index d748ebc..b01c94f 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -466,6 +466,11 @@ Requires:         pcs, dbus
+ Requires:         cman, pacemaker, corosync
+ %endif
+ 
++%if ( 0%{?fedora} && 0%{?fedora} > 25 )
++Requires(post):   policycoreutils-python-utils
++Requires(postun): policycoreutils-python-utils
++%endif
++
+ %description ganesha
+ GlusterFS is a distributed file-system capable of scaling to several
+ petabytes. It aggregates various storage bricks over Infiniband RDMA
+@@ -923,6 +928,14 @@ exit 0
+ %systemd_post glustereventsd
+ %endif
+ 
++%if ( 0%{!?_without_server:1} )
++%if ( 0%{?fedora} && 0%{?fedora} > 25 )
++%post ganesha
++semanage boolean -m ganesha_use_fusefs --on
++exit 0
++%endif
++%endif
++
+ %if ( 0%{!?_without_georeplication:1} )
+ %post geo-replication
+ if [ $1 -ge 1 ]; then
+@@ -1055,6 +1068,14 @@ fi
+ exit 0
+ %endif
+ 
++%if ( 0%{!?_without_server:1} )
++%if ( 0%{?fedora} && 0%{?fedora} > 25 )
++%postun ganesha
++semanage boolean -m ganesha_use_fusefs --off
++exit 0
++%endif
++%endif
++
+ ##-----------------------------------------------------------------------------
+ ## All %%files should be placed here and keep them grouped
+ ##
+-- 
+1.8.3.1
+

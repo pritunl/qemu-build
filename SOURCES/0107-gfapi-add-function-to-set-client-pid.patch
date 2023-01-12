@@ -1,0 +1,93 @@
+From 799a74e5e8123cd2e67e9ed5c0f986630a8e0547 Mon Sep 17 00:00:00 2001
+From: Ravishankar N <ravishankar@redhat.com>
+Date: Thu, 14 Mar 2019 18:41:11 +0530
+Subject: [PATCH 107/124] gfapi: add function to set client-pid
+
+This api offers the ability to set the pid of a client to a particular
+value, identical to how gluster fuse clients provide the --client-pid
+option. This is an internal API to be used by gluster processes only. See
+https://lists.gluster.org/pipermail/gluster-devel/2019-March/055925.html
+for more details. Currently glfsheal is the only proposed consumer.
+
+Patch on upstream master: https://review.gluster.org/#/c/glusterfs/+/22368/
+Change-Id: I0620be2127d79d69cdd57cffb29bba44e6e5da1f
+BUG 1676495
+Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/166459
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ api/src/gfapi.aliases   |  1 +
+ api/src/gfapi.map       |  4 ++++
+ api/src/glfs-internal.h |  6 ++++++
+ api/src/glfs.c          | 15 +++++++++++++++
+ 4 files changed, 26 insertions(+)
+
+diff --git a/api/src/gfapi.aliases b/api/src/gfapi.aliases
+index 25e2d74..09c0fd8 100644
+--- a/api/src/gfapi.aliases
++++ b/api/src/gfapi.aliases
+@@ -172,6 +172,7 @@ _pub_glfs_upcall_lease_get_lease_type _glfs_upcall_lease_get_lease_type$GFAPI_4.
+ 
+ _priv_glfs_statx _glfs_statx$GFAPI_6.0
+ _priv_glfs_iatt_from_statx _glfs_iatt_from_statx$GFAPI_6.0
++_priv_glfs_setfspid _glfs_setfspid$GFAPI_6.1
+ 
+ _pub_glfs_read_async _glfs_read_async$GFAPI_6.0
+ _pub_glfs_write_async _glfs_write_async$GFAPI_6.0
+diff --git a/api/src/gfapi.map b/api/src/gfapi.map
+index bb201c7..b97a614 100644
+--- a/api/src/gfapi.map
++++ b/api/src/gfapi.map
+@@ -267,3 +267,7 @@ GFAPI_6.0 {
+ 		glfs_fsetattr;
+ } GFAPI_PRIVATE_6.0;
+ 
++GFAPI_PRIVATE_6.1 {
++	global:
++		glfs_setfspid;
++} GFAPI_6.0;
+diff --git a/api/src/glfs-internal.h b/api/src/glfs-internal.h
+index 40bbb8a..55401b2 100644
+--- a/api/src/glfs-internal.h
++++ b/api/src/glfs-internal.h
+@@ -702,4 +702,10 @@ void
+ glfs_iatt_from_statx(struct iatt *, const struct glfs_stat *)
+     GFAPI_PRIVATE(glfs_iatt_from_statx, 6.0);
+ 
++/*
++ * This API is a per thread setting, similar to glfs_setfs{u/g}id, because of
++ * the call to syncopctx_setfspid.
++ */
++int
++glfs_setfspid(struct glfs *, pid_t) GFAPI_PRIVATE(glfs_setfspid, 6.1);
+ #endif /* !_GLFS_INTERNAL_H */
+diff --git a/api/src/glfs.c b/api/src/glfs.c
+index b741f6e..f4a8e08 100644
+--- a/api/src/glfs.c
++++ b/api/src/glfs.c
+@@ -1461,6 +1461,21 @@ invalid_fs:
+ 
+ GFAPI_SYMVER_PRIVATE_DEFAULT(glfs_ipc, 3.12.0);
+ 
++int
++priv_glfs_setfspid(struct glfs *fs, pid_t pid)
++{
++    cmd_args_t *cmd_args = NULL;
++    int ret = 0;
++
++    cmd_args = &fs->ctx->cmd_args;
++    cmd_args->client_pid = pid;
++    cmd_args->client_pid_set = 1;
++    ret = syncopctx_setfspid(&pid);
++
++    return ret;
++}
++GFAPI_SYMVER_PRIVATE_DEFAULT(glfs_setfspid, 6.1);
++
+ void
+ pub_glfs_free(void *ptr)
+ {
+-- 
+1.8.3.1
+

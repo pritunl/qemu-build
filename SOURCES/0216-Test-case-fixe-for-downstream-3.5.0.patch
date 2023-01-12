@@ -1,0 +1,29 @@
+From b2204969bb0dba5de32685e1021fa44d0c406813 Mon Sep 17 00:00:00 2001
+From: Sunil Kumar Acharya <sheggodu@redhat.com>
+Date: Tue, 25 Jun 2019 12:17:10 +0530
+Subject: [PATCH 216/221] Test case fixe for downstream 3.5.0
+
+Mark bug-1319374-THIS-crash.t  as bad.
+
+BUG: 1704562
+Change-Id: I6afeb9a74ab88af7b741454367005250cd4c0e0f
+Signed-off-by: Sunil Kumar Acharya <sheggodu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/174652
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ tests/bugs/gfapi/bug-1319374-THIS-crash.t | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/tests/bugs/gfapi/bug-1319374-THIS-crash.t b/tests/bugs/gfapi/bug-1319374-THIS-crash.t
+index 8d3db42..429d71e 100755
+--- a/tests/bugs/gfapi/bug-1319374-THIS-crash.t
++++ b/tests/bugs/gfapi/bug-1319374-THIS-crash.t
+@@ -25,3 +25,5 @@ TEST $(dirname $0)/bug-1319374 $H0 $V0 $logdir/bug-1319374.log
+ cleanup_tester $(dirname $0)/bug-1319374
+ 
+ cleanup;
++#G_TESTDEF_TEST_STATUS_CENTOS6=BAD_TEST,BUG=1723673
++#G_TESTDEF_TEST_STATUS_NETBSD7=BAD_TEST,BUG=1723673
+-- 
+1.8.3.1
+

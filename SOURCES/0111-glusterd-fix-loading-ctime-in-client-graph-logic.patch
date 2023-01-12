@@ -1,0 +1,49 @@
+From 310e09d46cdb293e4af2df0085b8ac45d5c17933 Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Tue, 16 Apr 2019 17:20:34 +0530
+Subject: [PATCH 111/124] glusterd: fix loading ctime in client graph logic
+
+Commit efbf8ab wasn't handling all the scenarios of toggling ctime
+option correctly and more over a ! had completely tossed up the logic.
+
+> upstream patch : https://review.gluster.org/#/c/glusterfs/+/22578/
+
+>Fixes: bz#1697907
+>Change-Id: If12e2f69045e59878992ee2cd0518cc0eabcce0d
+>Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+
+BUG: 1697820
+Change-Id: If12e2f69045e59878992ee2cd0518cc0eabcce0d
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/168048
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-volgen.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volgen.c b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+index 324ec2f..da877aa 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volgen.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+@@ -4358,9 +4358,15 @@ client_graph_builder(volgen_graph_t *graph, glusterd_volinfo_t *volinfo,
+             goto out;
+         }
+     }
+-
+-    if (conf->op_version >= GD_OP_VERSION_5_0 &&
+-        !dict_get_str_boolean(set_dict, "features.ctime", _gf_false)) {
++    /* a. ret will be -1 if features.ctime is not set in the volinfo->dict which
++     * means ctime should be loaded into the graph.
++     * b. ret will be 1 if features.ctime is explicitly turned on through
++     * volume set and in that case ctime should be loaded into the graph.
++     * c. ret will be 0 if features.ctime is explicitly turned off and in that
++     * case ctime shouldn't be loaded into the graph.
++     */
++    ret = dict_get_str_boolean(set_dict, "features.ctime", -1);
++    if (conf->op_version >= GD_OP_VERSION_5_0 && ret) {
+         xl = volgen_graph_add(graph, "features/utime", volname);
+         if (!xl) {
+             ret = -1;
+-- 
+1.8.3.1
+

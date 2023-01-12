@@ -1,0 +1,122 @@
+From 04b824ebfcf80c648d5855f10bc30fde45fd62eb Mon Sep 17 00:00:00 2001
+From: Sunny Kumar <sunkumar@redhat.com>
+Date: Thu, 26 Mar 2020 10:46:16 +0000
+Subject: [PATCH 361/362] snap_scheduler: python3 compatibility and new test
+ case
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Problem:
+"snap_scheduler.py init" command failing with the below traceback:
+
+[root@dhcp43-104 ~]# snap_scheduler.py init
+Traceback (most recent call last):
+  File "/usr/sbin/snap_scheduler.py", line 941, in <module>
+    sys.exit(main(sys.argv[1:]))
+  File "/usr/sbin/snap_scheduler.py", line 851, in main
+    initLogger()
+  File "/usr/sbin/snap_scheduler.py", line 153, in initLogger
+    logfile = os.path.join(process.stdout.read()[:-1], SCRIPT_NAME + ".log")
+  File "/usr/lib64/python3.6/posixpath.py", line 94, in join
+    genericpath._check_arg_types('join', a, *p)
+  File "/usr/lib64/python3.6/genericpath.py", line 151, in _check_arg_types
+    raise TypeError("Can't mix strings and bytes in path components") from None
+TypeError: Can't mix strings and bytes in path components
+
+Solution:
+
+Added the 'universal_newlines' flag to Popen to support backward compatibility.
+
+Added a basic test for snapshot scheduler.
+
+Backport Of:
+   
+        >Upstream Patch: https://review.gluster.org/#/c/glusterfs/+/24257/
+        >Change-Id: I78e8fabd866fd96638747ecd21d292f5ca074a4e
+        >Fixes: #1134
+        >Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+   
+BUG: 1817369
+Change-Id: I78e8fabd866fd96638747ecd21d292f5ca074a4e
+Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/196482
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/snap_scheduler/snap_scheduler.py |  2 +-
+ tests/basic/volume-snap-scheduler.t     | 49 +++++++++++++++++++++++++++++++++
+ 2 files changed, 50 insertions(+), 1 deletion(-)
+ create mode 100644 tests/basic/volume-snap-scheduler.t
+
+diff --git a/extras/snap_scheduler/snap_scheduler.py b/extras/snap_scheduler/snap_scheduler.py
+index a66c5e3..5a29d41 100755
+--- a/extras/snap_scheduler/snap_scheduler.py
++++ b/extras/snap_scheduler/snap_scheduler.py
+@@ -149,7 +149,7 @@ def initLogger():
+     sh.setFormatter(formatter)
+ 
+     process = subprocess.Popen(["gluster", "--print-logdir"],
+-                               stdout=subprocess.PIPE)
++                               stdout=subprocess.PIPE, universal_newlines=True)
+     logfile = os.path.join(process.stdout.read()[:-1], SCRIPT_NAME + ".log")
+ 
+     fh = logging.FileHandler(logfile)
+diff --git a/tests/basic/volume-snap-scheduler.t b/tests/basic/volume-snap-scheduler.t
+new file mode 100644
+index 0000000..a638c5c
+--- /dev/null
++++ b/tests/basic/volume-snap-scheduler.t
+@@ -0,0 +1,49 @@
++#!/bin/bash
++
++. $(dirname $0)/../include.rc
++. $(dirname $0)/../volume.rc
++
++cleanup;
++
++TEST glusterd;
++TEST pidof glusterd;
++
++TEST $CLI volume create $V0 replica 2 $H0:$B0/${GMV0}{1,2,3,4};
++TEST $CLI volume start $V0
++
++## Create, start and mount meta_volume as
++## snap_scheduler expects shared storage to be enabled.
++## This test is very basic in nature not creating any snapshot
++## and purpose is to validate snap scheduling commands.
++
++TEST $CLI volume create $META_VOL replica 3 $H0:$B0/${META_VOL}{1,2,3};
++TEST $CLI volume start $META_VOL
++TEST mkdir -p $META_MNT
++TEST glusterfs -s $H0 --volfile-id $META_VOL $META_MNT
++
++##function to check status
++function check_status_scheduler()
++{
++     local key=$1
++     snap_scheduler.py status | grep -F "$key" | wc -l
++}
++
++##Basic snap_scheduler command test init/enable/disable/list
++
++TEST snap_scheduler.py init
++
++TEST snap_scheduler.py enable
++
++EXPECT 1 check_status_scheduler "Enabled"
++
++TEST snap_scheduler.py disable
++
++EXPECT 1 check_status_scheduler "Disabled"
++
++TEST snap_scheduler.py list
++
++TEST $CLI volume stop $V0;
++
++TEST $CLI volume delete $V0;
++
++cleanup;
+-- 
+1.8.3.1
+

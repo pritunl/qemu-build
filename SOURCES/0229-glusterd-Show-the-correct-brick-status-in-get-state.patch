@@ -1,0 +1,113 @@
+From 4fc0a77db5b9760fa5c00d3803c6d11a28a00b74 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Wed, 3 Jul 2019 15:22:38 +0530
+Subject: [PATCH 229/255] glusterd: Show the correct brick status in get-state
+
+Problem: get-state does not show correct brick status if brick
+         status is not Started, it always shows started if any value
+         is set brickinfo->status
+
+Solution: Check the value of brickinfo->status to show correct status
+          in get-state
+
+> Change-Id: I12a79619024c2cf59f338220d144f2f034059b3b
+> fixes: bz#1726906
+> (Cherry pick from commit af989db23d1db00e087f2b9d3dfc43b13ef17153)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/22983/)
+
+BUG: 1726991
+Change-Id: I12a79619024c2cf59f338220d144f2f034059b3b
+Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/175355
+Tested-by: Mohit Agrawal <moagrawa@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-handler.c |  7 +++++--
+ xlators/mgmt/glusterd/src/glusterd-utils.c   | 28 ++++++++++++++++++++++++++++
+ xlators/mgmt/glusterd/src/glusterd-utils.h   |  4 ++++
+ 3 files changed, 37 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-handler.c b/xlators/mgmt/glusterd/src/glusterd-handler.c
+index cc1f1df..94e1be5 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-handler.c
++++ b/xlators/mgmt/glusterd/src/glusterd-handler.c
+@@ -5589,7 +5589,9 @@ glusterd_get_state(rpcsvc_request_t *req, dict_t *dict)
+     char vol_status_str[STATUS_STRLEN] = {
+         0,
+     };
+-
++    char brick_status_str[STATUS_STRLEN] = {
++        0,
++    };
+     this = THIS;
+     GF_VALIDATE_OR_GOTO(THIS->name, this, out);
+ 
+@@ -5852,8 +5854,9 @@ glusterd_get_state(rpcsvc_request_t *req, dict_t *dict)
+                     brickinfo->rdma_port);
+             fprintf(fp, "Volume%d.Brick%d.port_registered: %d\n", count_bkp,
+                     count, brickinfo->port_registered);
++            glusterd_brick_get_status_str(brickinfo, brick_status_str);
+             fprintf(fp, "Volume%d.Brick%d.status: %s\n", count_bkp, count,
+-                    brickinfo->status ? "Started" : "Stopped");
++                    brick_status_str);
+ 
+             /*FIXME: This is a hacky way of figuring out whether a
+              * brick belongs to the hot or cold tier */
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index 2eb5116..3bdfd49 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -13898,6 +13898,34 @@ out:
+     return ret;
+ }
+ 
++void
++glusterd_brick_get_status_str(glusterd_brickinfo_t *brickinfo, char *status_str)
++{
++    GF_VALIDATE_OR_GOTO(THIS->name, brickinfo, out);
++    GF_VALIDATE_OR_GOTO(THIS->name, status_str, out);
++
++    switch (brickinfo->status) {
++        case GF_BRICK_STOPPED:
++            sprintf(status_str, "%s", "Stopped");
++            break;
++        case GF_BRICK_STARTED:
++            sprintf(status_str, "%s", "Started");
++            break;
++        case GF_BRICK_STARTING:
++            sprintf(status_str, "%s", "Starting");
++            break;
++        case GF_BRICK_STOPPING:
++            sprintf(status_str, "%s", "Stopping");
++            break;
++        default:
++            sprintf(status_str, "%s", "None");
++            break;
++    }
++
++out:
++    return;
++}
++
+ int
+ glusterd_volume_get_transport_type_str(glusterd_volinfo_t *volinfo,
+                                        char *transport_type_str)
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.h b/xlators/mgmt/glusterd/src/glusterd-utils.h
+index 6ad8062..5c6a453 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.h
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.h
+@@ -781,6 +781,10 @@ glusterd_volume_get_type_str(glusterd_volinfo_t *volinfo, char **vol_type_str);
+ int
+ glusterd_volume_get_status_str(glusterd_volinfo_t *volinfo, char *status_str);
+ 
++void
++glusterd_brick_get_status_str(glusterd_brickinfo_t *brickinfo,
++                              char *status_str);
++
+ int
+ glusterd_volume_get_transport_type_str(glusterd_volinfo_t *volinfo,
+                                        char *transport_type_str);
+-- 
+1.8.3.1
+

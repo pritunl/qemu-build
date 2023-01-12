@@ -1,0 +1,162 @@
+From 71fc5b7949e00c4448f5ec1291e756b201a70082 Mon Sep 17 00:00:00 2001
+From: Ravishankar N <ravishankar@redhat.com>
+Date: Thu, 29 Apr 2021 18:34:57 +0530
+Subject: [PATCH 543/543] glusterd: handle custom xlator failure cases
+
+Problem-1:
+custom xlator insertion was failing for those xlators in the brick graph
+whose dbg_key was NULL in the server_graph_table. Looking at the git log,
+the dbg_key was added in commit d1397dbd7d6cdbd2d81d5d36d608b6175d449db4
+for inserting debug xlators.
+
+Fix: I think it is fine to define it for all brick xlators below server.
+
+Problem-2:
+In the commit-op phase, glusterd_op_set_volume() updates the volinfo
+dict with the key-value pairs and then proceeds to create the volfiles.
+If any of the steps fail, the volinfo dict retains those key-values,
+until glusterd is restarted or `gluster vol reset $VOLNAME` is issued.
+
+Fix:
+Make a copy of the volinfo dict and if there are any failures in
+proceeding with the set volume logic, restore the dict to its original
+state.
+
+Backport of:
+> Upstream-patch-link: https://github.com/gluster/glusterfs/pull/2371
+> Change-Id: I9010dab33d0139b8e6d603308e331b6d220a4849
+> Updates: #2370
+> Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+
+Change-Id: I9010dab33d0139b8e6d603308e331b6d220a4849
+BUG: 1953901
+Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/239889
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/basic/user-xlator.t                   | 16 ++++++++++++++--
+ xlators/mgmt/glusterd/src/glusterd-op-sm.c  | 16 ++++++++++++++++
+ xlators/mgmt/glusterd/src/glusterd-volgen.c | 14 +++++++-------
+ 3 files changed, 37 insertions(+), 9 deletions(-)
+
+diff --git a/tests/basic/user-xlator.t b/tests/basic/user-xlator.t
+index a711f9f..ed2d831 100755
+--- a/tests/basic/user-xlator.t
++++ b/tests/basic/user-xlator.t
+@@ -35,8 +35,18 @@ EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}4
+ EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}5
+ EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}6
+ 
+-TEST $CLI volume set $V0 user.xlator.hoge trash
+-TEST grep -q 'user/hoge' ${SERVER_VOLFILE}
++# Test that the insertion at all positions between server and posix is successful.
++# It is not guaranteed that the brick process will start/work in all positions though.
++TESTS_EXPECTED_IN_LOOP=34
++declare -a brick_side_xlators=("decompounder" "io-stats" "quota" "index" "barrier"
++                               "marker" "selinux" "io-threads" "upcall" "leases"
++                               "read-only" "worm" "locks"  "access-control"
++                               "bitrot-stub" "changelog" "trash")
++for xlator in "${brick_side_xlators[@]}"
++  do
++    TEST_IN_LOOP $CLI volume set $V0 user.xlator.hoge $xlator
++    TEST_IN_LOOP grep -q 'user/hoge' ${SERVER_VOLFILE}
++  done
+ 
+ TEST $CLI volume stop $V0
+ TEST $CLI volume start $V0
+@@ -49,6 +59,8 @@ EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}6
+ 
+ TEST ! $CLI volume set $V0 user.xlator.hoge unknown
+ TEST grep -q 'user/hoge' ${SERVER_VOLFILE} # When the CLI fails, the volfile is not modified.
++# User xlator insert failures must not prevent setting other volume options.
++TEST $CLI volume set $V0 storage.reserve 10%
+ 
+ TEST $CLI volume stop $V0
+ TEST $CLI volume start $V0
+diff --git a/xlators/mgmt/glusterd/src/glusterd-op-sm.c b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+index 1e84f5f..893af29 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-op-sm.c
++++ b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+@@ -2911,6 +2911,7 @@ glusterd_op_set_volume(dict_t *dict, char **errstr)
+     uint32_t new_op_version = 0;
+     gf_boolean_t quorum_action = _gf_false;
+     glusterd_svc_t *svc = NULL;
++    dict_t *volinfo_dict_orig = NULL;
+ 
+     this = THIS;
+     GF_ASSERT(this);
+@@ -2918,6 +2919,10 @@ glusterd_op_set_volume(dict_t *dict, char **errstr)
+     priv = this->private;
+     GF_ASSERT(priv);
+ 
++    volinfo_dict_orig = dict_new();
++    if (!volinfo_dict_orig)
++        goto out;
++
+     ret = dict_get_int32n(dict, "count", SLEN("count"), &dict_count);
+     if (ret) {
+         gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_DICT_GET_FAILED,
+@@ -2949,6 +2954,11 @@ glusterd_op_set_volume(dict_t *dict, char **errstr)
+         goto out;
+     }
+ 
++    if (dict_copy(volinfo->dict, volinfo_dict_orig) == NULL) {
++        ret = -ENOMEM;
++        goto out;
++    }
++
+     /* TODO: Remove this once v3.3 compatibility is not required */
+     check_op_version = dict_get_str_boolean(dict, "check-op-version",
+                                             _gf_false);
+@@ -3171,6 +3181,12 @@ out:
+     gf_msg_debug(this->name, 0, "returning %d", ret);
+     if (quorum_action)
+         glusterd_do_quorum_action();
++    if (ret < 0 && count > 1) {
++        if (dict_reset(volinfo->dict) == 0)
++            dict_copy(volinfo_dict_orig, volinfo->dict);
++    }
++    if (volinfo_dict_orig)
++        dict_unref(volinfo_dict_orig);
+     return ret;
+ }
+ 
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volgen.c b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+index 71aed08..aa85bdb 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volgen.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+@@ -2706,24 +2706,24 @@ out:
+ static volgen_brick_xlator_t server_graph_table[] = {
+     {brick_graph_add_server, NULL},
+     {brick_graph_add_decompounder, "decompounder"},
+-    {brick_graph_add_io_stats, "NULL"},
++    {brick_graph_add_io_stats, "io-stats"},
+     {brick_graph_add_sdfs, "sdfs"},
+     {brick_graph_add_namespace, "namespace"},
+-    {brick_graph_add_cdc, NULL},
++    {brick_graph_add_cdc, "cdc" },
+     {brick_graph_add_quota, "quota"},
+     {brick_graph_add_index, "index"},
+-    {brick_graph_add_barrier, NULL},
++    {brick_graph_add_barrier, "barrier" },
+     {brick_graph_add_marker, "marker"},
+     {brick_graph_add_selinux, "selinux"},
+     {brick_graph_add_fdl, "fdl"},
+     {brick_graph_add_iot, "io-threads"},
+     {brick_graph_add_upcall, "upcall"},
+     {brick_graph_add_leases, "leases"},
+-    {brick_graph_add_pump, NULL},
+-    {brick_graph_add_ro, NULL},
+-    {brick_graph_add_worm, NULL},
++    {brick_graph_add_pump, "pump" },
++    {brick_graph_add_ro, "read-only" },
++    {brick_graph_add_worm, "worm" },
+     {brick_graph_add_locks, "locks"},
+-    {brick_graph_add_acl, "acl"},
++    {brick_graph_add_acl, "access-control"},
+     {brick_graph_add_bitrot_stub, "bitrot-stub"},
+     {brick_graph_add_changelog, "changelog"},
+ #if USE_GFDB /* changetimerecorder depends on gfdb */
+-- 
+1.8.3.1
+

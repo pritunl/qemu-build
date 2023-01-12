@@ -1,0 +1,180 @@
+From 21f376939f03f91214218c485e7d3a2848dae4b2 Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Thu, 11 Jul 2019 12:43:44 +0530
+Subject: [PATCH 231/255] Revert "graph/shd: Use top down approach while
+ cleaning xlator"
+
+This reverts commit b963fa8bb71963127147d33bf609f439dd5bd107.
+
+Label : DOWNSTREAM ONLY
+
+BUG: 1471742
+Change-Id: Ifb8056395c5988cf7c484891bea052f5415bf9da
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/175941
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/graph.c                         | 10 +---------
+ xlators/features/bit-rot/src/stub/bit-rot-stub.c |  1 -
+ xlators/features/changelog/src/changelog.c       |  1 -
+ xlators/features/cloudsync/src/cloudsync.c       |  4 +---
+ xlators/features/index/src/index.c               |  1 -
+ xlators/features/quiesce/src/quiesce.c           |  1 -
+ xlators/features/read-only/src/worm.c            |  1 -
+ xlators/features/sdfs/src/sdfs.c                 |  1 -
+ xlators/features/selinux/src/selinux.c           |  2 --
+ xlators/features/trash/src/trash.c               |  1 -
+ 10 files changed, 2 insertions(+), 21 deletions(-)
+
+diff --git a/libglusterfs/src/graph.c b/libglusterfs/src/graph.c
+index 172dc61..5b95fd6 100644
+--- a/libglusterfs/src/graph.c
++++ b/libglusterfs/src/graph.c
+@@ -1193,14 +1193,6 @@ glusterfs_graph_fini(glusterfs_graph_t *graph)
+         if (trav->init_succeeded) {
+             trav->cleanup_starting = 1;
+             trav->fini(trav);
+-            if (trav->local_pool) {
+-                mem_pool_destroy(trav->local_pool);
+-                trav->local_pool = NULL;
+-            }
+-            if (trav->itable) {
+-                inode_table_destroy(trav->itable);
+-                trav->itable = NULL;
+-            }
+             trav->init_succeeded = 0;
+         }
+         trav = trav->next;
+@@ -1402,7 +1394,7 @@ glusterfs_graph_cleanup(void *arg)
+ 
+     pthread_mutex_lock(&ctx->cleanup_lock);
+     {
+-        glusterfs_graph_fini(graph);
++        glusterfs_graph_deactivate(graph);
+         glusterfs_graph_destroy(graph);
+     }
+     pthread_mutex_unlock(&ctx->cleanup_lock);
+diff --git a/xlators/features/bit-rot/src/stub/bit-rot-stub.c b/xlators/features/bit-rot/src/stub/bit-rot-stub.c
+index 03446be..3f48a4b 100644
+--- a/xlators/features/bit-rot/src/stub/bit-rot-stub.c
++++ b/xlators/features/bit-rot/src/stub/bit-rot-stub.c
+@@ -185,7 +185,6 @@ cleanup_lock:
+     pthread_mutex_destroy(&priv->lock);
+ free_mempool:
+     mem_pool_destroy(priv->local_pool);
+-    priv->local_pool = NULL;
+ free_priv:
+     GF_FREE(priv);
+     this->private = NULL;
+diff --git a/xlators/features/changelog/src/changelog.c b/xlators/features/changelog/src/changelog.c
+index 2862d1e..d9025f3 100644
+--- a/xlators/features/changelog/src/changelog.c
++++ b/xlators/features/changelog/src/changelog.c
+@@ -2790,7 +2790,6 @@ cleanup_options:
+     changelog_freeup_options(this, priv);
+ cleanup_mempool:
+     mem_pool_destroy(this->local_pool);
+-    this->local_pool = NULL;
+ cleanup_priv:
+     GF_FREE(priv);
+ error_return:
+diff --git a/xlators/features/cloudsync/src/cloudsync.c b/xlators/features/cloudsync/src/cloudsync.c
+index 0ad987e..26e512c 100644
+--- a/xlators/features/cloudsync/src/cloudsync.c
++++ b/xlators/features/cloudsync/src/cloudsync.c
+@@ -200,10 +200,8 @@ cs_init(xlator_t *this)
+ 
+ out:
+     if (ret == -1) {
+-        if (this->local_pool) {
++        if (this->local_pool)
+             mem_pool_destroy(this->local_pool);
+-            this->local_pool = NULL;
+-        }
+ 
+         cs_cleanup_private(priv);
+ 
+diff --git a/xlators/features/index/src/index.c b/xlators/features/index/src/index.c
+index 4ece7ff..2f2a6d0 100644
+--- a/xlators/features/index/src/index.c
++++ b/xlators/features/index/src/index.c
+@@ -2478,7 +2478,6 @@ out:
+             GF_FREE(priv);
+         this->private = NULL;
+         mem_pool_destroy(this->local_pool);
+-        this->local_pool = NULL;
+     }
+ 
+     if (attr_inited)
+diff --git a/xlators/features/quiesce/src/quiesce.c b/xlators/features/quiesce/src/quiesce.c
+index 06f58c9..bfd1116 100644
+--- a/xlators/features/quiesce/src/quiesce.c
++++ b/xlators/features/quiesce/src/quiesce.c
+@@ -2536,7 +2536,6 @@ fini(xlator_t *this)
+     this->private = NULL;
+ 
+     mem_pool_destroy(priv->local_pool);
+-    priv->local_pool = NULL;
+     LOCK_DESTROY(&priv->lock);
+     GF_FREE(priv);
+ out:
+diff --git a/xlators/features/read-only/src/worm.c b/xlators/features/read-only/src/worm.c
+index 7d13180..24196f8 100644
+--- a/xlators/features/read-only/src/worm.c
++++ b/xlators/features/read-only/src/worm.c
+@@ -569,7 +569,6 @@ fini(xlator_t *this)
+     mem_put(priv);
+     this->private = NULL;
+     mem_pool_destroy(this->local_pool);
+-    this->local_pool = NULL;
+ out:
+     return;
+ }
+diff --git a/xlators/features/sdfs/src/sdfs.c b/xlators/features/sdfs/src/sdfs.c
+index 164c632..f0247fd 100644
+--- a/xlators/features/sdfs/src/sdfs.c
++++ b/xlators/features/sdfs/src/sdfs.c
+@@ -1429,7 +1429,6 @@ void
+ fini(xlator_t *this)
+ {
+     mem_pool_destroy(this->local_pool);
+-    this->local_pool = NULL;
+     return;
+ }
+ 
+diff --git a/xlators/features/selinux/src/selinux.c b/xlators/features/selinux/src/selinux.c
+index ce5fc90..58b4c5d 100644
+--- a/xlators/features/selinux/src/selinux.c
++++ b/xlators/features/selinux/src/selinux.c
+@@ -256,7 +256,6 @@ out:
+             GF_FREE(priv);
+         }
+         mem_pool_destroy(this->local_pool);
+-        this->local_pool = NULL;
+     }
+     return ret;
+ }
+@@ -285,7 +284,6 @@ fini(xlator_t *this)
+     GF_FREE(priv);
+ 
+     mem_pool_destroy(this->local_pool);
+-    this->local_pool = NULL;
+ 
+     return;
+ }
+diff --git a/xlators/features/trash/src/trash.c b/xlators/features/trash/src/trash.c
+index eb5007b..d668436 100644
+--- a/xlators/features/trash/src/trash.c
++++ b/xlators/features/trash/src/trash.c
+@@ -2523,7 +2523,6 @@ out:
+             GF_FREE(priv);
+         }
+         mem_pool_destroy(this->local_pool);
+-        this->local_pool = NULL;
+     }
+     return ret;
+ }
+-- 
+1.8.3.1
+

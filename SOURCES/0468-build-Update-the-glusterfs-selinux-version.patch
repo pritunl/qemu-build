@@ -1,0 +1,36 @@
+From 4b72f5e7704d480bac869f7a32ac891898bb994f Mon Sep 17 00:00:00 2001
+From: Rinku Kothiya <rkothiya@redhat.com>
+Date: Thu, 3 Sep 2020 14:56:27 +0000
+Subject: [PATCH 468/468] build: Update the glusterfs-selinux version
+
+Updated the glusterfs-selinux version according to
+the downstream official version.
+
+Label: DOWNSTREAM ONLY
+
+BUG: 1460657
+
+Change-Id: I7b8bbf53f71f6f56103042950d8910f0cb63a685
+Signed-off-by: Rinku Kothiya <rkothiya@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/210685
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ glusterfs.spec.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index ed6bdf3..30d7162 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -651,7 +651,7 @@ Requires:         %{name}%{?_isa} = %{version}-%{release}
+ Requires:         %{name}-cli%{?_isa} = %{version}-%{release}
+ Requires:         %{name}-libs%{?_isa} = %{version}-%{release}
+ %if ( 0%{?fedora} && 0%{?fedora} >= 30  || ( 0%{?rhel} && 0%{?rhel} >= 8 ) )
+-Requires:         glusterfs-selinux >= 0.1.0-2
++Requires:         glusterfs-selinux >= 1.0-1
+ %endif
+ # some daemons (like quota) use a fuse-mount, glusterfsd is part of -fuse
+ Requires:         %{name}-fuse%{?_isa} = %{version}-%{release}
+-- 
+1.8.3.1
+

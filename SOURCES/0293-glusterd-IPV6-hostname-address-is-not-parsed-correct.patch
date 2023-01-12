@@ -1,0 +1,69 @@
+From 8f89aef9691b0806d7487525c6a54a1a615c8bc1 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Mon, 2 Sep 2019 10:46:10 +0530
+Subject: [PATCH 293/297] glusterd: IPV6 hostname address is not parsed
+ correctly
+
+Problem: IPV6 hostname address is not parsed correctly in function
+         glusterd_check_brick_order
+
+Solution: Update the code to parse hostname address
+
+> Change-Id: Ifb2f83f9c6e987b2292070e048e97eeb51b728ab
+> Fixes: bz#1747746
+> Credits: Amgad Saleh <amgad.saleh@nokia.com>
+> Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+> (Cherry picked from commit 6563ffb04d7ba51a89726e7c5bbb85c7dbc685b5)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/23341/)
+
+Change-Id: Ifb2f83f9c6e987b2292070e048e97eeb51b728ab
+BUG: 1750241
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/181185
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-volume-ops.c | 16 +++++++++++-----
+ 1 file changed, 11 insertions(+), 5 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-ops.c b/xlators/mgmt/glusterd/src/glusterd-volume-ops.c
+index 1ea8ba6..076bc80 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-ops.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-ops.c
+@@ -95,6 +95,10 @@ glusterd_check_brick_order(dict_t *dict, char *err_str)
+     int32_t type = GF_CLUSTER_TYPE_NONE;
+     int32_t sub_count = 0;
+     struct addrinfo *ai_info = NULL;
++    char brick_addr[128] = {
++        0,
++    };
++    int addrlen = 0;
+ 
+     const char failed_string[2048] =
+         "Failed to perform brick order "
+@@ -182,15 +186,17 @@ glusterd_check_brick_order(dict_t *dict, char *err_str)
+         brick_list_dup = tmpptr;
+         if (brick == NULL)
+             goto check_failed;
+-        brick = strtok_r(brick, ":", &tmpptr);
+-        if (brick == NULL)
++        tmpptr = strrchr(brick, ':');
++        if (tmpptr == NULL)
+             goto check_failed;
+-        ret = getaddrinfo(brick, NULL, NULL, &ai_info);
++        addrlen = strlen(brick) - strlen(tmpptr);
++        strncpy(brick_addr, brick, addrlen);
++        brick_addr[addrlen] = '\0';
++        ret = getaddrinfo(brick_addr, NULL, NULL, &ai_info);
+         if (ret != 0) {
+             ret = 0;
+             gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_HOSTNAME_RESOLVE_FAIL,
+-                   "unable to resolve "
+-                   "host name");
++                   "unable to resolve host name for addr %s", brick_addr);
+             goto out;
+         }
+         ai_list_tmp1 = MALLOC(sizeof(addrinfo_list_t));
+-- 
+1.8.3.1
+

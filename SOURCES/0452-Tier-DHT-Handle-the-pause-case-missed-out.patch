@@ -1,0 +1,48 @@
+From c184943bdf38de5b4cbf165fd1cd98ce7bd9e976 Mon Sep 17 00:00:00 2001
+From: hari gowtham <hgowtham@redhat.com>
+Date: Tue, 16 Jun 2020 14:47:53 +0530
+Subject: [PATCH 452/456] Tier/DHT: Handle the pause case missed out
+
+Problem: While backporting a change from master
+the changes related to tier were removed. This started affecting
+the tier pause functionality. Backporting it
+to downstream left this usecase messed up as we still support tier.
+patch that caused this: https://code.engineering.redhat.com/gerrit/#/c/202647/2
+
+Fix: add the condition back for tier pause to work.
+
+Label: DOWNSTREAM ONLY
+
+BUG: 1844359
+Change-Id: I46c6c179b09c7e1a729be9fd257fa4a490f0287e
+Signed-off-by: hari gowtham <hgowtham@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/203560
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/dht/src/dht-rebalance.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/xlators/cluster/dht/src/dht-rebalance.c b/xlators/cluster/dht/src/dht-rebalance.c
+index e9974cd..abc10fc 100644
+--- a/xlators/cluster/dht/src/dht-rebalance.c
++++ b/xlators/cluster/dht/src/dht-rebalance.c
+@@ -1160,6 +1160,15 @@ __dht_rebalance_migrate_data(xlator_t *this, gf_defrag_info_t *defrag,
+             break;
+         }
+ 
++        if ((defrag && defrag->cmd == GF_DEFRAG_CMD_START_TIER) &&
++            (gf_defrag_get_pause_state(&defrag->tier_conf) != TIER_RUNNING)) {
++            gf_msg("tier", GF_LOG_INFO, 0, DHT_MSG_TIER_PAUSED,
++                   "Migrate file paused");
++            ret = -1;
++            break;
++        }
++
++
+         offset += ret;
+         total += ret;
+ 
+-- 
+1.8.3.1
+

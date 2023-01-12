@@ -1,0 +1,55 @@
+From 5e7a2ad35a174d6d0ee5ed58a3e27955e85aa47c Mon Sep 17 00:00:00 2001
+From: kshithijiyer <kshithij.ki@gmail.com>
+Date: Mon, 24 Jun 2019 20:08:48 +0530
+Subject: [PATCH 321/335] Adding white spaces to description of set group.
+
+The description of set group is missing spaces which
+leads to the description look like:
+volume set <VOLNAME> group  <GROUP> - This option can be used for
+setting multiple pre-defined volume optionswhere group_name is a
+file under /var/lib/glusterd/groups containing onekey, value pair
+per line
+
+Instead of:
+volume set <VOLNAME> group <GROUP> - This option can be used for
+setting multiple pre-defined volume options where group_name is a
+file under /var/lib/glusterd/groups containing one key value
+pair per line
+
+> upstream patch: https://review.gluster.org/#/c/glusterfs/+/22934/
+> Fixes: bz#1723455
+> Change-Id: I4957988c0c1f35f043db3f64089c049193e60e8f
+> Signed-off-by: kshithijiyer <kshithij.ki@gmail.com>
+
+BUG: 1724021
+Change-Id: I4957988c0c1f35f043db3f64089c049193e60e8f
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/185756
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ cli/src/cli-cmd-volume.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/cli/src/cli-cmd-volume.c b/cli/src/cli-cmd-volume.c
+index 6b958bd..66beb1b 100644
+--- a/cli/src/cli-cmd-volume.c
++++ b/cli/src/cli-cmd-volume.c
+@@ -3393,10 +3393,10 @@ struct cli_cmd volume_cmds[] = {
+     {"volume set <VOLNAME> <KEY> <VALUE>", cli_cmd_volume_set_cbk,
+      "set options for volume <VOLNAME>"},
+ 
+-    {"volume set <VOLNAME> group  <GROUP>", cli_cmd_volume_set_cbk,
+-     "This option can be used for setting multiple pre-defined volume options"
+-     "where group_name is a file under /var/lib/glusterd/groups containing one"
+-     "key, value pair per line"},
++    {"volume set <VOLNAME> group <GROUP>", cli_cmd_volume_set_cbk,
++     "This option can be used for setting multiple pre-defined volume options "
++     "where group_name is a file under /var/lib/glusterd/groups containing one "
++     "key value pair per line"},
+ 
+     {"volume log <VOLNAME> rotate [BRICK]", cli_cmd_log_rotate_cbk,
+      "rotate the log file for corresponding volume/brick"},
+-- 
+1.8.3.1
+

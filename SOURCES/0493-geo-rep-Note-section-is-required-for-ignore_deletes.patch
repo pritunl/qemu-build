@@ -1,0 +1,283 @@
+From 03de45e5fb1c8aa5369848ed9e52abd1365e1d21 Mon Sep 17 00:00:00 2001
+From: Shwetha K Acharya <sacharya@redhat.com>
+Date: Wed, 31 Jul 2019 11:34:19 +0530
+Subject: [PATCH 493/511] geo-rep: Note section is required for ignore_deletes
+
+There exists a window of 15 sec, where the deletes are picked up
+by history crawl when the ignore_deletes is set to true.
+And it eventually deletes the file/s from slave which is/are not
+supposed to be deleted. Though it is working as per design, a
+note regarding this is needed.
+
+Added a warning message indicating the same.
+Also logged info when the worker restarts after ignore-deletes
+option set.
+
+>fixes: bz#1708603
+>Change-Id: I103be882fac18b4cef935efa355f5037a396f7c1
+>Signed-off-by: Shwetha K Acharya <sacharya@redhat.com>
+Upstream patch: https://review.gluster.org/c/glusterfs/+/22702
+
+BUG: 1224906
+Change-Id: I103be882fac18b4cef935efa355f5037a396f7c1
+Signed-off-by: srijan-sivakumar <ssivakum@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/220757
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ cli/src/cli-cmd-parser.c             | 45 ++++++++++++++++++++------
+ cli/src/cli-cmd-volume.c             | 20 ++++++++----
+ cli/src/cli.h                        |  3 +-
+ geo-replication/syncdaemon/gsyncd.py |  2 +-
+ geo-replication/syncdaemon/master.py |  6 ++++
+ tests/00-geo-rep/bug-1708603.t       | 63 ++++++++++++++++++++++++++++++++++++
+ 6 files changed, 120 insertions(+), 19 deletions(-)
+ create mode 100644 tests/00-geo-rep/bug-1708603.t
+
+diff --git a/cli/src/cli-cmd-parser.c b/cli/src/cli-cmd-parser.c
+index 5fd05f4..34f17c9 100644
+--- a/cli/src/cli-cmd-parser.c
++++ b/cli/src/cli-cmd-parser.c
+@@ -2901,7 +2901,8 @@ out:
+ }
+ 
+ int32_t
+-cli_cmd_gsync_set_parse(const char **words, int wordcount, dict_t **options)
++cli_cmd_gsync_set_parse(struct cli_state *state, const char **words,
++                        int wordcount, dict_t **options, char **errstr)
+ {
+     int32_t ret = -1;
+     dict_t *dict = NULL;
+@@ -2918,6 +2919,8 @@ cli_cmd_gsync_set_parse(const char **words, int wordcount, dict_t **options)
+     char *save_ptr = NULL;
+     char *slave_temp = NULL;
+     char *token = NULL;
++    gf_answer_t answer = GF_ANSWER_NO;
++    const char *question = NULL;
+ 
+     GF_ASSERT(words);
+     GF_ASSERT(options);
+@@ -2990,8 +2993,10 @@ cli_cmd_gsync_set_parse(const char **words, int wordcount, dict_t **options)
+ 
+     if (masteri && gsyncd_url_check(words[masteri]))
+         goto out;
+-    if (slavei && !glob && !gsyncd_url_check(words[slavei]))
++    if (slavei && !glob && !gsyncd_url_check(words[slavei])) {
++        gf_asprintf(errstr, "Invalid slave url: %s", words[slavei]);
+         goto out;
++    }
+ 
+     w = str_getunamb(words[cmdi], opwords);
+     if (!w)
+@@ -3101,16 +3106,36 @@ cli_cmd_gsync_set_parse(const char **words, int wordcount, dict_t **options)
+     }
+     if (!ret)
+         ret = dict_set_int32(dict, "type", type);
+-    if (!ret && type == GF_GSYNC_OPTION_TYPE_CONFIG)
++    if (!ret && type == GF_GSYNC_OPTION_TYPE_CONFIG) {
++        if (!strcmp((char *)words[wordcount - 2], "ignore-deletes") &&
++            !strcmp((char *)words[wordcount - 1], "true")) {
++            question =
++                "There exists ~15 seconds delay for the option to take"
++                " effect from stime of the corresponding brick. Please"
++                " check the log for the time, the option is effective."
++                " Proceed";
++
++            answer = cli_cmd_get_confirmation(state, question);
++
++            if (GF_ANSWER_NO == answer) {
++                gf_log("cli", GF_LOG_INFO,
++                       "Operation "
++                       "cancelled, exiting");
++                *errstr = gf_strdup("Aborted by user.");
++                ret = -1;
++                goto out;
++            }
++        }
++
+         ret = config_parse(words, wordcount, dict, cmdi, glob);
++    }
+ 
+ out:
+     if (slave_temp)
+         GF_FREE(slave_temp);
+-    if (ret) {
+-        if (dict)
+-            dict_unref(dict);
+-    } else
++    if (ret && dict)
++        dict_unref(dict);
++    else
+         *options = dict;
+ 
+     return ret;
+@@ -5659,9 +5684,9 @@ cli_cmd_bitrot_parse(const char **words, int wordcount, dict_t **options)
+     int32_t ret = -1;
+     char *w = NULL;
+     char *volname = NULL;
+-    char *opwords[] = {
+-        "enable",       "disable", "scrub-throttle", "scrub-frequency", "scrub",
+-        "signing-time", "signer-threads", NULL};
++    char *opwords[] = {"enable",          "disable", "scrub-throttle",
++                       "scrub-frequency", "scrub",   "signing-time",
++                       "signer-threads",  NULL};
+     char *scrub_throt_values[] = {"lazy", "normal", "aggressive", NULL};
+     char *scrub_freq_values[] = {"hourly",  "daily",  "weekly", "biweekly",
+                                  "monthly", "minute", NULL};
+diff --git a/cli/src/cli-cmd-volume.c b/cli/src/cli-cmd-volume.c
+index 72504ca..6f5bf8b 100644
+--- a/cli/src/cli-cmd-volume.c
++++ b/cli/src/cli-cmd-volume.c
+@@ -2457,6 +2457,7 @@ cli_cmd_volume_gsync_set_cbk(struct cli_state *state, struct cli_cmd_word *word,
+     rpc_clnt_procedure_t *proc = NULL;
+     call_frame_t *frame = NULL;
+     cli_local_t *local = NULL;
++    char *errstr = NULL;
+ #if (USE_EVENTS)
+     int ret1 = -1;
+     int cmd_type = -1;
+@@ -2468,16 +2469,21 @@ cli_cmd_volume_gsync_set_cbk(struct cli_state *state, struct cli_cmd_word *word,
+ 
+     proc = &cli_rpc_prog->proctable[GLUSTER_CLI_GSYNC_SET];
+ 
+-    frame = create_frame(THIS, THIS->ctx->pool);
+-    if (frame == NULL) {
+-        ret = -1;
++    ret = cli_cmd_gsync_set_parse(state, words, wordcount, &options, &errstr);
++    if (ret) {
++        if (errstr) {
++            cli_err("%s", errstr);
++            GF_FREE(errstr);
++        } else {
++            cli_usage_out(word->pattern);
++        }
++        parse_err = 1;
+         goto out;
+     }
+ 
+-    ret = cli_cmd_gsync_set_parse(words, wordcount, &options);
+-    if (ret) {
+-        cli_usage_out(word->pattern);
+-        parse_err = 1;
++    frame = create_frame(THIS, THIS->ctx->pool);
++    if (frame == NULL) {
++        ret = -1;
+         goto out;
+     }
+ 
+diff --git a/cli/src/cli.h b/cli/src/cli.h
+index c30ae9c..7b4f446 100644
+--- a/cli/src/cli.h
++++ b/cli/src/cli.h
+@@ -269,7 +269,8 @@ int32_t
+ cli_cmd_volume_reset_parse(const char **words, int wordcount, dict_t **opt);
+ 
+ int32_t
+-cli_cmd_gsync_set_parse(const char **words, int wordcount, dict_t **opt);
++cli_cmd_gsync_set_parse(struct cli_state *state, const char **words,
++                        int wordcount, dict_t **opt, char **errstr);
+ 
+ int32_t
+ cli_cmd_quota_parse(const char **words, int wordcount, dict_t **opt);
+diff --git a/geo-replication/syncdaemon/gsyncd.py b/geo-replication/syncdaemon/gsyncd.py
+index 8940384..215c62d 100644
+--- a/geo-replication/syncdaemon/gsyncd.py
++++ b/geo-replication/syncdaemon/gsyncd.py
+@@ -315,7 +315,7 @@ def main():
+ 
+     # Log message for loaded config file
+     if config_file is not None:
+-        logging.info(lf("Using session config file", path=config_file))
++        logging.debug(lf("Using session config file", path=config_file))
+ 
+     set_term_handler()
+     excont = FreeObject(exval=0)
+diff --git a/geo-replication/syncdaemon/master.py b/geo-replication/syncdaemon/master.py
+index 08e98f8..98637e7 100644
+--- a/geo-replication/syncdaemon/master.py
++++ b/geo-replication/syncdaemon/master.py
+@@ -1549,6 +1549,12 @@ class GMasterChangeloghistoryMixin(GMasterChangelogMixin):
+         data_stime = self.get_data_stime()
+ 
+         end_time = int(time.time())
++
++        #as start of historical crawl marks Geo-rep worker restart
++        if gconf.get("ignore-deletes"):
++            logging.info(lf('ignore-deletes config option is set',
++                         stime=data_stime))
++
+         logging.info(lf('starting history crawl',
+                         turns=self.history_turns,
+                         stime=data_stime,
+diff --git a/tests/00-geo-rep/bug-1708603.t b/tests/00-geo-rep/bug-1708603.t
+new file mode 100644
+index 0000000..26913f1
+--- /dev/null
++++ b/tests/00-geo-rep/bug-1708603.t
+@@ -0,0 +1,63 @@
++#!/bin/bash
++
++. $(dirname $0)/../include.rc
++. $(dirname $0)/../volume.rc
++. $(dirname $0)/../geo-rep.rc
++. $(dirname $0)/../env.rc
++
++SCRIPT_TIMEOUT=300
++
++##Cleanup and start glusterd
++cleanup;
++TEST glusterd;
++TEST pidof glusterd
++
++
++##Variables
++GEOREP_CLI="gluster volume geo-replication"
++master=$GMV0
++SH0="127.0.0.1"
++slave=${SH0}::${GSV0}
++num_active=2
++num_passive=2
++master_mnt=$M0
++slave_mnt=$M1
++
++############################################################
++#SETUP VOLUMES AND GEO-REPLICATION
++############################################################
++
++##create_and_start_master_volume
++TEST $CLI volume create $GMV0 replica 2 $H0:$B0/${GMV0}{1,2,3,4};
++TEST $CLI volume start $GMV0
++
++##create_and_start_slave_volume
++TEST $CLI volume create $GSV0 replica 2 $H0:$B0/${GSV0}{1,2,3,4};
++TEST $CLI volume start $GSV0
++
++##Mount master
++TEST glusterfs -s $H0 --volfile-id $GMV0 $M0
++
++##Mount slave
++TEST glusterfs -s $H0 --volfile-id $GSV0 $M1
++
++#Create geo-rep session
++TEST create_georep_session $master $slave
++
++echo n | $GEOREP_CLI $master $slave config ignore-deletes true >/dev/null 2>&1
++EXPECT "false" echo $($GEOREP_CLI $master $slave config ignore-deletes)
++echo y | $GEOREP_CLI $master $slave config ignore-deletes true
++EXPECT "true" echo $($GEOREP_CLI $master $slave config ignore-deletes)
++
++#Stop Geo-rep
++TEST $GEOREP_CLI $master $slave stop
++
++#Delete Geo-rep
++TEST $GEOREP_CLI $master $slave delete
++
++#Cleanup authorized keys
++sed -i '/^command=.*SSH_ORIGINAL_COMMAND#.*/d' ~/.ssh/authorized_keys
++sed -i '/^command=.*gsyncd.*/d' ~/.ssh/authorized_keys
++
++cleanup;
++#G_TESTDEF_TEST_STATUS_NETBSD7=BAD_TEST,BUG=000000
+-- 
+1.8.3.1
+

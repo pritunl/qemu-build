@@ -1,0 +1,49 @@
+From 955fea10809861aa9b3da85d386c2cc92b319cdb Mon Sep 17 00:00:00 2001
+From: Barak Sason Rofman <bsasonro@redhat.com>
+Date: Thu, 7 May 2020 18:57:37 +0300
+Subject: [PATCH 372/375] posix - fix seek functionality
+
+A wrong pointer check causes the offset returned by seek to be always
+wrong
+
+backport of https://review.gluster.org/#/c/glusterfs/+/24412/
+>fixes: #1228
+>Change-Id: Iac4c6a163175617ac4f14544fc6b7c6fb4041cd6
+>Signed-off-by: Barak Sason Rofman <bsasonro@redhat.com>
+
+BUG: 1833017
+Change-Id: Iac4c6a163175617ac4f14544fc6b7c6fb4041cd6
+Signed-off-by: Barak Sason Rofman <bsasonro@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/199761
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/syncop.c | 11 ++++++-----
+ 1 file changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/libglusterfs/src/syncop.c b/libglusterfs/src/syncop.c
+index 0de53c6..693970f 100644
+--- a/libglusterfs/src/syncop.c
++++ b/libglusterfs/src/syncop.c
+@@ -2881,12 +2881,13 @@ syncop_seek(xlator_t *subvol, fd_t *fd, off_t offset, gf_seek_what_t what,
+     SYNCOP(subvol, (&args), syncop_seek_cbk, subvol->fops->seek, fd, offset,
+            what, xdata_in);
+ 
+-    if (*off)
+-        *off = args.offset;
+-
+-    if (args.op_ret == -1)
++    if (args.op_ret < 0) {
+         return -args.op_errno;
+-    return args.op_ret;
++    } else {
++        if (off)
++            *off = args.offset;
++        return args.op_ret;
++    }
+ }
+ 
+ int
+-- 
+1.8.3.1
+

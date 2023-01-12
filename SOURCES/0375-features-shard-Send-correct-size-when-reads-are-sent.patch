@@ -1,0 +1,75 @@
+From ac5b1b38e705bd0e4c00cc50580a71dfaa4d3b5f Mon Sep 17 00:00:00 2001
+From: Krutika Dhananjay <kdhananj@redhat.com>
+Date: Wed, 7 Aug 2019 12:12:43 +0530
+Subject: [PATCH 375/375] features/shard: Send correct size when reads are sent
+ beyond file size
+
+Backport of:
+> https://review.gluster.org/c/glusterfs/+/23175
+> Change-Id: I0cebaaf55c09eb1fb77a274268ff564e871b743b
+> fixes bz#1738419
+> Signed-off-by: Krutika Dhananjay <kdhananj@redhat.com>
+
+Change-Id: I0cebaaf55c09eb1fb77a274268ff564e871b743b
+BUG: 1802013
+Signed-off-by: Krutika Dhananjay <kdhananj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/199570
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/shard/bug-1738419.t     | 29 +++++++++++++++++++++++++++++
+ xlators/features/shard/src/shard.c |  2 ++
+ 2 files changed, 31 insertions(+)
+ create mode 100644 tests/bugs/shard/bug-1738419.t
+
+diff --git a/tests/bugs/shard/bug-1738419.t b/tests/bugs/shard/bug-1738419.t
+new file mode 100644
+index 0000000..8d0a31d
+--- /dev/null
++++ b/tests/bugs/shard/bug-1738419.t
+@@ -0,0 +1,29 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++
++cleanup
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 replica 3 $H0:$B0/${V0}{0,1,2}
++TEST $CLI volume set $V0 features.shard on
++TEST $CLI volume set $V0 network.remote-dio off
++TEST $CLI volume set $V0 performance.io-cache off
++TEST $CLI volume set $V0 performance.quick-read off
++TEST $CLI volume set $V0 performance.read-ahead off
++TEST $CLI volume set $V0 performance.strict-o-direct on
++TEST $CLI volume start $V0
++
++TEST $GFS --volfile-id=$V0 --volfile-server=$H0 $M0
++
++TEST dd if=/dev/zero of=$M0/metadata bs=501 count=1
++
++EXPECT "501" echo $("dd" if=$M0/metadata bs=4096 count=1 of=/dev/null iflag=direct 2>&1 | awk '/bytes/ {print $1}')
++
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
++TEST $CLI volume stop $V0
++TEST $CLI volume delete $V0
++
++cleanup
+diff --git a/xlators/features/shard/src/shard.c b/xlators/features/shard/src/shard.c
+index b224abd..9ed597b 100644
+--- a/xlators/features/shard/src/shard.c
++++ b/xlators/features/shard/src/shard.c
+@@ -4433,6 +4433,8 @@ out:
+       if (xdata)
+         local->xattr_rsp = dict_ref(xdata);
+       vec.iov_base = local->iobuf->ptr;
++      if (local->offset + local->req_size > local->prebuf.ia_size)
++          local->total_size = local->prebuf.ia_size - local->offset;
+       vec.iov_len = local->total_size;
+       local->op_ret = local->total_size;
+       SHARD_STACK_UNWIND(readv, frame, local->op_ret, local->op_errno, &vec, 1,
+-- 
+1.8.3.1
+

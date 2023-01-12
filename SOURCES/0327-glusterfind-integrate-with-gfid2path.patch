@@ -1,0 +1,93 @@
+From f89242132dc4756c827113154cc6ad18ad6bde88 Mon Sep 17 00:00:00 2001
+From: Milind Changire <mchangir@redhat.com>
+Date: Tue, 19 Feb 2019 12:49:12 +0530
+Subject: [PATCH 327/335] glusterfind: integrate with gfid2path
+
+Integration with gfid2path helps avoid file-system crawl and saves
+precious time. Extended attributes starting with "trusted.gfid2path."
+are read and the <PGFID>/<BN> values are extracted and the <PGFID> is
+iteratively resolved from the brick backend to arrive at the full path.
+
+>Change-Id: I593b02880e3413b77bfceed4a36b00d401f03bc0
+>fixes: #529
+>Signed-off-by: Milind Changire <mchangir@redhat.com>
+>Signed-off-by: Shwetha K Acharya <sacharya@redhat.com>
+
+backport of https://review.gluster.org/#/c/glusterfs/+/22225/
+BUG: 1599802
+Change-Id: I593b02880e3413b77bfceed4a36b00d401f03bc0
+Signed-off-by: Milind Changire <mchangir@redhat.com>
+Signed-off-by: Shwetha K Acharya <sacharya@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/185706
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tools/glusterfind/src/changelog.py | 45 ++++++++++++++++++++++++++++++++++----
+ 1 file changed, 41 insertions(+), 4 deletions(-)
+
+diff --git a/tools/glusterfind/src/changelog.py b/tools/glusterfind/src/changelog.py
+index ef982db..d8f97e0 100644
+--- a/tools/glusterfind/src/changelog.py
++++ b/tools/glusterfind/src/changelog.py
+@@ -114,6 +114,43 @@ def populate_pgfid_and_inodegfid(brick, changelog_data):
+                 continue
+ 
+ 
++def enum_hard_links_using_gfid2path(brick, gfid, args):
++    hardlinks = []
++    p = os.path.join(brick, ".glusterfs", gfid[0:2], gfid[2:4], gfid)
++    if not os.path.isdir(p):
++        # we have a symlink or a normal file
++        try:
++            file_xattrs = xattr.list(p)
++            for x in file_xattrs:
++                if x.startswith("trusted.gfid2path."):
++                    # get the value for the xattr i.e. <PGFID>/<BN>
++                    v = xattr.getxattr(p, x)
++                    pgfid, bn = v.split(os.sep)
++                    try:
++                        path = symlink_gfid_to_path(brick, pgfid)
++                        fullpath = os.path.join(path, bn)
++                        fullpath = output_path_prepare(fullpath, args)
++                        hardlinks.append(fullpath)
++                    except (IOError, OSError) as e:
++                        logger.warn("Error converting to path: %s" % e)
++                        continue
++        except (IOError, OSError):
++            pass
++    return hardlinks
++
++
++def gfid_to_all_paths_using_gfid2path(brick, changelog_data, args):
++    path = ""
++    for row in changelog_data.gfidpath_get({"path1": "", "type": "MODIFY"}):
++        gfid = row[3].strip()
++        logger.debug("Processing gfid %s" % gfid)
++        hardlinks = enum_hard_links_using_gfid2path(brick, gfid, args)
++
++        path = ",".join(hardlinks)
++
++        changelog_data.gfidpath_update({"path1": path}, {"gfid": gfid})
++
++
+ def gfid_to_path_using_pgfid(brick, changelog_data, args):
+     """
+     For all the pgfids collected, Converts to Path and
+@@ -314,11 +351,11 @@ def get_changes(brick, hash_dir, log_file, start, end, args):
+     changelog_data.commit()
+     logger.info("[2/4] Finished 'pgfid to path' conversions.")
+ 
+-    # Convert all GFIDs for which no other additional details available
+-    logger.info("[3/4] Starting 'gfid to path using pgfid' conversions ...")
+-    gfid_to_path_using_pgfid(brick, changelog_data, args)
++    # Convert all gfids recorded for data and metadata to all hardlink paths
++    logger.info("[3/4] Starting 'gfid2path' conversions ...")
++    gfid_to_all_paths_using_gfid2path(brick, changelog_data, args)
+     changelog_data.commit()
+-    logger.info("[3/4] Finished 'gfid to path using pgfid' conversions.")
++    logger.info("[3/4] Finished 'gfid2path' conversions.")
+ 
+     # If some GFIDs fail to get converted from previous step,
+     # convert using find
+-- 
+1.8.3.1
+

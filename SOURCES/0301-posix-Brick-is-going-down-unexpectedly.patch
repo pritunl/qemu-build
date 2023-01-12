@@ -1,0 +1,61 @@
+From 913a0dc8f1eaa2fb18a6ebd6fcf66f46b48039f1 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Wed, 18 Sep 2019 19:11:33 +0530
+Subject: [PATCH 301/302] posix: Brick is going down unexpectedly
+
+Problem: In brick_mux environment, while multiple volumes are
+         created (1-1000) sometimes brick is going down due to
+         health_check thread failure
+
+Solution: Ignore EAGAIN error in health_check thread code to
+          avoid the issue
+
+> Change-Id: Id44c59f8e071a363a14d09d188813a6633855213
+> Fixes: bz#1751907
+> Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+> (Cherry picked from commit c4d926900dc36f71c04b3f65ceca5150ce0e8c81)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/23437/)
+
+Change-Id: Id44c59f8e071a363a14d09d188813a6633855213
+BUG: 1731826
+Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/182106
+Tested-by: Mohit Agrawal <moagrawa@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/storage/posix/src/posix-helpers.c | 14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/xlators/storage/posix/src/posix-helpers.c b/xlators/storage/posix/src/posix-helpers.c
+index 6a1a35c..35dd3b6 100644
+--- a/xlators/storage/posix/src/posix-helpers.c
++++ b/xlators/storage/posix/src/posix-helpers.c
+@@ -2108,14 +2108,20 @@ out:
+     if (fd != -1) {
+         sys_close(fd);
+     }
++
+     if (ret && file_path[0]) {
+         gf_msg(this->name, GF_LOG_WARNING, errno, P_MSG_HEALTHCHECK_FAILED,
+                "%s() on %s returned ret is %d error is %s", op, file_path, ret,
+                ret != -1 ? strerror(ret) : strerror(op_errno));
+-        gf_event(EVENT_POSIX_HEALTH_CHECK_FAILED,
+-                 "op=%s;path=%s;error=%s;brick=%s:%s timeout is %d", op,
+-                 file_path, strerror(op_errno), priv->hostname, priv->base_path,
+-                 timeout);
++
++        if ((op_errno == EAGAIN) || (ret == EAGAIN)) {
++            ret = 0;
++        } else {
++            gf_event(EVENT_POSIX_HEALTH_CHECK_FAILED,
++                     "op=%s;path=%s;error=%s;brick=%s:%s timeout is %d", op,
++                     file_path, strerror(op_errno), priv->hostname,
++                     priv->base_path, timeout);
++        }
+     }
+     return ret;
+ }
+-- 
+1.8.3.1
+

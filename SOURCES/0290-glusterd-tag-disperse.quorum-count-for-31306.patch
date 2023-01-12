@@ -1,0 +1,84 @@
+From 312da653ac80b537af06139f8d83a63180c72461 Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Tue, 10 Sep 2019 14:04:17 +0530
+Subject: [PATCH 290/297] glusterd: tag disperse.quorum-count for 31306
+
+In upstream disperse.quorum-count is makred for release-8
+latest new op-version is 31306.
+
+Label: DOWNSTREAM ONLY
+
+fixes: bz#1748688
+Change-Id: I88fdbd56ce3b8475b5ec670659adaa9d11c01d97
+Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/180675
+Reviewed-by: Ashish Pandey <aspandey@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/glusterfs/globals.h            | 12 ++++++------
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c |  2 +-
+ 2 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/libglusterfs/src/glusterfs/globals.h b/libglusterfs/src/glusterfs/globals.h
+index bdc8b3d..e218285 100644
+--- a/libglusterfs/src/glusterfs/globals.h
++++ b/libglusterfs/src/glusterfs/globals.h
+@@ -50,19 +50,19 @@
+     1 /* MIN is the fresh start op-version, mostly                             \
+          should not change */
+ #define GD_OP_VERSION_MAX                                                      \
+-    GD_OP_VERSION_8_0 /* MAX VERSION is the maximum                            \
++    GD_OP_VERSION_7_0 /* MAX VERSION is the maximum                            \
+                          count in VME table, should                            \
+                          keep changing with                                    \
+                          introduction of newer                                 \
+                          versions */
+ 
+-#define GD_OP_VERSION_RHS_3_0    30000 /* Op-Version of RHS 3.0 */
++#define GD_OP_VERSION_RHS_3_0 30000 /* Op-Version of RHS 3.0 */
+ 
+ #define GD_OP_VER_PERSISTENT_AFR_XATTRS GD_OP_VERSION_RHS_3_0
+ 
+-#define GD_OP_VERSION_RHS_2_1_5  20105 /* RHS 2.1 update 5 */
++#define GD_OP_VERSION_RHS_2_1_5 20105 /* RHS 2.1 update 5 */
+ 
+-#define GD_OP_VERSION_RHS_3_0_4  30004 /* Op-Version of RHS 3.0.4 */
++#define GD_OP_VERSION_RHS_3_0_4 30004 /* Op-Version of RHS 3.0.4 */
+ 
+ #define GD_OP_VERSION_3_7_0 30700 /* Op-version for GlusterFS 3.7.0 */
+ 
+@@ -124,6 +124,8 @@
+ 
+ #define GD_OP_VERSION_3_13_5 31305 /* Op-version for GlusterFS 3.13.5 */
+ 
++#define GD_OP_VERSION_3_13_6 31306 /* Op-version for GlusterFS 3.13.6 */
++
+ #define GD_OP_VERSION_4_0_0 40000 /* Op-version for GlusterFS 4.0.0 */
+ 
+ #define GD_OP_VERSION_4_1_0 40100 /* Op-version for GlusterFS 4.1.0 */
+@@ -136,8 +138,6 @@
+ 
+ #define GD_OP_VERSION_7_0 70000 /* Op-version for GlusterFS 7.0 */
+ 
+-#define GD_OP_VERSION_8_0 80000 /* Op-version for GlusterFS 8.0 */
+-
+ #include "glusterfs/xlator.h"
+ #include "glusterfs/options.h"
+ 
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index 7ca47a6..16601a2 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -3702,7 +3702,7 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+     {.key = "disperse.quorum-count",
+      .voltype = "cluster/disperse",
+      .type = NO_DOC,
+-     .op_version = GD_OP_VERSION_8_0,
++     .op_version = GD_OP_VERSION_3_13_6,
+      .validate_fn = validate_disperse_quorum_count,
+      .description = "This option can be used to define how many successes on"
+                     "the bricks constitute a success to the application. This"
+-- 
+1.8.3.1
+

@@ -1,0 +1,52 @@
+From 73cef29731c0d7b8b4f3b880c032dc232b8fcc31 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawa@redhat.com>
+Date: Thu, 4 Jun 2020 16:06:44 +0530
+Subject: [PATCH 397/449] mgmt/brick-mux: Avoid sending two response when
+ attach is failed.
+
+We were sending two response back to glusterd when an attach is
+failed. One from the handler function glusterfs_handle_attach and
+another from rpcsvc_check_and_reply_error. It was causing problems
+like ref leaks, transport disconnect etc.
+
+> Change-Id: I3bb5b59959530760b568d52becb519499b3dcd2b
+> updates: bz#1785143
+> Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+> (Cherry pick from commit 42f484dcecd9942611396d9bd2ad3a39019b0e1f)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/23906/)
+
+Change-Id: I3bb5b59959530760b568d52becb519499b3dcd2b
+BUG: 1776901
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202346
+Reviewed-by: Sanju Rakonde <srakonde@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfsd/src/glusterfsd-mgmt.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/glusterfsd/src/glusterfsd-mgmt.c b/glusterfsd/src/glusterfsd-mgmt.c
+index 15acc10..61d1b21 100644
+--- a/glusterfsd/src/glusterfsd-mgmt.c
++++ b/glusterfsd/src/glusterfsd-mgmt.c
+@@ -954,7 +954,15 @@ glusterfs_handle_attach(rpcsvc_request_t *req)
+             ret = -1;
+         }
+ 
+-        glusterfs_translator_info_response_send(req, ret, NULL, NULL);
++        ret = glusterfs_translator_info_response_send(req, ret, NULL, NULL);
++        if (ret) {
++            /* Response sent back to glusterd, req is already destroyed. So
++             * resetting the ret to 0. Otherwise another response will be
++             * send from rpcsvc_check_and_reply_error. Which will lead to
++             * double resource leak.
++             */
++            ret = 0;
++        }
+ 
+     out:
+         UNLOCK(&ctx->volfile_lock);
+-- 
+1.8.3.1
+

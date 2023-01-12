@@ -1,0 +1,45 @@
+From 1df830953b9a09404f9ca6a0539172e9f23ecbf4 Mon Sep 17 00:00:00 2001
+From: Sunny Kumar <sunkumar@redhat.com>
+Date: Wed, 17 Apr 2019 15:13:12 +0530
+Subject: [PATCH 112/124] geo-rep : fix incorrectly formatted authorized_keys
+
+Problem :  While Geo-rep setup when creating an ssh authorized_keys
+           the geo-rep setup inserts an extra space before the "ssh-rsa" label.
+           This gets flagged by an enterprise customer's security scan as a
+           security violation.
+
+Solution: Remove extra space in GSYNCD_CMD & TAR_CMD.
+
+>Upstream patch: https://review.gluster.org/#/c/glusterfs/+/22246/
+>Change-Id: I956f938faef0e0883703bbc337b1dc2770e4a921
+>fixes: bz#1679401
+>Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+
+BUG: 1671862
+Change-Id: I194a2bddcf2ee9b8286b204f8c4da5c480a528b3
+Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/168144
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ geo-replication/src/peer_georep-sshkey.py.in | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/geo-replication/src/peer_georep-sshkey.py.in b/geo-replication/src/peer_georep-sshkey.py.in
+index 2196fd7..58696e9 100644
+--- a/geo-replication/src/peer_georep-sshkey.py.in
++++ b/geo-replication/src/peer_georep-sshkey.py.in
+@@ -30,8 +30,8 @@ from prettytable import PrettyTable
+ 
+ SECRET_PEM = "@GLUSTERD_WORKDIR@/geo-replication/secret.pem"
+ TAR_SSH_PEM = "@GLUSTERD_WORKDIR@/geo-replication/tar_ssh.pem"
+-GSYNCD_CMD = 'command="@GLUSTERFS_LIBEXECDIR@/gsyncd"  '
+-TAR_CMD = 'command="tar ${SSH_ORIGINAL_COMMAND#* }"  '
++GSYNCD_CMD = 'command="@GLUSTERFS_LIBEXECDIR@/gsyncd" '
++TAR_CMD = 'command="tar ${SSH_ORIGINAL_COMMAND#* }" '
+ COMMON_SECRET_FILE = "@GLUSTERD_WORKDIR@/geo-replication/common_secret.pem.pub"
+ 
+ 
+-- 
+1.8.3.1
+

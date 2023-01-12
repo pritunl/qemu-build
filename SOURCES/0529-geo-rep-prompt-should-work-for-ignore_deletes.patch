@@ -1,0 +1,75 @@
+From 1c7e96e73273b7891ea6ef0d768c2bf7ff5de7b0 Mon Sep 17 00:00:00 2001
+From: Shwetha K Acharya <sacharya@redhat.com>
+Date: Thu, 4 Feb 2021 16:29:39 +0530
+Subject: [PATCH 529/532] geo-rep: prompt should work for ignore_deletes
+
+The python cli is intelligent enough to parse both "-" and "_" alike:
+
+Example:
+geo-replication config updated successfully
+sync_job 4
+geo-replication config updated successfully
+gluster volume geo-replication primary 127.0.0.1::secondary config | grep sync_jobs
+sync_jobs:5
+
+Thus the prompt which appears after ignore-deletes true should
+work for both ignore-deletes and ignore_deletes.
+
+Label: DOWNSTREAM ONLY
+
+BUG: 1224906
+Change-Id: I89f854200a604d07d3ac6c374fe6d445ce9f22ca
+Signed-off-by: Shwetha K Acharya <sacharya@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/226599
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ cli/src/cli-cmd-parser.c       |  5 +++--
+ tests/00-geo-rep/bug-1708603.t | 12 ++++++++++--
+ 2 files changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/cli/src/cli-cmd-parser.c b/cli/src/cli-cmd-parser.c
+index 34f17c9..dda8979 100644
+--- a/cli/src/cli-cmd-parser.c
++++ b/cli/src/cli-cmd-parser.c
+@@ -3107,8 +3107,9 @@ cli_cmd_gsync_set_parse(struct cli_state *state, const char **words,
+     if (!ret)
+         ret = dict_set_int32(dict, "type", type);
+     if (!ret && type == GF_GSYNC_OPTION_TYPE_CONFIG) {
+-        if (!strcmp((char *)words[wordcount - 2], "ignore-deletes") &&
+-            !strcmp((char *)words[wordcount - 1], "true")) {
++        if ((((!strcmp((char *)words[wordcount - 2], "ignore_deletes")) ||
++              (!strcmp((char *)words[wordcount - 2], "ignore-deletes")))) &&
++            ((!strcmp((char *)words[wordcount - 1], "true")))) {
+             question =
+                 "There exists ~15 seconds delay for the option to take"
+                 " effect from stime of the corresponding brick. Please"
+diff --git a/tests/00-geo-rep/bug-1708603.t b/tests/00-geo-rep/bug-1708603.t
+index 26913f1..edafb48 100644
+--- a/tests/00-geo-rep/bug-1708603.t
++++ b/tests/00-geo-rep/bug-1708603.t
+@@ -44,11 +44,19 @@ TEST glusterfs -s $H0 --volfile-id $GSV0 $M1
+ #Create geo-rep session
+ TEST create_georep_session $master $slave
+ 
+-echo n | $GEOREP_CLI $master $slave config ignore-deletes true >/dev/null 2>&1
+-EXPECT "false" echo $($GEOREP_CLI $master $slave config ignore-deletes)
++echo n | $GEOREP_CLI $master $slave config ignore_deletes true >/dev/null 2>&1
++EXPECT "false" echo $($GEOREP_CLI $master $slave config ignore_deletes)
++
++echo y | $GEOREP_CLI $master $slave config ignore_deletes true
++EXPECT "true" echo $($GEOREP_CLI $master $slave config ignore_deletes)
++
++$GEOREP_CLI $master $slave config ignore_deletes false
+ echo y | $GEOREP_CLI $master $slave config ignore-deletes true
+ EXPECT "true" echo $($GEOREP_CLI $master $slave config ignore-deletes)
+ 
++echo n | $GEOREP_CLI $master $slave config ignore-deletes true >/dev/null 2>&1
++EXPECT "true" echo $($GEOREP_CLI $master $slave config ignore-deletes)
++
+ #Stop Geo-rep
+ TEST $GEOREP_CLI $master $slave stop
+ 
+-- 
+1.8.3.1
+

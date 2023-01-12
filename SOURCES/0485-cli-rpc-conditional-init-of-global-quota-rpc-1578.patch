@@ -1,0 +1,87 @@
+From 2e6a5e504e66bc95208420e4882e453a53ac9ea2 Mon Sep 17 00:00:00 2001
+From: schaffung <ssivakum@redhat.com>
+Date: Mon, 2 Nov 2020 11:18:01 +0530
+Subject: [PATCH 485/511] cli-rpc: conditional init of global quota rpc (#1578)
+
+Issue: It is seem that the initialization of rpc to
+connect with quotad is done in every glusterfs cli command,
+irrespective of whether the quota feature is enabled or disabled.
+This seems to be an overkill.
+
+Code change: The file /var/run/quotad/quotad.pid is present
+signals that quotad is enabled. Hence we can put a conditional
+check for seeing when this file exists and if it doesn't we
+just skip over the initialization of the global quotad rpc.
+
+This will go on to reduce the extra rpc calls and operations
+being performed in the kernel space.
+
+>Fixes: #1577
+>Change-Id: Icb69d35330f76ce95626f59af75a12726eb620ff
+>Signed-off-by: srijan-sivakumar <ssivakumar@redhat.com>
+Upstream Patch : https://github.com/gluster/glusterfs/pull/1578
+
+BUG: 1885966
+Change-Id: Icb69d35330f76ce95626f59af75a12726eb620ff
+Signed-off-by: Srijan Sivakumar <ssivakum@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/220371
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ cli/src/cli.c | 18 +++++++++++++-----
+ cli/src/cli.h |  3 +++
+ 2 files changed, 16 insertions(+), 5 deletions(-)
+
+diff --git a/cli/src/cli.c b/cli/src/cli.c
+index 99a16a0..a76c5a2 100644
+--- a/cli/src/cli.c
++++ b/cli/src/cli.c
+@@ -64,8 +64,7 @@
+ extern int connected;
+ /* using argp for command line parsing */
+ 
+-const char *argp_program_version =
+-    PACKAGE_NAME" "PACKAGE_VERSION;
++const char *argp_program_version = PACKAGE_NAME " " PACKAGE_VERSION;
+ const char *argp_program_bug_address = "<" PACKAGE_BUGREPORT ">";
+ 
+ struct rpc_clnt *global_quotad_rpc;
+@@ -840,9 +839,18 @@ main(int argc, char *argv[])
+     if (!global_rpc)
+         goto out;
+ 
+-    global_quotad_rpc = cli_quotad_clnt_rpc_init();
+-    if (!global_quotad_rpc)
+-        goto out;
++    /*
++     * Now, one doesn't need to initialize global rpc
++     * for quota unless and until quota is enabled.
++     * So why not put a check to save all the rpc related
++     * ops here.
++     */
++    ret = sys_access(QUOTAD_PID_PATH, F_OK);
++    if (!ret) {
++        global_quotad_rpc = cli_quotad_clnt_rpc_init();
++        if (!global_quotad_rpc)
++            goto out;
++    }
+ 
+     ret = cli_cmds_register(&state);
+     if (ret)
+diff --git a/cli/src/cli.h b/cli/src/cli.h
+index 37e4d9d..c30ae9c 100644
+--- a/cli/src/cli.h
++++ b/cli/src/cli.h
+@@ -30,6 +30,9 @@
+ #define CLI_TAB_LENGTH 8
+ #define CLI_BRICK_STATUS_LINE_LEN 78
+ 
++// Quotad pid path.
++#define QUOTAD_PID_PATH "/var/run/gluster/quotad/quotad.pid"
++
+ /* Geo-rep command positional arguments' index  */
+ #define GEO_REP_CMD_INDEX 1
+ #define GEO_REP_CMD_CONFIG_INDEX 4
+-- 
+1.8.3.1
+

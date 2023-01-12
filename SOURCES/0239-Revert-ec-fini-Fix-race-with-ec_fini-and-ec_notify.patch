@@ -1,0 +1,128 @@
+From ad40c0783e84e5e54a83aeb20a52f720cc881b0c Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Thu, 11 Jul 2019 12:46:22 +0530
+Subject: [PATCH 239/255] Revert "ec/fini: Fix race with ec_fini and ec_notify"
+
+This reverts commit 998d9b8b5e271f407e1c654c34f45f0db36abc71.
+
+BUG: 1471742
+Change-Id: Ifccb8a22d9ef96c22b32dcb4b82bf4d21cf85484
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/175948
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/glusterfs/xlator.h |  3 ---
+ libglusterfs/src/libglusterfs.sym   |  1 -
+ libglusterfs/src/xlator.c           | 21 ---------------------
+ xlators/cluster/ec/src/ec-heal.c    |  4 ----
+ xlators/cluster/ec/src/ec-heald.c   |  6 ------
+ xlators/cluster/ec/src/ec.c         |  3 ---
+ 6 files changed, 38 deletions(-)
+
+diff --git a/libglusterfs/src/glusterfs/xlator.h b/libglusterfs/src/glusterfs/xlator.h
+index 09e463e..8998976 100644
+--- a/libglusterfs/src/glusterfs/xlator.h
++++ b/libglusterfs/src/glusterfs/xlator.h
+@@ -1092,7 +1092,4 @@ gluster_graph_take_reference(xlator_t *tree);
+ 
+ gf_boolean_t
+ mgmt_is_multiplexed_daemon(char *name);
+-
+-gf_boolean_t
+-xlator_is_cleanup_starting(xlator_t *this);
+ #endif /* _XLATOR_H */
+diff --git a/libglusterfs/src/libglusterfs.sym b/libglusterfs/src/libglusterfs.sym
+index 86215d2..05f93b4 100644
+--- a/libglusterfs/src/libglusterfs.sym
++++ b/libglusterfs/src/libglusterfs.sym
+@@ -1160,4 +1160,3 @@ glusterfs_process_svc_attach_volfp
+ glusterfs_mux_volfile_reconfigure
+ glusterfs_process_svc_detach
+ mgmt_is_multiplexed_daemon
+-xlator_is_cleanup_starting
+diff --git a/libglusterfs/src/xlator.c b/libglusterfs/src/xlator.c
+index fbfbbe2..022c3ed 100644
+--- a/libglusterfs/src/xlator.c
++++ b/libglusterfs/src/xlator.c
+@@ -1486,24 +1486,3 @@ mgmt_is_multiplexed_daemon(char *name)
+     }
+     return _gf_false;
+ }
+-
+-gf_boolean_t
+-xlator_is_cleanup_starting(xlator_t *this)
+-{
+-    gf_boolean_t cleanup = _gf_false;
+-    glusterfs_graph_t *graph = NULL;
+-    xlator_t *xl = NULL;
+-
+-    if (!this)
+-        goto out;
+-    graph = this->graph;
+-
+-    if (!graph)
+-        goto out;
+-
+-    xl = graph->first;
+-    if (xl && xl->cleanup_starting)
+-        cleanup = _gf_true;
+-out:
+-    return cleanup;
+-}
+diff --git a/xlators/cluster/ec/src/ec-heal.c b/xlators/cluster/ec/src/ec-heal.c
+index 8844c29..2fa1f11 100644
+--- a/xlators/cluster/ec/src/ec-heal.c
++++ b/xlators/cluster/ec/src/ec-heal.c
+@@ -2855,10 +2855,6 @@ ec_replace_brick_heal_wrap(void *opaque)
+         itable = ec->xl->itable;
+     else
+         goto out;
+-
+-    if (xlator_is_cleanup_starting(ec->xl))
+-        goto out;
+-
+     ret = ec_replace_heal(ec, itable->root);
+ out:
+     return ret;
+diff --git a/xlators/cluster/ec/src/ec-heald.c b/xlators/cluster/ec/src/ec-heald.c
+index 91512d7..edf5e11 100644
+--- a/xlators/cluster/ec/src/ec-heald.c
++++ b/xlators/cluster/ec/src/ec-heald.c
+@@ -444,9 +444,6 @@ unlock:
+ int
+ ec_shd_full_healer_spawn(xlator_t *this, int subvol)
+ {
+-    if (xlator_is_cleanup_starting(this))
+-        return -1;
+-
+     return ec_shd_healer_spawn(this, NTH_FULL_HEALER(this, subvol),
+                                ec_shd_full_healer);
+ }
+@@ -454,9 +451,6 @@ ec_shd_full_healer_spawn(xlator_t *this, int subvol)
+ int
+ ec_shd_index_healer_spawn(xlator_t *this, int subvol)
+ {
+-    if (xlator_is_cleanup_starting(this))
+-        return -1;
+-
+     return ec_shd_healer_spawn(this, NTH_INDEX_HEALER(this, subvol),
+                                ec_shd_index_healer);
+ }
+diff --git a/xlators/cluster/ec/src/ec.c b/xlators/cluster/ec/src/ec.c
+index df5912c..264582a 100644
+--- a/xlators/cluster/ec/src/ec.c
++++ b/xlators/cluster/ec/src/ec.c
+@@ -486,9 +486,6 @@ ec_set_up_state(ec_t *ec, uintptr_t index_mask, uintptr_t new_state)
+ {
+     uintptr_t current_state = 0;
+ 
+-    if (xlator_is_cleanup_starting(ec->xl))
+-        return _gf_false;
+-
+     if ((ec->xl_notify & index_mask) == 0) {
+         ec->xl_notify |= index_mask;
+         ec->xl_notify_count++;
+-- 
+1.8.3.1
+

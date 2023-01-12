@@ -1,0 +1,38 @@
+From 9425fd5a49a17a8f91c13632ae055a6510b0b44c Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Fri, 17 May 2019 14:27:58 +0530
+Subject: [PATCH 435/449] glusterd: coverity fix
+
+CID: 1401345 - Unused value
+
+> upstream patch link: https://review.gluster.org/#/c/glusterfs/+/22737/
+> updates: bz#789278
+> Change-Id: I6b8f2611151ce0174042384b7632019c312ebae3
+> Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+
+BUG: 1787310
+Change-Id: I6b8f2611151ce0174042384b7632019c312ebae3
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202622
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-utils.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index 8b0fc9a..2eb2a76 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -3740,7 +3740,7 @@ glusterd_compare_friend_volume(dict_t *peer_data, int32_t count,
+          * deleting a volume, so we shouldn't be trying to create a
+          * fresh volume here which would lead to a stale entry
+          */
+-        if (stage_deleted == 0)
++        if (!ret && stage_deleted == 0)
+             *status = GLUSTERD_VOL_COMP_UPDATE_REQ;
+         ret = 0;
+         goto out;
+-- 
+1.8.3.1
+

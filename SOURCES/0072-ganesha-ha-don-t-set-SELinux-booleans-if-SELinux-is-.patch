@@ -1,0 +1,60 @@
+From c147bbec10fc72b85301ab6a7580f15713b8a974 Mon Sep 17 00:00:00 2001
+From: Ambarish <asoman@redhat.com>
+Date: Tue, 12 Sep 2017 18:34:29 +0530
+Subject: [PATCH 072/124] ganesha-ha: don't set SELinux booleans if SELinux is
+ disabled
+
+semanage commands inside ganesha-ha.sh script will fail if selinux is
+Disabled. This patch introduces a check if selinux is enabled or not,
+and subsequently run semange commands only on selinux enabled systems.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Ibee61cbb1d51a73e6c326b49bac5c7ce06feb310
+Signed-off-by: Ambarish <asoman@redhat.com>
+Reviewed-on: https://review.gluster.org/18264
+Reviewed-by: Niels de Vos <ndevos@redhat.com>
+Smoke: Gluster Build System <jenkins@build.gluster.org>
+Reviewed-by: Kaleb KEITHLEY <kkeithle@redhat.com>
+Reviewed-by: jiffin tony Thottan <jthottan@redhat.com>
+Reviewed-by: Daniel Gryniewicz <dang@redhat.com>
+CentOS-regression: Gluster Build System <jenkins@build.gluster.org>
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167157
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/ganesha/scripts/ganesha-ha.sh | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/extras/ganesha/scripts/ganesha-ha.sh b/extras/ganesha/scripts/ganesha-ha.sh
+index f4400af..e1d3ea0 100644
+--- a/extras/ganesha/scripts/ganesha-ha.sh
++++ b/extras/ganesha/scripts/ganesha-ha.sh
+@@ -985,7 +985,9 @@ main()
+         exit 0
+     fi
+ 
+-    semanage boolean -m gluster_use_execmem --on
++    if (selinuxenabled) ;then
++     semanage boolean -m gluster_use_execmem --on
++    fi
+ 
+     HA_CONFDIR=${1%/}; shift
+     local ha_conf=${HA_CONFDIR}/ganesha-ha.conf
+@@ -1133,8 +1135,9 @@ $HA_CONFDIR/ganesha-ha.conf
+ 
+     esac
+ 
+-    semanage boolean -m gluster_use_execmem --off
+-
++    if (selinuxenabled) ;then
++     semanage boolean -m gluster_use_execmem --off
++    fi
+ }
+ 
+ main $*
+-- 
+1.8.3.1
+

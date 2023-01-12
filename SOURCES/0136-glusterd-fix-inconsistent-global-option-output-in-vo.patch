@@ -1,0 +1,51 @@
+From c63346dab3e5da0605bf4ddaa314253f42892c9d Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Wed, 8 May 2019 12:13:59 +0530
+Subject: [PATCH 136/141] glusterd: fix inconsistent global option output in
+ volume get
+
+volume get all all | grep <key> & volume get <volname> all | grep <key>
+dumps two different output value for cluster.brick-multiplex and
+cluster.server-quorum-ratio
+
+>upstream patch : https://review.gluster.org/#/c/glusterfs/+/22680/
+
+>Fixes: bz#1707700
+>Change-Id: Id131734e0502aa514b84768cf67fce3c22364eae
+>Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+
+BUG: 1706776
+Change-Id: Id131734e0502aa514b84768cf67fce3c22364eae
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/169948
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index e52de20..4b32fb6 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -2906,7 +2906,7 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+      .op_version = 1},
+     {.key = GLUSTERD_QUORUM_RATIO_KEY,
+      .voltype = "mgmt/glusterd",
+-     .value = "0",
++     .value = "51",
+      .op_version = 1},
+     /* changelog translator - global tunables */
+     {.key = "changelog.changelog",
+@@ -3547,7 +3547,7 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+     /* Brick multiplexing options */
+     {.key = GLUSTERD_BRICK_MULTIPLEX_KEY,
+      .voltype = "mgmt/glusterd",
+-     .value = "off",
++     .value = "disable",
+      .op_version = GD_OP_VERSION_3_10_0,
+      .validate_fn = validate_boolean,
+      .type = GLOBAL_DOC,
+-- 
+1.8.3.1
+

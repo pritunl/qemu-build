@@ -1,0 +1,66 @@
+From fbc7f0e5ac8c292b865a8e02ceed2efa101d145c Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Mon, 12 Mar 2018 19:47:11 +0530
+Subject: [PATCH 21/52] cli/glusterfsd: remove copyright information
+
+There's no point of dumping upstream copyright information in --version.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I3a10e30878698e1d53082936bbf22bca560a3896
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/132445
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Milind Changire <mchangir@redhat.com>
+---
+ cli/src/cli.c               | 11 +----------
+ glusterfsd/src/glusterfsd.c | 11 +----------
+ 2 files changed, 2 insertions(+), 20 deletions(-)
+
+diff --git a/cli/src/cli.c b/cli/src/cli.c
+index 84ce0f4..08f117e 100644
+--- a/cli/src/cli.c
++++ b/cli/src/cli.c
+@@ -65,16 +65,7 @@ extern int connected;
+ /* using argp for command line parsing */
+ 
+ const char *argp_program_version =
+-    "" PACKAGE_NAME " " PACKAGE_VERSION
+-    "\nRepository revision: " GLUSTERFS_REPOSITORY_REVISION
+-    "\n"
+-    "Copyright (c) 2006-2016 Red Hat, Inc. "
+-    "<https://www.gluster.org/>\n"
+-    "GlusterFS comes with ABSOLUTELY NO WARRANTY.\n"
+-    "It is licensed to you under your choice of the GNU Lesser\n"
+-    "General Public License, version 3 or any later version (LGPLv3\n"
+-    "or later), or the GNU General Public License, version 2 (GPLv2),\n"
+-    "in all cases as published by the Free Software Foundation.";
++    PACKAGE_NAME" "PACKAGE_VERSION;
+ const char *argp_program_bug_address = "<" PACKAGE_BUGREPORT ">";
+ 
+ struct rpc_clnt *global_quotad_rpc;
+diff --git a/glusterfsd/src/glusterfsd.c b/glusterfsd/src/glusterfsd.c
+index 5d46b3d..c983882 100644
+--- a/glusterfsd/src/glusterfsd.c
++++ b/glusterfsd/src/glusterfsd.c
+@@ -86,16 +86,7 @@ static char argp_doc[] =
+     "--volfile-server=SERVER [MOUNT-POINT]\n"
+     "--volfile=VOLFILE [MOUNT-POINT]";
+ const char *argp_program_version =
+-    "" PACKAGE_NAME " " PACKAGE_VERSION
+-    "\nRepository revision: " GLUSTERFS_REPOSITORY_REVISION
+-    "\n"
+-    "Copyright (c) 2006-2016 Red Hat, Inc. "
+-    "<https://www.gluster.org/>\n"
+-    "GlusterFS comes with ABSOLUTELY NO WARRANTY.\n"
+-    "It is licensed to you under your choice of the GNU Lesser\n"
+-    "General Public License, version 3 or any later version (LGPLv3\n"
+-    "or later), or the GNU General Public License, version 2 (GPLv2),\n"
+-    "in all cases as published by the Free Software Foundation.";
++    PACKAGE_NAME" "PACKAGE_VERSION;
+ const char *argp_program_bug_address = "<" PACKAGE_BUGREPORT ">";
+ 
+ static error_t
+-- 
+1.8.3.1
+

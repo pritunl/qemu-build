@@ -1,0 +1,26 @@
+From 00b79c4e2837980f36f7d8387d90cfb7dc8d0d58 Mon Sep 17 00:00:00 2001
+From: Rinku Kothiya <rkothiya@redhat.com>
+Date: Tue, 5 May 2020 12:41:41 -0400
+Subject: [PATCH 368/375] Update rfc.sh to rhgs-3.5.2
+
+Signed-off-by: Rinku Kothiya <rkothiya@redhat.com>
+---
+ rfc.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/rfc.sh b/rfc.sh
+index a408e45..37d551f 100755
+--- a/rfc.sh
++++ b/rfc.sh
+@@ -18,7 +18,7 @@ done
+ shift $((OPTIND-1))
+ 
+ 
+-branch="rhgs-3.5.1-rhel-8";
++branch="rhgs-3.5.2";
+ 
+ set_hooks_commit_msg()
+ {
+-- 
+1.8.3.1
+

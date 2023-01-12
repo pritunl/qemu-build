@@ -1,0 +1,57 @@
+From 808f311bd4f38f06b8afc49fc8d2c65fc4797431 Mon Sep 17 00:00:00 2001
+From: kshithijiyer <kshithij.ki@gmail.com>
+Date: Fri, 28 Jun 2019 15:32:31 +0530
+Subject: [PATCH 332/335] Removing one top command from gluster v help
+
+The current help show 2 different top commands
+intead of one single top command which can be
+easily observed when "# gluster v help" command
+is issued. Removing one "volume top <VOLNAME>"
+and clubbing into them into a single command.
+
+Current help:
+volume top <VOLNAME> {open|read|write|opendir|readdir|clear}
+[nfs|brick <brick>] [list-cnt <value>] |
+volume top <VOLNAME> {read-perf|write-perf}
+[bs <size> count <count>] [brick <brick>]
+[list-cnt <value>] - volume top operations
+
+Expected help:
+volume top <VOLNAME> {open|read|write|opendir|readdir|clear}
+[nfs|brick <brick>] [list-cnt <value>] | {read-perf|write-perf}
+[bs <size> count <count>] [brick <brick>] [list-cnt <value>]
+- volume top operations
+
+> upstream patch: https://review.gluster.org/#/c/glusterfs/+/22972/
+> fixes: bz#1725034
+> Change-Id: Ifbc4c95f2558286e27dfc5e9667046b80eb1715d
+> Signed-off-by: kshithijiyer <kshithij.ki@gmail.com>
+
+BUG: 1726058
+Change-Id: Ifbc4c95f2558286e27dfc5e9667046b80eb1715d
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/185757
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ cli/src/cli-cmd-volume.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/cli/src/cli-cmd-volume.c b/cli/src/cli-cmd-volume.c
+index 66beb1b..754d333 100644
+--- a/cli/src/cli-cmd-volume.c
++++ b/cli/src/cli-cmd-volume.c
+@@ -3427,8 +3427,8 @@ struct cli_cmd volume_cmds[] = {
+      cli_cmd_volume_profile_cbk, "volume profile operations"},
+ 
+     {"volume top <VOLNAME> {open|read|write|opendir|readdir|clear} [nfs|brick "
+-     "<brick>] [list-cnt <value>] |\n"
+-     "volume top <VOLNAME> {read-perf|write-perf} [bs <size> count <count>] "
++     "<brick>] [list-cnt <value>] | "
++     "{read-perf|write-perf} [bs <size> count <count>] "
+      "[brick <brick>] [list-cnt <value>]",
+      cli_cmd_volume_top_cbk, "volume top operations"},
+ 
+-- 
+1.8.3.1
+

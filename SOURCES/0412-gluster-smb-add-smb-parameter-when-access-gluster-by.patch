@@ -1,0 +1,46 @@
+From 0769c5ddc78ea37b9a43ac35dd71ec8cea4b8da8 Mon Sep 17 00:00:00 2001
+From: yinkui <13965432176@163.com>
+Date: Fri, 16 Aug 2019 10:15:07 +0800
+Subject: [PATCH 412/449] gluster-smb:add smb parameter when access gluster by
+ cifs
+
+Backport of https://review.gluster.org/23240
+
+Change-Id: I9ff54f2ca6f86bb5b2f4740485a0159e1fd7785f
+BUG: 1783232
+Signed-off-by: yinkui <13965432176@163.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202472
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/hook-scripts/set/post/S30samba-set.sh     | 1 +
+ extras/hook-scripts/start/post/S30samba-start.sh | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/extras/hook-scripts/set/post/S30samba-set.sh b/extras/hook-scripts/set/post/S30samba-set.sh
+index d2a62d3..e73f00f 100755
+--- a/extras/hook-scripts/set/post/S30samba-set.sh
++++ b/extras/hook-scripts/set/post/S30samba-set.sh
+@@ -90,6 +90,7 @@ function add_samba_share () {
+         STRING+="path = /\n"
+         STRING+="read only = no\n"
+         STRING+="guest ok = yes\n"
++        STRING+="kernel share modes = no\n"
+         printf "$STRING"  >> ${CONFIGFILE}
+ }
+ 
+diff --git a/extras/hook-scripts/start/post/S30samba-start.sh b/extras/hook-scripts/start/post/S30samba-start.sh
+index 2854bdd..0d5a5ed 100755
+--- a/extras/hook-scripts/start/post/S30samba-start.sh
++++ b/extras/hook-scripts/start/post/S30samba-start.sh
+@@ -89,6 +89,7 @@ function add_samba_share () {
+         STRING+="path = /\n"
+         STRING+="read only = no\n"
+         STRING+="guest ok = yes\n"
++        STRING+="kernel share modes = no\n"
+         printf "$STRING"  >> "${CONFIGFILE}"
+ }
+ 
+-- 
+1.8.3.1
+

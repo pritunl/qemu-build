@@ -1,0 +1,40 @@
+From 40bd6e9c186adb427e136a84eaab631e6a6f5263 Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Sun, 5 May 2019 21:17:24 +0530
+Subject: [PATCH 140/141] cluster/ec: Reopen shouldn't happen with O_TRUNC
+
+Problem:
+Doing re-open with O_TRUNC will truncate the fragment even when it is not
+needed needing extra heals
+
+Fix:
+At the time of re-open don't use O_TRUNC.
+
+Upstream-patch: https://review.gluster.org/c/glusterfs/+/22660/
+
+fixes bz#1706549
+Change-Id: Idc6408968efaad897b95a5a52481c66e843d3fb8
+Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/169982
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/ec/src/ec-common.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/cluster/ec/src/ec-common.c b/xlators/cluster/ec/src/ec-common.c
+index 1454ae2..b1ba5e9 100644
+--- a/xlators/cluster/ec/src/ec-common.c
++++ b/xlators/cluster/ec/src/ec-common.c
+@@ -128,7 +128,7 @@ ec_fix_open(ec_fop_data_t *fop, uintptr_t mask)
+     } else {
+         ec_open(fop->frame, fop->xl, need_open,
+                 EC_MINIMUM_ONE | EC_FOP_NO_PROPAGATE_ERROR, NULL, NULL, &loc,
+-                fop->fd->flags, fop->fd, NULL);
++                fop->fd->flags & (~O_TRUNC), fop->fd, NULL);
+     }
+ 
+ out:
+-- 
+1.8.3.1
+

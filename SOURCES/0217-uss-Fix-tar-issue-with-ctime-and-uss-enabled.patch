@@ -1,0 +1,75 @@
+From 71ff9b7c6356e521d98ee025554b63dd23db9836 Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Thu, 13 Jun 2019 22:43:47 +0530
+Subject: [PATCH 217/221] uss: Fix tar issue with ctime and uss enabled
+
+Problem:
+If ctime and uss enabled, tar still complains with 'file
+changed as we read it'
+
+Cause:
+To clear nfs cache (gluster-nfs), the ctime was incremented
+in snap-view client on stat cbk.
+
+Fix:
+The ctime should not be incremented manually. Since gluster-nfs
+is planning to be deprecated, this code is being removed to
+fix the issue.
+
+Backport of:
+ > Patch: https://review.gluster.org/22861
+ > Change-Id: Iae7f100c20fce880a50b008ba716077350281404
+ > fixes: bz#1720290
+ > Signed-off-by: Kotresh HR <khiremat@redhat.com>
+
+Change-Id: Iae7f100c20fce880a50b008ba716077350281404
+BUG: 1709301
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/173922
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ .../features/snapview-client/src/snapview-client.c | 22 +++++++++++++---------
+ 1 file changed, 13 insertions(+), 9 deletions(-)
+
+diff --git a/xlators/features/snapview-client/src/snapview-client.c b/xlators/features/snapview-client/src/snapview-client.c
+index 5d7986c..9c789ae 100644
+--- a/xlators/features/snapview-client/src/snapview-client.c
++++ b/xlators/features/snapview-client/src/snapview-client.c
+@@ -577,20 +577,24 @@ gf_svc_stat_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+                 int32_t op_ret, int32_t op_errno, struct iatt *buf,
+                 dict_t *xdata)
+ {
+-    /* Consider a testcase:
++    /* TODO: FIX ME
++     * Consider a testcase:
+      * #mount -t nfs host1:/vol1 /mnt
+      * #ls /mnt
+      * #ls /mnt/.snaps (As expected this fails)
+      * #gluster volume set vol1 features.uss enable
+-     * Now `ls /mnt/.snaps` should work,
+-     * but fails with No such file or directory.
+-     * This is because NFS client caches the list of files in
+-     * a directory. This cache is updated if there are any changes
+-     * in the directory attributes. To solve this problem change
+-     * a attribute 'ctime' when USS is enabled
++     * Now `ls /mnt/.snaps` should work, but fails with No such file or
++     * directory. This is because NFS client (gNFS) caches the list of files
++     * in a directory. This cache is updated if there are any changes in the
++     * directory attributes. So, one way to solve this problem is to change
++     * 'ctime' attribute when USS is enabled as below.
++     *
++     * if (op_ret == 0 && IA_ISDIR(buf->ia_type))
++     *     buf->ia_ctime_nsec++;
++     *
++     * But this is not the ideal solution as applications see the unexpected
++     * ctime change causing failures.
+      */
+-    if (op_ret == 0 && IA_ISDIR(buf->ia_type))
+-        buf->ia_ctime_nsec++;
+ 
+     SVC_STACK_UNWIND(stat, frame, op_ret, op_errno, buf, xdata);
+     return 0;
+-- 
+1.8.3.1
+

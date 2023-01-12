@@ -1,0 +1,233 @@
+From 541e1400ecaec5fea0f56e8ca18f00c229906d8a Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Tue, 18 Jun 2019 22:15:37 +0530
+Subject: [PATCH 203/221] glusterd/shd: Change shd logfile to a unique name
+
+With the shd mux changes, shd was havinga a logfile
+with volname of the first started volume.
+
+This was creating a lot confusion, as other volumes data
+is also logging to a logfile which has a different vol name.
+
+With this changes the logfile will be changed to a unique name
+ie "/var/log/glusterfs/glustershd.log". This was the same
+logfile name before the shd mux
+
+Backport of: https://review.gluster.org/22895
+
+>Change-Id: I2b94c1f0b2cf3c9493505dddf873687755a46dda
+>fixes: bz#1721601
+>Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+
+Change-Id: Ia659386dd19f533fbadaf5a9d5453c9ef2acac64
+BUG: 1721351
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/174542
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ .../mgmt/glusterd/src/glusterd-shd-svc-helper.c    | 12 --------
+ .../mgmt/glusterd/src/glusterd-shd-svc-helper.h    |  6 ----
+ xlators/mgmt/glusterd/src/glusterd-shd-svc.c       | 14 ++++-----
+ xlators/mgmt/glusterd/src/glusterd-svc-helper.c    | 34 +++++++++++++++++-----
+ xlators/mgmt/glusterd/src/glusterd-svc-mgmt.c      |  4 +--
+ xlators/mgmt/glusterd/src/glusterd-svc-mgmt.h      |  4 +++
+ 6 files changed, 40 insertions(+), 34 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.c b/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.c
+index 9196758..57ceda9 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.c
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.c
+@@ -75,18 +75,6 @@ glusterd_svc_build_shd_volfile_path(glusterd_volinfo_t *volinfo, char *path,
+ }
+ 
+ void
+-glusterd_svc_build_shd_logdir(char *logdir, char *volname, size_t len)
+-{
+-    snprintf(logdir, len, "%s/shd/%s", DEFAULT_LOG_FILE_DIRECTORY, volname);
+-}
+-
+-void
+-glusterd_svc_build_shd_logfile(char *logfile, char *logdir, size_t len)
+-{
+-    snprintf(logfile, len, "%s/shd.log", logdir);
+-}
+-
+-void
+ glusterd_shd_svcproc_cleanup(glusterd_shdsvc_t *shd)
+ {
+     glusterd_svc_proc_t *svc_proc = NULL;
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.h b/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.h
+index c70702c..59466ec 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.h
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.h
+@@ -27,12 +27,6 @@ glusterd_svc_build_shd_volfile_path(glusterd_volinfo_t *volinfo, char *path,
+                                     int path_len);
+ 
+ void
+-glusterd_svc_build_shd_logdir(char *logdir, char *volname, size_t len);
+-
+-void
+-glusterd_svc_build_shd_logfile(char *logfile, char *logdir, size_t len);
+-
+-void
+ glusterd_shd_svcproc_cleanup(glusterd_shdsvc_t *shd);
+ 
+ int
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+index dbe2560..8ad90a9 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+@@ -90,8 +90,8 @@ glusterd_shdsvc_init(void *data, glusterd_conn_t *mux_conn,
+     GLUSTERD_GET_SHD_RUNDIR(rundir, volinfo, priv);
+     glusterd_svc_create_rundir(rundir);
+ 
+-    glusterd_svc_build_shd_logdir(logdir, volinfo->volname, sizeof(logdir));
+-    glusterd_svc_build_shd_logfile(logfile, logdir, sizeof(logfile));
++    glusterd_svc_build_logfile_path(shd_svc_name, DEFAULT_LOG_FILE_DIRECTORY,
++                                    logfile, sizeof(logfile));
+ 
+     /* Initialize the connection mgmt */
+     if (mux_conn && mux_svc->rpc) {
+@@ -104,7 +104,7 @@ glusterd_shdsvc_init(void *data, glusterd_conn_t *mux_conn,
+         if (ret < 0)
+             goto out;
+     } else {
+-        ret = mkdir_p(logdir, 0755, _gf_true);
++        ret = mkdir_p(DEFAULT_LOG_FILE_DIRECTORY, 0755, _gf_true);
+         if ((ret == -1) && (EEXIST != errno)) {
+             gf_msg(this->name, GF_LOG_ERROR, errno, GD_MSG_CREATE_DIR_FAILED,
+                    "Unable to create logdir %s", logdir);
+@@ -460,6 +460,7 @@ glusterd_shdsvc_start(glusterd_svc_t *svc, int flags)
+         return -1;
+ 
+     glusterd_volinfo_ref(volinfo);
++
+     if (!svc->inited) {
+         ret = glusterd_shd_svc_mux_init(volinfo, svc);
+         if (ret)
+@@ -471,12 +472,11 @@ glusterd_shdsvc_start(glusterd_svc_t *svc, int flags)
+         /* Unref will happen from glusterd_svc_attach_cbk */
+         ret = glusterd_attach_svc(svc, volinfo, flags);
+         if (ret) {
+-            glusterd_volinfo_unref(volinfo);
+             gf_msg("glusterd", GF_LOG_ERROR, 0, GD_MSG_VOLINFO_GET_FAIL,
+-                   "Failed to attach shd svc(volume=%s) to pid=%d. Starting"
+-                   "a new process",
++                   "Failed to attach shd svc(volume=%s) to pid=%d",
+                    volinfo->volname, glusterd_proc_get_pid(&svc->proc));
+-            ret = glusterd_recover_shd_attach_failure(volinfo, svc, flags);
++            glusterd_shd_svcproc_cleanup(&volinfo->shd);
++            glusterd_volinfo_unref(volinfo);
+         }
+         goto out;
+     }
+diff --git a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+index a6e662f..400826f 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
++++ b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+@@ -469,6 +469,9 @@ glusterd_shd_svc_mux_init(glusterd_volinfo_t *volinfo, glusterd_svc_t *svc)
+     glusterd_conf_t *conf = NULL;
+     glusterd_svc_t *parent_svc = NULL;
+     int pid = -1;
++    char pidfile[PATH_MAX] = {
++        0,
++    };
+ 
+     GF_VALIDATE_OR_GOTO("glusterd", svc, out);
+     GF_VALIDATE_OR_GOTO("glusterd", volinfo, out);
+@@ -478,8 +481,26 @@ glusterd_shd_svc_mux_init(glusterd_volinfo_t *volinfo, glusterd_svc_t *svc)
+ 
+     pthread_mutex_lock(&conf->attach_lock);
+     {
++        if (svc->inited && !glusterd_proc_is_running(&(svc->proc))) {
++            /* This is the case when shd process was abnormally killed */
++            pthread_mutex_unlock(&conf->attach_lock);
++            glusterd_shd_svcproc_cleanup(&volinfo->shd);
++            pthread_mutex_lock(&conf->attach_lock);
++        }
++
+         if (!svc->inited) {
+-            if (gf_is_service_running(svc->proc.pidfile, &pid)) {
++            glusterd_svc_build_shd_pidfile(volinfo, pidfile, sizeof(pidfile));
++            ret = snprintf(svc->proc.name, sizeof(svc->proc.name), "%s",
++                           "glustershd");
++            if (ret < 0)
++                goto unlock;
++
++            ret = snprintf(svc->proc.pidfile, sizeof(svc->proc.pidfile), "%s",
++                           pidfile);
++            if (ret < 0)
++                goto unlock;
++
++            if (gf_is_service_running(pidfile, &pid)) {
+                 /* Just connect is required, but we don't know what happens
+                  * during the disconnect. So better to reattach.
+                  */
+@@ -487,10 +508,10 @@ glusterd_shd_svc_mux_init(glusterd_volinfo_t *volinfo, glusterd_svc_t *svc)
+             }
+ 
+             if (!mux_proc) {
+-                if (pid != -1 && sys_access(svc->proc.pidfile, R_OK) == 0) {
++                if (pid != -1 && sys_access(pidfile, R_OK) == 0) {
+                     /* stale pid file, stop and unlink it */
+                     glusterd_proc_stop(&svc->proc, SIGTERM, PROC_STOP_FORCE);
+-                    glusterd_unlink_file(svc->proc.pidfile);
++                    glusterd_unlink_file(pidfile);
+                 }
+                 mux_proc = __gf_find_compatible_svc(GD_NODE_SHD);
+             }
+@@ -684,11 +705,10 @@ glusterd_svc_attach_cbk(struct rpc_req *req, struct iovec *iov, int count,
+                volinfo->volname, glusterd_proc_get_pid(&svc->proc));
+     } else {
+         gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_SVC_ATTACH_FAIL,
+-               "svc %s of volume %s failed to "
+-               "attach to pid %d. Starting a new process",
+-               svc->name, volinfo->volname, glusterd_proc_get_pid(&svc->proc));
++               "svc %s of volume %s failed to attach to pid %d", svc->name,
++               volinfo->volname, glusterd_proc_get_pid(&svc->proc));
+         if (!strcmp(svc->name, "glustershd")) {
+-            glusterd_recover_shd_attach_failure(volinfo, svc, *flag);
++            glusterd_shd_svcproc_cleanup(&volinfo->shd);
+         }
+     }
+ out:
+diff --git a/xlators/mgmt/glusterd/src/glusterd-svc-mgmt.c b/xlators/mgmt/glusterd/src/glusterd-svc-mgmt.c
+index f32dafc..fa316a6 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-svc-mgmt.c
++++ b/xlators/mgmt/glusterd/src/glusterd-svc-mgmt.c
+@@ -33,14 +33,14 @@ glusterd_svc_create_rundir(char *rundir)
+     return ret;
+ }
+ 
+-static void
++void
+ glusterd_svc_build_logfile_path(char *server, char *logdir, char *logfile,
+                                 size_t len)
+ {
+     snprintf(logfile, len, "%s/%s.log", logdir, server);
+ }
+ 
+-static void
++void
+ glusterd_svc_build_volfileid_path(char *server, char *volfileid, size_t len)
+ {
+     snprintf(volfileid, len, "gluster/%s", server);
+diff --git a/xlators/mgmt/glusterd/src/glusterd-svc-mgmt.h b/xlators/mgmt/glusterd/src/glusterd-svc-mgmt.h
+index fbc5225..5a5466a 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-svc-mgmt.h
++++ b/xlators/mgmt/glusterd/src/glusterd-svc-mgmt.h
+@@ -74,6 +74,10 @@ glusterd_svc_build_volfile_path(char *server, char *workdir, char *volfile,
+                                 size_t len);
+ 
+ void
++glusterd_svc_build_logfile_path(char *server, char *logdir, char *logfile,
++                                size_t len);
++
++void
+ glusterd_svc_build_svcdir(char *server, char *workdir, char *path, size_t len);
+ 
+ void
+-- 
+1.8.3.1
+

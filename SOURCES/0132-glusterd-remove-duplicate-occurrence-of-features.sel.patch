@@ -1,0 +1,41 @@
+From 83d5ebd6ca68e319db86e310cf072888d0f0f1d1 Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Wed, 8 May 2019 10:07:29 +0530
+Subject: [PATCH 132/141] glusterd: remove duplicate occurrence of
+ features.selinux from volume option table
+
+Label : DOWNSTREAM ONLY
+
+Change-Id: I0a49fece7a1fcbb9f3bbfe5806ec470aeb33ad70
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/169664
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c | 10 ----------
+ 1 file changed, 10 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index 10aa2ae..e52de20 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -3242,16 +3242,6 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+                     "pages."
+                     "The max value is 262144 pages i.e 1 GB and "
+                     "the min value is 1000 pages i.e ~4 MB."},
+-    {.key = VKEY_FEATURES_SELINUX,
+-     .voltype = "features/selinux",
+-     .type = NO_DOC,
+-     .value = "on",
+-     .op_version = GD_OP_VERSION_3_11_0,
+-     .description = "Convert security.selinux xattrs to "
+-                    "trusted.gluster.selinux on the bricks. Recommended "
+-                    "to have enabled when clients and/or bricks support "
+-                    "SELinux."},
+-
+ #endif /* USE_GFDB */
+     {
+         .key = "locks.trace",
+-- 
+1.8.3.1
+

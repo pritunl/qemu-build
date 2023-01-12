@@ -1,0 +1,181 @@
+From 80eef2f52bb92ed740ac00eeb11ee7a3e7fffff2 Mon Sep 17 00:00:00 2001
+From: Raghavendra Bhat <raghavendra@redhat.com>
+Date: Mon, 11 Mar 2019 12:16:50 -0400
+Subject: [PATCH 459/465] features/bit-rot: Unconditionally sign the files
+ during oneshot crawl
+
+Currently bit-rot feature has an issue with disabling and reenabling it
+on the same volume. Consider enabling bit-rot detection which goes on to
+crawl and sign all the files present in the volume. Then some files are
+modified and the bit-rot daemon goes on to sign the modified files with
+the correct signature. Now, disable bit-rot feature. While, signing and
+scrubbing are not happening, previous checksums of the files continue to
+exist as extended attributes. Now, if some files with checksum xattrs get
+modified, they are not signed with new signature as the feature is off.
+
+At this point, if the feature is enabled again, the bit rot daemon will
+go and sign those files which does not have any bit-rot specific xattrs
+(i.e. those files which were created after bit-rot was disabled). Whereas
+the files with bit-rot xattrs wont get signed with proper new checksum.
+At this point if scrubber runs, it finds the on disk checksum and the actual
+checksum of the file to be different (because the file got modified) and
+marks the file as corrupted.
+
+FIX:
+
+The fix is to unconditionally sign the files when the bit-rot daemon
+comes up (instead of skipping the files with bit-rot xattrs).
+
+upstream fix:
+	> patch: https://review.gluster.org/#/c/glusterfs/+/22360/
+	> fixes: #bz1700078
+	> Change-ID: Iadfb47dd39f7e2e77f22d549a4a07a385284f4f5
+
+Change-Id: Iadfb47dd39f7e2e77f22d549a4a07a385284f4f5
+BUG: 1851424
+Signed-off-by: Raghavendra M <raghavendra@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/208305
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bitrot/bug-1700078.t                  | 87 +++++++++++++++++++++++++++++
+ xlators/features/bit-rot/src/bitd/bit-rot.c | 15 ++++-
+ 2 files changed, 101 insertions(+), 1 deletion(-)
+ create mode 100644 tests/bitrot/bug-1700078.t
+
+diff --git a/tests/bitrot/bug-1700078.t b/tests/bitrot/bug-1700078.t
+new file mode 100644
+index 0000000..f273742
+--- /dev/null
++++ b/tests/bitrot/bug-1700078.t
+@@ -0,0 +1,87 @@
++#!/bin/bash
++
++. $(dirname $0)/../include.rc
++. $(dirname $0)/../volume.rc
++
++cleanup;
++
++## Start glusterd
++TEST glusterd;
++TEST pidof glusterd;
++
++## Lets create and start the volume
++TEST $CLI volume create $V0 $H0:$B0/${V0}1
++TEST $CLI volume start $V0
++
++## Enable bitrot for volume $V0
++TEST $CLI volume bitrot $V0 enable
++
++## Turn off quick-read so that it wont cache the contents
++# of the file in lookup. For corrupted files, it might
++# end up in reads being served from the cache instead of
++# an error.
++TEST $CLI volume set $V0 performance.quick-read off
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" get_bitd_count
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'Active' scrub_status $V0 'State of scrub'
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '/var/log/glusterfs/bitd.log' scrub_status $V0 'Bitrot error log location'
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '/var/log/glusterfs/scrub.log' scrub_status $V0 'Scrubber error log location'
++
++## Set expiry-timeout to 1 sec
++TEST $CLI volume set $V0 features.expiry-time 1
++
++##Mount $V0
++TEST glusterfs --volfile-id=$V0 --volfile-server=$H0 $M0 --attribute-timeout=0 --entry-timeout=0
++
++## Turn off quick-read xlator so that, the contents are not served from the
++# quick-read cache.
++TEST $CLI volume set $V0 performance.quick-read off
++
++#Create sample file
++TEST `echo "1234" > $M0/FILE1`
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.bit-rot.signature' check_for_xattr 'trusted.bit-rot.signature' "/$B0/${V0}1/FILE1"
++
++##disable bitrot
++TEST $CLI volume bitrot $V0 disable
++
++## modify the file
++TEST `echo "write" >> $M0/FILE1`
++
++# unmount and remount when the file has to be accessed.
++# This is to ensure that, when the remount happens,
++# and the file is read, its contents are served from the
++# brick instead of cache.
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
++
++##enable bitrot
++TEST $CLI volume bitrot $V0 enable
++
++# expiry time is set to 1 second. Hence sleep for 2 seconds for the
++# oneshot crawler to finish its crawling and sign the file properly.
++sleep 2
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" get_bitd_count
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'Active' scrub_status $V0 'State of scrub'
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '/var/log/glusterfs/bitd.log' scrub_status $V0 'Bitrot error log location'
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT '/var/log/glusterfs/scrub.log' scrub_status $V0 'Scrubber error log location'
++
++## Ondemand scrub
++TEST $CLI volume bitrot $V0 scrub ondemand
++
++# the scrub ondemand CLI command, just ensures that
++# the scrubber has received the ondemand scrub directive
++# and started. sleep for 2 seconds for scrubber to finish
++# crawling and marking file(s) as bad (if if finds that
++# corruption has happened) which are filesystem operations.
++sleep 2
++
++TEST ! getfattr -n 'trusted.bit-rot.bad-file' $B0/${V0}1/FILE1
++
++##Mount $V0
++TEST glusterfs --volfile-id=$V0 --volfile-server=$H0 $M0 --attribute-timeout=0 --entry-timeout=0
++
++TEST cat $M0/FILE1
++
++cleanup;
+diff --git a/xlators/features/bit-rot/src/bitd/bit-rot.c b/xlators/features/bit-rot/src/bitd/bit-rot.c
+index b8feef7..424c0d5 100644
+--- a/xlators/features/bit-rot/src/bitd/bit-rot.c
++++ b/xlators/features/bit-rot/src/bitd/bit-rot.c
+@@ -973,6 +973,7 @@ bitd_oneshot_crawl(xlator_t *subvol, gf_dirent_t *entry, loc_t *parent,
+     int32_t ret = -1;
+     inode_t *linked_inode = NULL;
+     gf_boolean_t need_signing = _gf_false;
++    gf_boolean_t need_reopen = _gf_true;
+ 
+     GF_VALIDATE_OR_GOTO("bit-rot", subvol, out);
+     GF_VALIDATE_OR_GOTO("bit-rot", data, out);
+@@ -1046,6 +1047,18 @@ bitd_oneshot_crawl(xlator_t *subvol, gf_dirent_t *entry, loc_t *parent,
+                    uuid_utoa(linked_inode->gfid));
+     } else {
+         need_signing = br_check_object_need_sign(this, xattr, child);
++
++        /*
++         * If we are here means, bitrot daemon has started. Is it just
++         * a simple restart of the daemon or is it started because the
++         * feature is enabled is something hard to determine. Hence,
++         * if need_signing is false (because bit-rot version and signature
++         * are present), then still go ahead and sign it.
++         */
++        if (!need_signing) {
++            need_signing = _gf_true;
++            need_reopen = _gf_true;
++        }
+     }
+ 
+     if (!need_signing)
+@@ -1054,7 +1067,7 @@ bitd_oneshot_crawl(xlator_t *subvol, gf_dirent_t *entry, loc_t *parent,
+     gf_msg(this->name, GF_LOG_INFO, 0, BRB_MSG_TRIGGER_SIGN,
+            "Triggering signing for %s [GFID: %s | Brick: %s]", loc.path,
+            uuid_utoa(linked_inode->gfid), child->brick_path);
+-    br_trigger_sign(this, child, linked_inode, &loc, _gf_true);
++    br_trigger_sign(this, child, linked_inode, &loc, need_reopen);
+ 
+     ret = 0;
+ 
+-- 
+1.8.3.1
+

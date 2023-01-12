@@ -1,0 +1,62 @@
+From bfb64a0e685eb5755ceda6c54690335564e135c9 Mon Sep 17 00:00:00 2001
+From: Hari Gowtham <hgowtham@redhat.com>
+Date: Mon, 16 Sep 2019 14:22:34 +0530
+Subject: [PATCH 296/297] glusterfind: pre command failure on a modify
+
+Label: DOWNSTREAM ONLY
+
+On upstream we have gfid_to_all_paths_using_gfid2path instead of
+gfid_to_path_using_pgfid and so we do not hit this in upstream.
+
+Problem: On a modify, the pre commands runs through the find function.
+where the number of arguments sent mismatches and causes a stderr.
+The mismatch is because of both changelog and brickfind use the find(),
+but the brickfind was alone handled.
+
+Fix: Have handled the additional argument on the changelog side as well.
+Received it as a dummy variable for changelog.
+
+Change-Id: I5eecdd993e477b68a0e486db2ad7e56ba94bbf02
+fixes: bz#1733970
+Signed-off-by: Hari Gowtham <hgowtham@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/181095
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Aravinda Vishwanathapura Krishna Murthy <avishwan@redhat.com>
+Reviewed-by: Rinku Kothiya <rkothiya@redhat.com>
+---
+ tools/glusterfind/src/changelog.py | 5 +++--
+ tools/glusterfind/src/utils.py     | 2 +-
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/tools/glusterfind/src/changelog.py b/tools/glusterfind/src/changelog.py
+index 40c381b..ef982db 100644
+--- a/tools/glusterfind/src/changelog.py
++++ b/tools/glusterfind/src/changelog.py
+@@ -141,8 +141,9 @@ def gfid_to_path_using_pgfid(brick, changelog_data, args):
+ 
+     # Length of brick path, to remove from output path
+     brick_path_len = len(brick)
+-
+-    def output_callback(path, inode):
++    # is_dir is a dummy variable to make it compitable with the find
++    # used in brickfind
++    def output_callback(path, inode, is_dir):
+         # For each path found, encodes it and updates path1
+         # Also updates converted flag in inodegfid table as 1
+         path = path.strip()
+diff --git a/tools/glusterfind/src/utils.py b/tools/glusterfind/src/utils.py
+index cc09903..e226c5a 100644
+--- a/tools/glusterfind/src/utils.py
++++ b/tools/glusterfind/src/utils.py
+@@ -70,7 +70,7 @@ def find(path, callback_func=lambda x: True, filter_func=lambda x: True,
+             else:
+                 filter_result = filter_func(full_path)
+                 if filter_result is not None:
+-                    callback_func(full_path, filter_result)
++                    callback_func(full_path, filter_result, None)
+         else:
+             filter_result = filter_func(full_path)
+             if filter_result is not None:
+-- 
+1.8.3.1
+

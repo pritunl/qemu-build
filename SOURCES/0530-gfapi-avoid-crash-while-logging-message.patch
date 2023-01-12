@@ -1,0 +1,41 @@
+From 5a7348a266587704dae4f1ddda16b7c95f547251 Mon Sep 17 00:00:00 2001
+From: Rinku Kothiya <rkothiya@redhat.com>
+Date: Sun, 7 Feb 2021 13:40:24 +0000
+Subject: [PATCH 530/532] gfapi: avoid crash while logging message.
+
+Breaking parameter into two different parameter
+to avoid a crash.
+
+Upstream:
+> Reviewed-on: https://github.com/gluster/glusterfs/pull/2139
+> fixes: #2138
+> Change-Id: Idd5f3631488c1d892748f83e6847fb6fd2d0802a
+> Signed-off-by: Rinku Kothiya <rkothiya@redhat.com>
+
+BUG: 1691320
+
+Change-Id: Ifd6a96982ffd4e5334f8be2297de2ad826f3145b
+Signed-off-by: Rinku Kothiya <rkothiya@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/226851
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ api/src/glfs-fops.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/api/src/glfs-fops.c b/api/src/glfs-fops.c
+index 051541f..6dc3b66 100644
+--- a/api/src/glfs-fops.c
++++ b/api/src/glfs-fops.c
+@@ -1529,7 +1529,7 @@ glfs_pwritev_common(struct glfs_fd *glfd, const struct iovec *iovec, int iovcnt,
+         ret = -1;
+         errno = EINVAL;
+         gf_smsg(THIS->name, GF_LOG_ERROR, errno, API_MSG_INVALID_ARG,
+-                "size >= %llu is not allowed", GF_UNIT_GB, NULL);
++                "Data size too large", "size=%llu", GF_UNIT_GB, NULL);
+         goto out;
+     }
+ 
+-- 
+1.8.3.1
+

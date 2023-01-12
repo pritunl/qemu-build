@@ -1,0 +1,70 @@
+From 704bf84d432e1eea1534e35ee27d4116a7273146 Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Thu, 4 Jun 2020 16:15:35 +0530
+Subject: [PATCH 401/449] cli: change the warning message
+
+while creating the replica 2 volume or converting
+a volume to replica 2 volume, we issue a warning
+saying "replica 2 volumes are prone to split brain".
+As the support for replica 2 volumes has been deprecated,
+warning message should be changed accordingly to reflect
+the same.
+
+Label: DOWNSTREAM ONLY
+
+BUG: 1763124
+Change-Id: If55e5412cda2e4a21a6359492d8d704dd702530d
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202348
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-by: Ravishankar Narayanankutty <ravishankar@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ cli/src/cli-cmd-parser.c | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/cli/src/cli-cmd-parser.c b/cli/src/cli-cmd-parser.c
+index 5e7ce53..7446b95 100644
+--- a/cli/src/cli-cmd-parser.c
++++ b/cli/src/cli-cmd-parser.c
+@@ -603,8 +603,8 @@ cli_cmd_volume_create_parse(struct cli_state *state, const char **words,
+             if (replica_count == 2) {
+                 if (strcmp(words[wordcount - 1], "force")) {
+                     question =
+-                        "Replica 2 volumes are prone"
+-                        " to split-brain. Use "
++                        "Support for replica 2 volumes stands deprecated as "
++                        "they are prone to split-brain. Use "
+                         "Arbiter or Replica 3 to "
+                         "avoid this.\n"
+                         "Do you still want to "
+@@ -1817,9 +1817,9 @@ cli_cmd_volume_add_brick_parse(struct cli_state *state, const char **words,
+         if (count == 2) {
+             if (strcmp(words[wordcount - 1], "force")) {
+                 question =
+-                    "Replica 2 volumes are prone to "
+-                    "split-brain. Use Arbiter or "
+-                    "Replica 3 to avaoid this. See: "
++                    "Support for replica 2 volumes stands deprecated as they "
++                    "are prone to split-brain. Use Arbiter or "
++                    "Replica 3 to avoid this. See: "
+                     "http://docs.gluster.org/en/latest/Administrator%20Guide/"
+                     "Split%20brain%20and%20ways%20to%20deal%20with%20it/."
+                     "\nDo you still want to continue?\n";
+@@ -2098,9 +2098,9 @@ cli_cmd_volume_remove_brick_parse(struct cli_state *state, const char **words,
+         if (count == 2) {
+             if (strcmp(words[wordcount - 1], "force")) {
+                 ques =
+-                    "Replica 2 volumes are prone to "
+-                    "split-brain. Use Arbiter or Replica 3 "
+-                    "to avaoid this. See: "
++                    "Support for replica 2 volumes stands deprecated as they "
++                    "are prone to split-brain. Use Arbiter or Replica 3 "
++                    "to avoid this. See: "
+                     "http://docs.gluster.org/en/latest/Administrator%20Guide/"
+                     "Split%20brain%20and%20ways%20to%20deal%20with%20it/."
+                     "\nDo you still want to continue?\n";
+-- 
+1.8.3.1
+

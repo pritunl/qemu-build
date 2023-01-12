@@ -1,0 +1,113 @@
+From 1ca8a545833e0a6e674984245338b8675ddc58bc Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Fri, 10 Jan 2020 16:48:14 +0530
+Subject: [PATCH 348/349] glusterfind: Fix py2/py3 issues
+
+1. In dictionary values(), returns list in py2 and not in py3.
+   So explicitly convert it into list.
+2. xattr module returns values in bytes. So explicitly convert
+   them to str to work both with py2 and py3
+
+Backport of:
+ > Patch: https://review.gluster.org/23993
+ > fixes: bz#1789439
+ > Change-Id: I27a639cda4f7a4ece9744a97c3d16e247906bd94
+ > Signed-off-by: Kotresh HR <khiremat@redhat.com>
+
+BUG: 1789447
+Change-Id: I27a639cda4f7a4ece9744a97c3d16e247906bd94
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/189215
+Reviewed-by: Shwetha Acharya <sacharya@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Hari Gowtham Gopal <hgowtham@redhat.com>
+Reviewed-by: Sunny Kumar <sunkumar@redhat.com>
+---
+ tools/glusterfind/src/changelog.py | 14 +++++++++-----
+ tools/glusterfind/src/main.py      |  8 ++++----
+ 2 files changed, 13 insertions(+), 9 deletions(-)
+
+diff --git a/tools/glusterfind/src/changelog.py b/tools/glusterfind/src/changelog.py
+index d8f97e0..d972fb5 100644
+--- a/tools/glusterfind/src/changelog.py
++++ b/tools/glusterfind/src/changelog.py
+@@ -14,6 +14,7 @@ import sys
+ import time
+ import xattr
+ import logging
++from gfind_py2py3 import bytearray_to_str
+ from argparse import ArgumentParser, RawDescriptionHelpFormatter
+ import hashlib
+ try:
+@@ -105,9 +106,10 @@ def populate_pgfid_and_inodegfid(brick, changelog_data):
+                 changelog_data.inodegfid_add(os.stat(p).st_ino, gfid)
+                 file_xattrs = xattr.list(p)
+                 for x in file_xattrs:
+-                    if x.startswith("trusted.pgfid."):
++                    x_str = bytearray_to_str(x)
++                    if x_str.startswith("trusted.pgfid."):
+                         # PGFID in pgfid table
+-                        changelog_data.pgfid_add(x.split(".")[-1])
++                        changelog_data.pgfid_add(x_str.split(".")[-1])
+             except (IOError, OSError):
+                 # All OS Errors ignored, since failures will be logged
+                 # in End. All GFIDs present in gfidpath table
+@@ -122,10 +124,12 @@ def enum_hard_links_using_gfid2path(brick, gfid, args):
+         try:
+             file_xattrs = xattr.list(p)
+             for x in file_xattrs:
+-                if x.startswith("trusted.gfid2path."):
++                x_str = bytearray_to_str(x)
++                if x_str.startswith("trusted.gfid2path."):
+                     # get the value for the xattr i.e. <PGFID>/<BN>
+-                    v = xattr.getxattr(p, x)
+-                    pgfid, bn = v.split(os.sep)
++                    v = xattr.getxattr(p, x_str)
++                    v_str = bytearray_to_str(v)
++                    pgfid, bn = v_str.split(os.sep)
+                     try:
+                         path = symlink_gfid_to_path(brick, pgfid)
+                         fullpath = os.path.join(path, bn)
+diff --git a/tools/glusterfind/src/main.py b/tools/glusterfind/src/main.py
+index fefe4a3..dfc9d07 100644
+--- a/tools/glusterfind/src/main.py
++++ b/tools/glusterfind/src/main.py
+@@ -633,7 +633,7 @@ def mode_query(session_dir, args):
+     # Merger
+     if args.full:
+         if len(g_pid_nodefile_map) > 0:
+-            cmd = ["sort", "-u"] + g_pid_nodefile_map.values() + \
++            cmd = ["sort", "-u"] + list(g_pid_nodefile_map.values()) + \
+                   ["-o", args.outfile]
+             execute(cmd,
+                     exit_msg="Failed to merge output files "
+@@ -645,7 +645,7 @@ def mode_query(session_dir, args):
+         # Read each Changelogs db and generate finaldb
+         create_file(args.outfile, exit_on_err=True, logger=logger)
+         outfilemerger = OutputMerger(args.outfile + ".db",
+-                                     g_pid_nodefile_map.values())
++                                     list(g_pid_nodefile_map.values()))
+         write_output(args.outfile, outfilemerger, args.field_separator)
+ 
+     try:
+@@ -702,7 +702,7 @@ def mode_pre(session_dir, args):
+     # Merger
+     if args.full:
+         if len(g_pid_nodefile_map) > 0:
+-            cmd = ["sort", "-u"] + g_pid_nodefile_map.values() + \
++            cmd = ["sort", "-u"] + list(g_pid_nodefile_map.values()) + \
+                   ["-o", args.outfile]
+             execute(cmd,
+                     exit_msg="Failed to merge output files "
+@@ -714,7 +714,7 @@ def mode_pre(session_dir, args):
+         # Read each Changelogs db and generate finaldb
+         create_file(args.outfile, exit_on_err=True, logger=logger)
+         outfilemerger = OutputMerger(args.outfile + ".db",
+-                                     g_pid_nodefile_map.values())
++                                     list(g_pid_nodefile_map.values()))
+         write_output(args.outfile, outfilemerger, args.field_separator)
+ 
+     try:
+-- 
+1.8.3.1
+

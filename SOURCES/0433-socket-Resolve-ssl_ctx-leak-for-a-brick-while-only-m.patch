@@ -1,0 +1,54 @@
+From 0e3871a57b7a621444dc5cfd49935a1e412f6436 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawa@redhat.com>
+Date: Mon, 8 Jun 2020 13:27:50 +0530
+Subject: [PATCH 433/449] socket: Resolve ssl_ctx leak for a brick while only
+ mgmt SSL is enabled
+
+Problem: While only mgmt SSL is enabled for a brick process use_ssl flag
+         is false for a brick process and socket api's cleanup ssl_ctx only
+         while use_ssl and ssl_ctx both are valid
+
+Solution: To avoid a leak check only ssl_ctx, if it is valid cleanup
+          ssl_ctx
+
+> Fixes: #1196
+> Change-Id: I2f4295478f4149dcb7d608ea78ee5104f28812c3
+> Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+> (Cherry pick from commit 9873baee34afdf0c20f5fc98a7dbf2a9f07447e2)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/24366/)
+
+BUG: 1810924
+Change-Id: I2f4295478f4149dcb7d608ea78ee5104f28812c3
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202625
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ rpc/rpc-transport/socket/src/socket.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/rpc/rpc-transport/socket/src/socket.c b/rpc/rpc-transport/socket/src/socket.c
+index 226b2e2..54cd5df 100644
+--- a/rpc/rpc-transport/socket/src/socket.c
++++ b/rpc/rpc-transport/socket/src/socket.c
+@@ -1163,7 +1163,7 @@ __socket_reset(rpc_transport_t *this)
+         SSL_free(priv->ssl_ssl);
+         priv->ssl_ssl = NULL;
+     }
+-    if (priv->use_ssl && priv->ssl_ctx) {
++    if (priv->ssl_ctx) {
+         SSL_CTX_free(priv->ssl_ctx);
+         priv->ssl_ctx = NULL;
+     }
+@@ -4685,7 +4685,7 @@ fini(rpc_transport_t *this)
+             SSL_free(priv->ssl_ssl);
+             priv->ssl_ssl = NULL;
+         }
+-        if (priv->use_ssl && priv->ssl_ctx) {
++        if (priv->ssl_ctx) {
+             SSL_CTX_free(priv->ssl_ctx);
+             priv->ssl_ctx = NULL;
+         }
+-- 
+1.8.3.1
+

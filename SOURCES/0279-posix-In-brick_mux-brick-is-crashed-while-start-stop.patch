@@ -1,0 +1,253 @@
+From bf24623765817ede84ea47f3265f5e6c2ae17ee7 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Tue, 16 Jul 2019 20:36:57 +0530
+Subject: [PATCH 279/284] posix: In brick_mux brick is crashed while start/stop
+ volume in loop
+
+Problem: In brick_mux environment sometime brick is crashed while
+         volume stop/start in a loop.Brick is crashed in janitor task
+         at the time of accessing priv.If posix priv is cleaned up before
+         call janitor task then janitor task is crashed.
+
+Solution: To avoid the crash in brick_mux environment introduce a new
+          flag janitor_task_stop in posix_private and before send CHILD_DOWN event
+          wait for update the flag by janitor_task_done
+
+> Change-Id: Id9fa5d183a463b2b682774ab5cb9868357d139a4
+> fixes: bz#1730409
+> Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+> (Cherry picked from commit f138d3fa2237e7fa940ecf17153fd700350c4138)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/23060/)
+
+Change-Id: Id9fa5d183a463b2b682774ab5cb9868357d139a4
+fixex: bz#1729971
+Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/178934
+Tested-by: Mohit Agrawal <moagrawa@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/glusterfs/xlator.h        |  3 +++
+ xlators/mgmt/glusterd/src/glusterd-utils.c |  5 ++--
+ xlators/protocol/server/src/server.c       |  6 ++++-
+ xlators/storage/posix/src/posix-common.c   | 40 +++++++++++++++++++++++++++++-
+ xlators/storage/posix/src/posix-helpers.c  | 16 ++++++++++++
+ xlators/storage/posix/src/posix.h          |  3 +++
+ 6 files changed, 69 insertions(+), 4 deletions(-)
+
+diff --git a/libglusterfs/src/glusterfs/xlator.h b/libglusterfs/src/glusterfs/xlator.h
+index b78daad..da551e9 100644
+--- a/libglusterfs/src/glusterfs/xlator.h
++++ b/libglusterfs/src/glusterfs/xlator.h
+@@ -861,6 +861,9 @@ struct _xlator {
+ 
+     /* Flag to notify got CHILD_DOWN event for detach brick */
+     uint32_t notify_down;
++
++    /* Flag to avoid throw duplicate PARENT_DOWN event */
++    uint32_t parent_down;
+ };
+ 
+ /* This would be the only structure which needs to be exported by
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index 2aa975b..812c698 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -4082,8 +4082,9 @@ out:
+     if (msg[0]) {
+         gf_msg("glusterd", GF_LOG_ERROR, 0, GD_MSG_BRICK_IMPORT_FAIL, "%s",
+                msg);
+-        gf_event(EVENT_IMPORT_BRICK_FAILED, "peer=%s;brick=%s",
+-                 new_brickinfo->hostname, new_brickinfo->path);
++        if (new_brickinfo)
++            gf_event(EVENT_IMPORT_BRICK_FAILED, "peer=%s;brick=%s",
++                     new_brickinfo->hostname, new_brickinfo->path);
+     }
+     gf_msg_debug("glusterd", 0, "Returning with %d", ret);
+     return ret;
+diff --git a/xlators/protocol/server/src/server.c b/xlators/protocol/server/src/server.c
+index 6ae63ba..a5f09fe 100644
+--- a/xlators/protocol/server/src/server.c
++++ b/xlators/protocol/server/src/server.c
+@@ -580,6 +580,7 @@ server_graph_janitor_threads(void *data)
+     gf_boolean_t victim_found = _gf_false;
+     xlator_list_t **trav_p = NULL;
+     xlator_t *top = NULL;
++    uint32_t parent_down = 0;
+ 
+     GF_ASSERT(data);
+ 
+@@ -598,7 +599,10 @@ server_graph_janitor_threads(void *data)
+         victim = (*trav_p)->xlator;
+         if (victim->cleanup_starting &&
+             strcmp(victim->name, victim_name) == 0) {
+-            victim_found = _gf_true;
++            parent_down = victim->parent_down;
++            victim->parent_down = 1;
++            if (!parent_down)
++                victim_found = _gf_true;
+             break;
+         }
+     }
+diff --git a/xlators/storage/posix/src/posix-common.c b/xlators/storage/posix/src/posix-common.c
+index d738692..69857d9 100644
+--- a/xlators/storage/posix/src/posix-common.c
++++ b/xlators/storage/posix/src/posix-common.c
+@@ -146,10 +146,15 @@ int32_t
+ posix_notify(xlator_t *this, int32_t event, void *data, ...)
+ {
+     xlator_t *victim = data;
++    struct posix_private *priv = this->private;
++    int ret = 0;
++    struct timespec sleep_till = {
++        0,
++    };
+ 
+     switch (event) {
+         case GF_EVENT_PARENT_UP: {
+-            /* Tell the parent that posix xlator is up */
++            /* the parent that posix xlator is up */
+             default_notify(this, GF_EVENT_CHILD_UP, data);
+         } break;
+ 
+@@ -158,6 +163,31 @@ posix_notify(xlator_t *this, int32_t event, void *data, ...)
+                 break;
+             gf_log(this->name, GF_LOG_INFO, "Sending CHILD_DOWN for brick %s",
+                    victim->name);
++
++            if (priv->janitor) {
++                pthread_mutex_lock(&priv->janitor_mutex);
++                {
++                    priv->janitor_task_stop = _gf_true;
++                    ret = gf_tw_del_timer(this->ctx->tw->timer_wheel,
++                                          priv->janitor);
++                    if (!ret) {
++                        clock_gettime(CLOCK_REALTIME, &sleep_till);
++                        sleep_till.tv_sec += 1;
++                        /* Wait to set janitor_task flag to _gf_false by
++                         * janitor_task_done */
++                        while (priv->janitor_task_stop) {
++                            (void)pthread_cond_timedwait(&priv->janitor_cond,
++                                                         &priv->janitor_mutex,
++                                                         &sleep_till);
++                            clock_gettime(CLOCK_REALTIME, &sleep_till);
++                            sleep_till.tv_sec += 1;
++                        }
++                    }
++                }
++                pthread_mutex_unlock(&priv->janitor_mutex);
++                GF_FREE(priv->janitor);
++            }
++            priv->janitor = NULL;
+             default_notify(this->parents->xlator, GF_EVENT_CHILD_DOWN, data);
+         } break;
+         default:
+@@ -1008,6 +1038,8 @@ posix_init(xlator_t *this)
+ 
+     pthread_mutex_init(&_private->fsync_mutex, NULL);
+     pthread_cond_init(&_private->fsync_cond, NULL);
++    pthread_mutex_init(&_private->janitor_mutex, NULL);
++    pthread_cond_init(&_private->janitor_cond, NULL);
+     INIT_LIST_HEAD(&_private->fsyncs);
+     ret = posix_spawn_ctx_janitor_thread(this);
+     if (ret)
+@@ -1128,6 +1160,7 @@ posix_fini(xlator_t *this)
+         (void)gf_thread_cleanup_xint(priv->disk_space_check);
+         priv->disk_space_check = 0;
+     }
++
+     if (priv->janitor) {
+         /*TODO: Make sure the synctask is also complete */
+         ret = gf_tw_del_timer(this->ctx->tw->timer_wheel, priv->janitor);
+@@ -1135,8 +1168,10 @@ posix_fini(xlator_t *this)
+             gf_msg(this->name, GF_LOG_ERROR, errno, P_MSG_TIMER_DELETE_FAILED,
+                    "Failed to delete janitor timer");
+         }
++        GF_FREE(priv->janitor);
+         priv->janitor = NULL;
+     }
++
+     if (priv->fsyncer) {
+         (void)gf_thread_cleanup_xint(priv->fsyncer);
+         priv->fsyncer = 0;
+@@ -1148,6 +1183,9 @@ posix_fini(xlator_t *this)
+     GF_FREE(priv->base_path);
+     LOCK_DESTROY(&priv->lock);
+     pthread_mutex_destroy(&priv->fsync_mutex);
++    pthread_cond_destroy(&priv->fsync_cond);
++    pthread_mutex_destroy(&priv->janitor_mutex);
++    pthread_cond_destroy(&priv->janitor_cond);
+     GF_FREE(priv->hostname);
+     GF_FREE(priv->trash_path);
+     GF_FREE(priv);
+diff --git a/xlators/storage/posix/src/posix-helpers.c b/xlators/storage/posix/src/posix-helpers.c
+index 07169b5..ef5bfd5 100644
+--- a/xlators/storage/posix/src/posix-helpers.c
++++ b/xlators/storage/posix/src/posix-helpers.c
+@@ -1432,12 +1432,24 @@ posix_janitor_task_done(int ret, call_frame_t *frame, void *data)
+     this = data;
+     priv = this->private;
+ 
++    pthread_mutex_lock(&priv->janitor_mutex);
++    {
++        if (priv->janitor_task_stop) {
++            priv->janitor_task_stop = _gf_false;
++            pthread_cond_signal(&priv->janitor_cond);
++            pthread_mutex_unlock(&priv->janitor_mutex);
++            goto out;
++        }
++    }
++    pthread_mutex_unlock(&priv->janitor_mutex);
++
+     LOCK(&priv->lock);
+     {
+         __posix_janitor_timer_start(this);
+     }
+     UNLOCK(&priv->lock);
+ 
++out:
+     return 0;
+ }
+ 
+@@ -1456,6 +1468,9 @@ posix_janitor_task(void *data)
+     old_this = THIS;
+     THIS = this;
+ 
++    if (!priv)
++        goto out;
++
+     time(&now);
+     if ((now - priv->last_landfill_check) > priv->janitor_sleep_duration) {
+         if (priv->disable_landfill_purge) {
+@@ -1475,6 +1490,7 @@ posix_janitor_task(void *data)
+ 
+     THIS = old_this;
+ 
++out:
+     return 0;
+ }
+ 
+diff --git a/xlators/storage/posix/src/posix.h b/xlators/storage/posix/src/posix.h
+index b0935a7..64288a7 100644
+--- a/xlators/storage/posix/src/posix.h
++++ b/xlators/storage/posix/src/posix.h
+@@ -203,6 +203,8 @@ struct posix_private {
+     struct list_head fsyncs;
+     pthread_mutex_t fsync_mutex;
+     pthread_cond_t fsync_cond;
++    pthread_mutex_t janitor_mutex;
++    pthread_cond_t janitor_cond;
+     int fsync_queue_count;
+ 
+     enum {
+@@ -257,6 +259,7 @@ struct posix_private {
+ 
+     gf_boolean_t fips_mode_rchecksum;
+     gf_boolean_t ctime;
++    gf_boolean_t janitor_task_stop;
+ };
+ 
+ typedef struct {
+-- 
+1.8.3.1
+

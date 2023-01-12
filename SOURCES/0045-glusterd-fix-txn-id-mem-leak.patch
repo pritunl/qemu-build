@@ -1,0 +1,126 @@
+From 6c004c6c8b8f98f56e186740881520b8364e6f85 Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Mon, 18 Mar 2019 16:08:04 +0530
+Subject: [PATCH 45/52] glusterd: fix txn-id mem leak
+
+This commit ensures the following:
+1. Don't send commit op request to the remote nodes when gluster v
+status all is executed as for the status all transaction the local
+commit gets the name of the volumes and remote commit ops are
+technically a no-op. So no need for additional rpc requests.
+2. In op state machine flow, if the transaction is in staged state and
+op_info.skip_locking is true, then no need to set the txn id in the
+priv->glusterd_txn_opinfo dictionary which never gets freed.
+
+> Fixes: bz#1691164
+> Change-Id: Ib6a9300ea29633f501abac2ba53fb72ff648c822
+> Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+
+upstream patch: https://review.gluster.org/#/c/glusterfs/+/22388/
+
+BUG: 1670415
+Change-Id: Ib6a9300ea29633f501abac2ba53fb72ff648c822
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/166449
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-op-sm.c  | 26 ++++++++++++++++++++------
+ xlators/mgmt/glusterd/src/glusterd-syncop.c | 16 ++++++++++++++++
+ 2 files changed, 36 insertions(+), 6 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-op-sm.c b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+index cbbb5d9..12d857a 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-op-sm.c
++++ b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+@@ -5652,6 +5652,9 @@ glusterd_op_ac_stage_op(glusterd_op_sm_event_t *event, void *ctx)
+     dict_t *dict = NULL;
+     xlator_t *this = NULL;
+     uuid_t *txn_id = NULL;
++    glusterd_op_info_t txn_op_info = {
++        {0},
++    };
+ 
+     this = THIS;
+     GF_ASSERT(this);
+@@ -5686,6 +5689,7 @@ glusterd_op_ac_stage_op(glusterd_op_sm_event_t *event, void *ctx)
+         ret = -1;
+         goto out;
+     }
++    ret = glusterd_get_txn_opinfo(&event->txn_id, &txn_op_info);
+ 
+     ret = dict_set_bin(rsp_dict, "transaction_id", txn_id, sizeof(*txn_id));
+     if (ret) {
+@@ -5704,6 +5708,12 @@ out:
+ 
+     gf_msg_debug(this->name, 0, "Returning with %d", ret);
+ 
++    /* for no volname transactions, the txn_opinfo needs to be cleaned up
++     * as there's no unlock event triggered
++     */
++    if (txn_op_info.skip_locking)
++        ret = glusterd_clear_txn_opinfo(txn_id);
++
+     if (rsp_dict)
+         dict_unref(rsp_dict);
+ 
+@@ -8159,12 +8169,16 @@ glusterd_op_sm()
+                            "Unable to clear "
+                            "transaction's opinfo");
+             } else {
+-                ret = glusterd_set_txn_opinfo(&event->txn_id, &opinfo);
+-                if (ret)
+-                    gf_msg(this->name, GF_LOG_ERROR, 0,
+-                           GD_MSG_TRANS_OPINFO_SET_FAIL,
+-                           "Unable to set "
+-                           "transaction's opinfo");
++                if (!(event_type == GD_OP_EVENT_STAGE_OP &&
++                      opinfo.state.state == GD_OP_STATE_STAGED &&
++                      opinfo.skip_locking)) {
++                    ret = glusterd_set_txn_opinfo(&event->txn_id, &opinfo);
++                    if (ret)
++                        gf_msg(this->name, GF_LOG_ERROR, 0,
++                               GD_MSG_TRANS_OPINFO_SET_FAIL,
++                               "Unable to set "
++                               "transaction's opinfo");
++                }
+             }
+ 
+             glusterd_destroy_op_event_ctx(event);
+diff --git a/xlators/mgmt/glusterd/src/glusterd-syncop.c b/xlators/mgmt/glusterd/src/glusterd-syncop.c
+index 1741cf8..618d8bc 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-syncop.c
++++ b/xlators/mgmt/glusterd/src/glusterd-syncop.c
+@@ -1392,6 +1392,8 @@ gd_commit_op_phase(glusterd_op_t op, dict_t *op_ctx, dict_t *req_dict,
+     char *errstr = NULL;
+     struct syncargs args = {0};
+     int type = GF_QUOTA_OPTION_TYPE_NONE;
++    uint32_t cmd = 0;
++    gf_boolean_t origin_glusterd = _gf_false;
+ 
+     this = THIS;
+     GF_ASSERT(this);
+@@ -1449,6 +1451,20 @@ commit_done:
+     gd_syncargs_init(&args, op_ctx);
+     synctask_barrier_init((&args));
+     peer_cnt = 0;
++    origin_glusterd = is_origin_glusterd(req_dict);
++
++    if (op == GD_OP_STATUS_VOLUME) {
++        ret = dict_get_uint32(req_dict, "cmd", &cmd);
++        if (ret)
++            goto out;
++
++        if (origin_glusterd) {
++            if ((cmd & GF_CLI_STATUS_ALL)) {
++                ret = 0;
++                goto out;
++            }
++        }
++    }
+ 
+     RCU_READ_LOCK;
+     cds_list_for_each_entry_rcu(peerinfo, &conf->peers, uuid_list)
+-- 
+1.8.3.1
+

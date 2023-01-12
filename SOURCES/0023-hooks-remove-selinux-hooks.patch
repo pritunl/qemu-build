@@ -1,0 +1,148 @@
+From 421743b7cfa6a249544f6abb4cca5a612bd20ea1 Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Tue, 11 Dec 2018 16:21:43 +0530
+Subject: [PATCH 23/52] hooks: remove selinux hooks
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I810466a0ca99ab21f5a8eac8cdffbb18333d10ad
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/135800
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Jiffin Thottan <jthottan@redhat.com>
+Reviewed-by: Milind Changire <mchangir@redhat.com>
+---
+ configure.ac                                | 20 --------------------
+ extras/hook-scripts/Makefile.am             |  2 +-
+ extras/hook-scripts/create/Makefile.am      |  1 -
+ extras/hook-scripts/create/post/Makefile.am |  8 --------
+ extras/hook-scripts/delete/Makefile.am      |  1 -
+ extras/hook-scripts/delete/pre/Makefile.am  |  8 --------
+ glusterfs.spec.in                           |  2 --
+ 7 files changed, 1 insertion(+), 41 deletions(-)
+ delete mode 100644 extras/hook-scripts/create/Makefile.am
+ delete mode 100644 extras/hook-scripts/create/post/Makefile.am
+ delete mode 100644 extras/hook-scripts/delete/Makefile.am
+ delete mode 100644 extras/hook-scripts/delete/pre/Makefile.am
+
+diff --git a/configure.ac b/configure.ac
+index 2f341de..0d06f5a 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -214,10 +214,6 @@ AC_CONFIG_FILES([Makefile
+                 extras/hook-scripts/add-brick/Makefile
+                 extras/hook-scripts/add-brick/pre/Makefile
+                 extras/hook-scripts/add-brick/post/Makefile
+-                extras/hook-scripts/create/Makefile
+-                extras/hook-scripts/create/post/Makefile
+-                extras/hook-scripts/delete/Makefile
+-                extras/hook-scripts/delete/pre/Makefile
+                 extras/hook-scripts/start/Makefile
+                 extras/hook-scripts/start/post/Makefile
+                 extras/hook-scripts/set/Makefile
+@@ -909,21 +905,6 @@ fi
+ AM_CONDITIONAL([BUILD_CLOUDSYNC], [test "x$BUILD_CLOUDSYNC" = "xyes"])
+ dnl end cloudsync section
+ 
+-dnl SELinux feature enablement
+-case $host_os in
+-  linux*)
+-    AC_ARG_ENABLE([selinux],
+-                  AC_HELP_STRING([--disable-selinux],
+-                                 [Disable SELinux features]),
+-                  [USE_SELINUX="${enableval}"], [USE_SELINUX="yes"])
+-    ;;
+-  *)
+-    USE_SELINUX=no
+-    ;;
+-esac
+-AM_CONDITIONAL(USE_SELINUX, test "x${USE_SELINUX}" = "xyes")
+-dnl end of SELinux feature enablement
+-
+ AC_CHECK_HEADERS([execinfo.h], [have_backtrace=yes])
+ if test "x${have_backtrace}" = "xyes"; then
+    AC_DEFINE(HAVE_BACKTRACE, 1, [define if found backtrace])
+@@ -1599,7 +1580,6 @@ echo "XML output           : $BUILD_XML_OUTPUT"
+ echo "Unit Tests           : $BUILD_UNITTEST"
+ echo "Track priv ports     : $TRACK_PRIVPORTS"
+ echo "POSIX ACLs           : $BUILD_POSIX_ACLS"
+-echo "SELinux features     : $USE_SELINUX"
+ echo "firewalld-config     : $BUILD_FIREWALLD"
+ echo "Events               : $BUILD_EVENTS"
+ echo "EC dynamic support   : $EC_DYNAMIC_SUPPORT"
+diff --git a/extras/hook-scripts/Makefile.am b/extras/hook-scripts/Makefile.am
+index 26059d7..771b37e 100644
+--- a/extras/hook-scripts/Makefile.am
++++ b/extras/hook-scripts/Makefile.am
+@@ -1,5 +1,5 @@
+ EXTRA_DIST = S40ufo-stop.py S56glusterd-geo-rep-create-post.sh
+-SUBDIRS = add-brick create delete set start stop reset
++SUBDIRS = add-brick set start stop reset
+ 
+ scriptsdir = $(GLUSTERD_WORKDIR)/hooks/1/gsync-create/post/
+ if USE_GEOREP
+diff --git a/extras/hook-scripts/create/Makefile.am b/extras/hook-scripts/create/Makefile.am
+deleted file mode 100644
+index b083a91..0000000
+--- a/extras/hook-scripts/create/Makefile.am
++++ /dev/null
+@@ -1 +0,0 @@
+-SUBDIRS = post
+diff --git a/extras/hook-scripts/create/post/Makefile.am b/extras/hook-scripts/create/post/Makefile.am
+deleted file mode 100644
+index fd1892e..0000000
+--- a/extras/hook-scripts/create/post/Makefile.am
++++ /dev/null
+@@ -1,8 +0,0 @@
+-EXTRA_DIST = S10selinux-label-brick.sh
+-
+-scriptsdir = $(GLUSTERD_WORKDIR)/hooks/1/create/post/
+-if WITH_SERVER
+-if USE_SELINUX
+-scripts_SCRIPTS = S10selinux-label-brick.sh
+-endif
+-endif
+diff --git a/extras/hook-scripts/delete/Makefile.am b/extras/hook-scripts/delete/Makefile.am
+deleted file mode 100644
+index c98a05d..0000000
+--- a/extras/hook-scripts/delete/Makefile.am
++++ /dev/null
+@@ -1 +0,0 @@
+-SUBDIRS = pre
+diff --git a/extras/hook-scripts/delete/pre/Makefile.am b/extras/hook-scripts/delete/pre/Makefile.am
+deleted file mode 100644
+index 4fbfbe7..0000000
+--- a/extras/hook-scripts/delete/pre/Makefile.am
++++ /dev/null
+@@ -1,8 +0,0 @@
+-EXTRA_DIST = S10selinux-del-fcontext.sh
+-
+-scriptsdir = $(GLUSTERD_WORKDIR)/hooks/1/delete/pre/
+-if WITH_SERVER
+-if USE_SELINUX
+-scripts_SCRIPTS = S10selinux-del-fcontext.sh
+-endif
+-endif
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index ec06176..db50b8e 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -1413,7 +1413,6 @@ exit 0
+             %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick/pre/S28Quota-enable-root-xattr-heal.sh
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/create
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/create/post
+-            %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/create/post/S10selinux-label-brick.sh
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/create/pre
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/copy-file
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/copy-file/post
+@@ -1422,7 +1421,6 @@ exit 0
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/delete/post
+                             %{_sharedstatedir}/glusterd/hooks/1/delete/post/S57glusterfind-delete-post
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/delete/pre
+-            %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/delete/pre/S10selinux-del-fcontext.sh
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/remove-brick
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/remove-brick/post
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/remove-brick/pre
+-- 
+1.8.3.1
+

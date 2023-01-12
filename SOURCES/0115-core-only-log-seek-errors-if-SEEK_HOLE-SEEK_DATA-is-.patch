@@ -1,0 +1,56 @@
+From 4901fcc0cc507accf30e1a4bdd020a5676488751 Mon Sep 17 00:00:00 2001
+From: Niels de Vos <ndevos@redhat.com>
+Date: Mon, 8 Apr 2019 12:14:34 +0200
+Subject: [PATCH 115/124] core: only log seek errors if SEEK_HOLE/SEEK_DATA is
+ available
+
+On RHEL-6 there is no support for SEEK_HOLE/SEEK_DATA and this causes
+the POSIX xlator to return errno=EINVAL. Because of this, the rpc-server
+xlator will log all 'failed' seek attempts. When applications call
+seek() often, the brick logs can grow very quickly and fill up the
+disks.
+
+Messages that get logged are like
+[server-rpc-fops.c:2091:server_seek_cbk] 0-vol01-server: 4947: SEEK-2 (53920aee-062c-4598-aa50-2b4d7821b204), client: worker.example.com-7808-2019/02/08-18:04:57:903430-vol01-client-0-0-0, error-xlator: vol01-posix [Invalid argument]
+
+The problem can be reproduced by running a Gluster Server on RHEL-6,
+with a client running on RHEL-7. The client should execute an
+application that calls lseek() with SEEK_HOLE/SEEK_DATA.
+
+>Change-Id: I7b6c16f8e0ba1a183e845cfdb8d5a3f8caeab138
+>Fixes: bz#1697316
+>Signed-off-by: Niels de Vos <ndevos@redhat.com>
+
+upstream patch: https://review.gluster.org/#/c/glusterfs/+/22526/
+
+BUG: 1696903
+Change-Id: I7b6c16f8e0ba1a183e845cfdb8d5a3f8caeab138
+Signed-off-by: Sunil Kumar Acharya <sheggodu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/168527
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ libglusterfs/src/common-utils.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/libglusterfs/src/common-utils.c b/libglusterfs/src/common-utils.c
+index a0c83c0..70d5d21 100644
+--- a/libglusterfs/src/common-utils.c
++++ b/libglusterfs/src/common-utils.c
+@@ -4500,9 +4500,13 @@ fop_log_level(glusterfs_fop_t fop, int op_errno)
+             return GF_LOG_DEBUG;
+ 
+     if (fop == GF_FOP_SEEK) {
++#ifdef HAVE_SEEK_HOLE
+         if (op_errno == ENXIO) {
+             return GF_LOG_DEBUG;
+         }
++#else
++        return GF_LOG_DEBUG;
++#endif
+     }
+ 
+     return GF_LOG_ERROR;
+-- 
+1.8.3.1
+

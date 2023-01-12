@@ -1,0 +1,336 @@
+From 023854d5573211d4737eb0ebe7ec954a7b7bb4ee Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Mon, 15 Apr 2019 10:34:34 +0530
+Subject: [PATCH 105/124] core: Log level changes do not effect on running
+ client process
+
+Problem: commit c34e4161f3cb6539ec83a9020f3d27eb4759a975 set log-level
+         per xlator during reconfigure only for a brick process not for
+         the client process.
+
+Solution: 1) Change per xlator log-level only if brick_mux is enabled.To make sure
+             about brick multiplex introudce a flag brick_mux at ctx->cmd_args.
+
+Note: There are two other changes done with this patch
+      1) Ignore client-log-level option to attach a brick with
+         already running brick if brick_mux is enabled
+      2) Add a log to print pid of the running process to make easier
+         debugging
+
+> Change-Id: I39e85de778e150d0685cd9a79425ce8b4783f9c9
+> Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+> Fixes: bz#1696046
+> (Cherry picked from commit 798aadbe51a9a02dd98a0f861cc239ecf7c8ed57)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/22495/)
+
+Change-Id: If82cc8e51cf00bd50d3321d31ec420f89786ea02
+Fixes: bz#1695081
+Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167828
+Tested-by: Mohit Agrawal <moagrawa@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ glusterfsd/src/glusterfsd-messages.h       |   2 +-
+ glusterfsd/src/glusterfsd.c                |  20 ++++-
+ glusterfsd/src/glusterfsd.h                |   1 +
+ libglusterfs/src/glusterfs/glusterfs.h     |   1 +
+ tests/bugs/glusterd/bug-1696046.t          | 113 +++++++++++++++++++++++++++++
+ xlators/debug/io-stats/src/io-stats.c      |  22 +++---
+ xlators/mgmt/glusterd/src/glusterd-utils.c |   7 ++
+ 7 files changed, 152 insertions(+), 14 deletions(-)
+ create mode 100644 tests/bugs/glusterd/bug-1696046.t
+
+diff --git a/glusterfsd/src/glusterfsd-messages.h b/glusterfsd/src/glusterfsd-messages.h
+index 94312a5..280624c 100644
+--- a/glusterfsd/src/glusterfsd-messages.h
++++ b/glusterfsd/src/glusterfsd-messages.h
+@@ -36,6 +36,6 @@ GLFS_MSGID(GLUSTERFSD, glusterfsd_msg_1, glusterfsd_msg_2, glusterfsd_msg_3,
+            glusterfsd_msg_31, glusterfsd_msg_32, glusterfsd_msg_33,
+            glusterfsd_msg_34, glusterfsd_msg_35, glusterfsd_msg_36,
+            glusterfsd_msg_37, glusterfsd_msg_38, glusterfsd_msg_39,
+-           glusterfsd_msg_40, glusterfsd_msg_41, glusterfsd_msg_42);
++           glusterfsd_msg_40, glusterfsd_msg_41, glusterfsd_msg_42, glusterfsd_msg_43);
+ 
+ #endif /* !_GLUSTERFSD_MESSAGES_H_ */
+diff --git a/glusterfsd/src/glusterfsd.c b/glusterfsd/src/glusterfsd.c
+index 3aa89ca..6aee4c1 100644
+--- a/glusterfsd/src/glusterfsd.c
++++ b/glusterfsd/src/glusterfsd.c
+@@ -85,8 +85,7 @@ static char gf_doc[] = "";
+ static char argp_doc[] =
+     "--volfile-server=SERVER [MOUNT-POINT]\n"
+     "--volfile=VOLFILE [MOUNT-POINT]";
+-const char *argp_program_version =
+-    PACKAGE_NAME" "PACKAGE_VERSION;
++const char *argp_program_version = PACKAGE_NAME " " PACKAGE_VERSION;
+ const char *argp_program_bug_address = "<" PACKAGE_BUGREPORT ">";
+ 
+ static error_t
+@@ -266,6 +265,7 @@ static struct argp_option gf_options[] = {
+      "attribute, dentry and page-cache. "
+      "Disable this only if same files/directories are not accessed across "
+      "two different mounts concurrently [default: \"on\"]"},
++    {"brick-mux", ARGP_BRICK_MUX_KEY, 0, 0, "Enable brick mux. "},
+     {0, 0, 0, 0, "Miscellaneous Options:"},
+     {
+         0,
+@@ -702,7 +702,6 @@ create_fuse_mount(glusterfs_ctx_t *ctx)
+     xlator_t *master = NULL;
+ 
+     cmd_args = &ctx->cmd_args;
+-
+     if (!cmd_args->mount_point) {
+         gf_msg_trace("glusterfsd", 0,
+                      "mount point not found, not a client process");
+@@ -1090,6 +1089,10 @@ parse_opts(int key, char *arg, struct argp_state *state)
+             cmd_args->thin_client = _gf_true;
+             break;
+ 
++        case ARGP_BRICK_MUX_KEY:
++            cmd_args->brick_mux = _gf_true;
++            break;
++
+         case ARGP_PID_FILE_KEY:
+             cmd_args->pid_file = gf_strdup(arg);
+             break;
+@@ -1207,7 +1210,6 @@ parse_opts(int key, char *arg, struct argp_state *state)
+         case ARGP_KEY_ARG:
+             if (state->arg_num >= 1)
+                 argp_usage(state);
+-
+             cmd_args->mount_point = gf_strdup(arg);
+             break;
+ 
+@@ -2540,6 +2542,8 @@ postfork:
+         if (ret)
+             goto out;
+     }
++    gf_log("glusterfs", GF_LOG_INFO, "Pid of current running process is %d",
++           getpid());
+     ret = gf_log_inject_timer_event(ctx);
+ 
+     glusterfs_signals_setup(ctx);
+@@ -2787,6 +2791,14 @@ main(int argc, char *argv[])
+     if (ret)
+         goto out;
+ 
++    /* set brick_mux mode only for server process */
++    if ((ctx->process_mode != GF_SERVER_PROCESS) && cmd->brick_mux) {
++        gf_msg("glusterfs", GF_LOG_CRITICAL, 0, glusterfsd_msg_43,
++               "command line argument --brick-mux is valid only for brick "
++               "process");
++        goto out;
++    }
++
+     /* log the version of glusterfs running here along with the actual
+        command line options. */
+     {
+diff --git a/glusterfsd/src/glusterfsd.h b/glusterfsd/src/glusterfsd.h
+index 35cf6d8..fa55789 100644
+--- a/glusterfsd/src/glusterfsd.h
++++ b/glusterfsd/src/glusterfsd.h
+@@ -111,6 +111,7 @@ enum argp_option_keys {
+     ARGP_FUSE_FLUSH_HANDLE_INTERRUPT_KEY = 189,
+     ARGP_FUSE_LRU_LIMIT_KEY = 190,
+     ARGP_FUSE_AUTO_INVAL_KEY = 191,
++    ARGP_BRICK_MUX_KEY = 192
+ };
+ 
+ struct _gfd_vol_top_priv {
+diff --git a/libglusterfs/src/glusterfs/glusterfs.h b/libglusterfs/src/glusterfs/glusterfs.h
+index deec5ba..fb727fc 100644
+--- a/libglusterfs/src/glusterfs/glusterfs.h
++++ b/libglusterfs/src/glusterfs/glusterfs.h
+@@ -575,6 +575,7 @@ struct _cmd_args {
+ 
+     int fuse_flush_handle_interrupt;
+     int fuse_auto_inval;
++    bool brick_mux;
+ };
+ typedef struct _cmd_args cmd_args_t;
+ 
+diff --git a/tests/bugs/glusterd/bug-1696046.t b/tests/bugs/glusterd/bug-1696046.t
+new file mode 100644
+index 0000000..e1c1eb2
+--- /dev/null
++++ b/tests/bugs/glusterd/bug-1696046.t
+@@ -0,0 +1,113 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++
++cleanup;
++
++function count_up_bricks {
++        $CLI --xml volume status $1 | grep '<status>1' | wc -l
++}
++
++function count_brick_processes {
++        pgrep glusterfsd | wc -l
++}
++
++logdir=`gluster --print-logdir`
++
++## Start and create a volume
++TEST glusterd;
++TEST pidof glusterd;
++
++TEST $CLI volume set all cluster.brick-multiplex on
++TEST $CLI volume create $V0 replica 3 $H0:$B0/${V0}{1,2,3};
++TEST $CLI volume create $V1 replica 3 $H0:$B0/${V1}{1,2,3};
++
++## Start volume and verify
++TEST $CLI volume start $V0;
++EXPECT 'Started' volinfo_field $V0 'Status';
++TEST $CLI volume start $V1;
++EXPECT 'Started' volinfo_field $V1 'Status';
++
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 4 count_up_bricks $V0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 4 count_up_bricks $V1
++
++EXPECT 1 count_brick_processes
++
++# Mount V0
++TEST glusterfs --volfile-id=$V0 --volfile-server=$H0 --entry-timeout=0 $M0;
++
++function client-log-file-name()
++{
++    logfilename=$M0".log"
++    echo ${logfilename:1} | tr / -
++}
++
++function brick-log-file-name()
++{
++    logfilename=$B0"/"$V0"1.log"
++    echo ${logfilename:1} | tr / -
++}
++
++log_file=$logdir"/"`client-log-file-name`
++nofdlog=$(cat $log_file | grep " D " | wc -l)
++TEST [ $((nofdlog)) -eq 0 ]
++
++brick_log_file=$logdir"/bricks/"`brick-log-file-name`
++nofdlog=$(cat $brick_log_file | grep " D " | wc -l)
++TEST [ $((nofdlog)) -eq 0 ]
++
++## Set brick-log-level to DEBUG
++TEST $CLI volume set $V0 diagnostics.brick-log-level DEBUG
++
++# Do some operation
++touch $M0/file1
++
++# Check debug message debug message should be exist only for V0
++# Server xlator is common in brick_mux so after enabling DEBUG log
++# some debug message should be available for other xlators like posix
++
++brick_log_file=$logdir"/bricks/"`brick-log-file-name`
++nofdlog=$(cat $brick_log_file | grep file1 | grep -v server | wc -l)
++TEST [ $((nofdlog)) -ne 0 ]
++
++#Check if any debug log exist in client-log file
++nofdlog=$(cat $log_file | grep " D " | wc -l)
++TEST [ $((nofdlog)) -eq 0 ]
++
++## Set brick-log-level to INFO
++TEST $CLI volume set $V0 diagnostics.brick-log-level INFO
++
++## Set client-log-level to DEBUG
++TEST $CLI volume set $V0 diagnostics.client-log-level DEBUG
++
++# Do some operation
++touch $M0/file2
++
++nofdlog=$(cat $brick_log_file | grep " D " | grep file2 | wc -l)
++TEST [ $((nofdlog)) -eq 0 ]
++
++nofdlog=$(cat $log_file | grep " D " | wc -l)
++TEST [ $((nofdlog)) -ne 0 ]
++
++# Unmount V0
++TEST umount $M0
++
++#Mount V1
++TEST glusterfs --volfile-id=$V1 --volfile-server=$H0 --entry-timeout=0 $M0;
++
++#do some operation
++touch $M0/file3
++
++
++# DEBUG log level is enabled only for V0 so no debug message should be available
++# in log specific to file2 creation except for server xlator, server xlator is
++# common xlator in brick mulitplex
++nofdlog=$(cat $brick_log_file | grep file3 | grep -v server | wc -l)
++TEST [ $((nofdlog)) -eq 0 ]
++
++# Unmount V1
++TEST umount $M0
++
++cleanup;
+diff --git a/xlators/debug/io-stats/src/io-stats.c b/xlators/debug/io-stats/src/io-stats.c
+index 41b57c5..aa91a0a 100644
+--- a/xlators/debug/io-stats/src/io-stats.c
++++ b/xlators/debug/io-stats/src/io-stats.c
+@@ -3704,19 +3704,23 @@ xlator_set_loglevel(xlator_t *this, int log_level)
+     active = ctx->active;
+     top = active->first;
+ 
+-    if (strcmp(top->type, "protocol/server") || (log_level == -1))
++    if (log_level == -1)
+         return;
+ 
+-    /* Set log-level for server xlator */
+-    top->loglevel = log_level;
++    if (ctx->cmd_args.brick_mux) {
++        /* Set log-level for all brick xlators */
++        top->loglevel = log_level;
+ 
+-    /* Set log-level for parent xlator */
+-    if (this->parents)
+-        this->parents->xlator->loglevel = log_level;
++        /* Set log-level for parent xlator */
++        if (this->parents)
++            this->parents->xlator->loglevel = log_level;
+ 
+-    while (trav) {
+-        trav->loglevel = log_level;
+-        trav = trav->next;
++        while (trav) {
++            trav->loglevel = log_level;
++            trav = trav->next;
++        }
++    } else {
++        gf_log_set_loglevel(this->ctx, log_level);
+     }
+ }
+ 
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index 2dd5f91..fdd7d91 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -2240,6 +2240,9 @@ retry:
+     if (volinfo->memory_accounting)
+         runner_add_arg(&runner, "--mem-accounting");
+ 
++    if (is_brick_mx_enabled())
++        runner_add_arg(&runner, "--brick-mux");
++
+     runner_log(&runner, "", 0, "Starting GlusterFS");
+ 
+     brickinfo->port = port;
+@@ -2378,6 +2381,10 @@ unsafe_option(dict_t *this, char *key, data_t *value, void *arg)
+         return _gf_false;
+     }
+ 
++    if (fnmatch("*diagnostics.client-log*", key, 0) == 0) {
++        return _gf_false;
++    }
++
+     return _gf_true;
+ }
+ 
+-- 
+1.8.3.1
+

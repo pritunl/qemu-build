@@ -1,0 +1,73 @@
+From d23ad767281af85cf07f5c3f63de482d40ee1953 Mon Sep 17 00:00:00 2001
+From: Shwetha K Acharya <sacharya@redhat.com>
+Date: Thu, 10 Sep 2020 13:16:12 +0530
+Subject: [PATCH 471/473] nfs-ganesha: gluster_shared_storage fails to
+ automount on node reboot on rhel 8
+
+The patch https://review.gluster.org/#/c/glusterfs/+/24934/, changes mount point
+of gluster_shared_storage from /var/run to /run to address the issue of symlink
+at mount path in fstab.
+NOTE: mount point /var/run is symlink to /run
+
+The required changes with respect to gluster_shared_storage mount path are
+introduced with this patch in nfs-ganesha.
+
+>Fixes: #1475
+>Change-Id: I9c7677a053e1291f71476d47ba6fa2e729f59625
+>Signed-off-by: Shwetha K Acharya <sacharya@redhat.com>
+
+backport of https://review.gluster.org/#/c/glusterfs/+/24970/
+BUG: 1873469
+Change-Id: I9c7677a053e1291f71476d47ba6fa2e729f59625
+Signed-off-by: Shwetha K Acharya <sacharya@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/211392
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/ganesha/ocf/ganesha_nfsd                    | 2 +-
+ extras/ganesha/scripts/ganesha-ha.sh               | 2 +-
+ extras/hook-scripts/start/post/S31ganesha-start.sh | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/extras/ganesha/ocf/ganesha_nfsd b/extras/ganesha/ocf/ganesha_nfsd
+index 93fc8be..f91e8b6 100644
+--- a/extras/ganesha/ocf/ganesha_nfsd
++++ b/extras/ganesha/ocf/ganesha_nfsd
+@@ -36,7 +36,7 @@ else
+ 	. ${OCF_FUNCTIONS_DIR}/ocf-shellfuncs
+ fi
+ 
+-OCF_RESKEY_ha_vol_mnt_default="/var/run/gluster/shared_storage"
++OCF_RESKEY_ha_vol_mnt_default="/run/gluster/shared_storage"
+ : ${OCF_RESKEY_ha_vol_mnt=${OCF_RESKEY_ha_vol_mnt_default}}
+ 
+ ganesha_meta_data() {
+diff --git a/extras/ganesha/scripts/ganesha-ha.sh b/extras/ganesha/scripts/ganesha-ha.sh
+index a6814b1..9790a71 100644
+--- a/extras/ganesha/scripts/ganesha-ha.sh
++++ b/extras/ganesha/scripts/ganesha-ha.sh
+@@ -24,7 +24,7 @@ GANESHA_HA_SH=$(realpath $0)
+ HA_NUM_SERVERS=0
+ HA_SERVERS=""
+ HA_VOL_NAME="gluster_shared_storage"
+-HA_VOL_MNT="/var/run/gluster/shared_storage"
++HA_VOL_MNT="/run/gluster/shared_storage"
+ HA_CONFDIR=$HA_VOL_MNT"/nfs-ganesha"
+ SERVICE_MAN="DISTRO_NOT_FOUND"
+ 
+diff --git a/extras/hook-scripts/start/post/S31ganesha-start.sh b/extras/hook-scripts/start/post/S31ganesha-start.sh
+index 90ba6bc..7ad6f23 100755
+--- a/extras/hook-scripts/start/post/S31ganesha-start.sh
++++ b/extras/hook-scripts/start/post/S31ganesha-start.sh
+@@ -4,7 +4,7 @@ OPTSPEC="volname:,gd-workdir:"
+ VOL=
+ declare -i EXPORT_ID
+ ganesha_key="ganesha.enable"
+-GANESHA_DIR="/var/run/gluster/shared_storage/nfs-ganesha"
++GANESHA_DIR="/run/gluster/shared_storage/nfs-ganesha"
+ CONF1="$GANESHA_DIR/ganesha.conf"
+ GLUSTERD_WORKDIR=
+ 
+-- 
+1.8.3.1
+

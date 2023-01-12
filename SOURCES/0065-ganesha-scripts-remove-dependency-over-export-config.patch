@@ -1,0 +1,58 @@
+From 7a47c004b907ed5469b78d559cae6d151e4d626b Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Thu, 23 Feb 2017 16:21:52 +0530
+Subject: [PATCH 065/124] ganesha/scripts : remove dependency over export
+ configuration file for unexport
+
+Currently unexport is performed by reading export id from volume configuration
+file. So unexport has dependency over that file. This patch will unexport with
+help of dbus command ShowExport. And it will only unexport the share which is
+added via cli.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I6f3c9b2bb48f0328b18e9cc0e4b9356174afd596
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://review.gluster.org/16771
+Smoke: Gluster Build System <jenkins@build.gluster.org>
+NetBSD-regression: NetBSD Build System <jenkins@build.gluster.org>
+CentOS-regression: Gluster Build System <jenkins@build.gluster.org>
+Reviewed-by: Kaleb KEITHLEY <kkeithle@redhat.com>
+Reviewed-by: Raghavendra Talur <rtalur@redhat.com>
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167150
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/ganesha/scripts/dbus-send.sh | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/extras/ganesha/scripts/dbus-send.sh b/extras/ganesha/scripts/dbus-send.sh
+index ec8d948..9d613a0 100755
+--- a/extras/ganesha/scripts/dbus-send.sh
++++ b/extras/ganesha/scripts/dbus-send.sh
+@@ -41,8 +41,18 @@ string:"EXPORT(Path=/$VOL)"
+ #This function removes an export dynamically(uses the export_id of the export)
+ function dynamic_export_remove()
+ {
+-        removed_id=`cat $GANESHA_DIR/exports/export.$VOL.conf |\
+-grep Export_Id | awk -F"[=,;]" '{print$2}'| tr -d '[[:space:]]'`
++        # Below bash fetch all the export from ShowExport command and search
++        # export entry based on path and then get its export entry.
++        # There are two possiblities for path, either entire volume will be
++        # exported or subdir. It handles both cases. But it remove only first
++        # entry from the list based on assumption that entry exported via cli
++        # has lowest export id value
++	removed_id=$(dbus-send --type=method_call --print-reply --system \
++                    --dest=org.ganesha.nfsd /org/ganesha/nfsd/ExportMgr \
++                    org.ganesha.nfsd.exportmgr.ShowExports | grep -B 1 -we \
++                    "/"$VOL -e "/"$VOL"/" | grep uint16 | awk '{print $2}' \
++		    | head -1)
++
+         dbus-send --print-reply --system \
+ --dest=org.ganesha.nfsd /org/ganesha/nfsd/ExportMgr \
+ org.ganesha.nfsd.exportmgr.RemoveExport uint16:$removed_id
+-- 
+1.8.3.1
+

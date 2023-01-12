@@ -1,0 +1,198 @@
+From ecaa0f10820f4b6e803021919ce59a43aedf356b Mon Sep 17 00:00:00 2001
+From: Ravishankar N <ravishankar@redhat.com>
+Date: Thu, 4 Jun 2020 16:15:35 +0530
+Subject: [PATCH 402/449] afr: wake up index healer threads
+
+...whenever shd is re-enabled after disabling or there is a change in
+`cluster.heal-timeout`, without needing to restart shd or waiting for the
+current `cluster.heal-timeout` seconds to expire.
+
+> Upstream patch link:https://review.gluster.org/#/c/glusterfs/+/23288/
+> Change-Id: Ia5ebd7c8e9f5b54cba3199c141fdd1af2f9b9bfe
+> fixes: bz#1744548
+> Reported-by: Glen Kiessling <glenk1973@hotmail.com>
+> Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+
+BUG: 1764091
+Change-Id: I42aa0807f09b5a09510fe9efb4a1697dad3410a3
+Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202368
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/replicate/bug-1744548-heal-timeout.t | 42 +++++++++++++++++++++++++
+ xlators/cluster/afr/src/afr-common.c            |  6 ++--
+ xlators/cluster/afr/src/afr-self-heald.c        | 14 ++++++---
+ xlators/cluster/afr/src/afr-self-heald.h        |  3 --
+ xlators/cluster/afr/src/afr.c                   | 10 ++++++
+ xlators/cluster/afr/src/afr.h                   |  2 ++
+ 6 files changed, 66 insertions(+), 11 deletions(-)
+ create mode 100644 tests/bugs/replicate/bug-1744548-heal-timeout.t
+
+diff --git a/tests/bugs/replicate/bug-1744548-heal-timeout.t b/tests/bugs/replicate/bug-1744548-heal-timeout.t
+new file mode 100644
+index 0000000..3cb73bc
+--- /dev/null
++++ b/tests/bugs/replicate/bug-1744548-heal-timeout.t
+@@ -0,0 +1,42 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../afr.rc
++
++cleanup;
++
++TEST glusterd;
++TEST pidof glusterd;
++TEST $CLI volume create $V0 replica 3 $H0:$B0/${V0}{0,1,2}
++TEST $CLI volume heal $V0 disable
++TEST $CLI volume start $V0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}2
++TEST ! $CLI volume heal $V0
++
++# Enable shd and verify that index crawl is triggered immediately.
++TEST $CLI volume profile $V0 start
++TEST $CLI volume profile $V0 info clear
++TEST $CLI volume heal $V0 enable
++TEST $CLI volume heal $V0
++# Each brick does 3 opendirs, corresponding to dirty, xattrop and entry-changes
++COUNT=`$CLI volume profile $V0 info incremental |grep OPENDIR|awk '{print $8}'|tr -d '\n'`
++TEST [ "$COUNT" == "333" ]
++
++# Check that a change in heal-timeout is honoured immediately.
++TEST $CLI volume set $V0 cluster.heal-timeout 5
++sleep 10
++COUNT=`$CLI volume profile $V0 info incremental |grep OPENDIR|awk '{print $8}'|tr -d '\n'`
++# Two crawls must have happened.
++TEST [ "$COUNT" == "666" ]
++
++# shd must not heal if it is disabled and heal-timeout is changed.
++TEST $CLI volume heal $V0 disable
++TEST $CLI volume profile $V0 info clear
++TEST $CLI volume set $V0 cluster.heal-timeout 6
++sleep 6
++COUNT=`$CLI volume profile $V0 info incremental |grep OPENDIR|awk '{print $8}'|tr -d '\n'`
++TEST [ -z $COUNT ]
++cleanup;
+diff --git a/xlators/cluster/afr/src/afr-common.c b/xlators/cluster/afr/src/afr-common.c
+index 3690b84..eef7fd2 100644
+--- a/xlators/cluster/afr/src/afr-common.c
++++ b/xlators/cluster/afr/src/afr-common.c
+@@ -5613,10 +5613,8 @@ afr_notify(xlator_t *this, int32_t event, void *data, void *data2)
+          * b) Already heard from everyone, but we now got a child-up
+          *    event.
+          */
+-        if (have_heard_from_all && priv->shd.iamshd) {
+-            for (i = 0; i < priv->child_count; i++)
+-                if (priv->child_up[i])
+-                    afr_selfheal_childup(this, i);
++        if (have_heard_from_all) {
++            afr_selfheal_childup(this, priv);
+         }
+     }
+ out:
+diff --git a/xlators/cluster/afr/src/afr-self-heald.c b/xlators/cluster/afr/src/afr-self-heald.c
+index 7eb1207..95ac5f2 100644
+--- a/xlators/cluster/afr/src/afr-self-heald.c
++++ b/xlators/cluster/afr/src/afr-self-heald.c
+@@ -1258,12 +1258,18 @@ out:
+     return ret;
+ }
+ 
+-int
+-afr_selfheal_childup(xlator_t *this, int subvol)
++void
++afr_selfheal_childup(xlator_t *this, afr_private_t *priv)
+ {
+-    afr_shd_index_healer_spawn(this, subvol);
++    int subvol = 0;
+ 
+-    return 0;
++    if (!priv->shd.iamshd)
++        return;
++    for (subvol = 0; subvol < priv->child_count; subvol++)
++        if (priv->child_up[subvol])
++            afr_shd_index_healer_spawn(this, subvol);
++
++    return;
+ }
+ 
+ int
+diff --git a/xlators/cluster/afr/src/afr-self-heald.h b/xlators/cluster/afr/src/afr-self-heald.h
+index 7de7c43..1990539 100644
+--- a/xlators/cluster/afr/src/afr-self-heald.h
++++ b/xlators/cluster/afr/src/afr-self-heald.h
+@@ -60,9 +60,6 @@ typedef struct {
+ } afr_self_heald_t;
+ 
+ int
+-afr_selfheal_childup(xlator_t *this, int subvol);
+-
+-int
+ afr_selfheal_daemon_init(xlator_t *this);
+ 
+ int
+diff --git a/xlators/cluster/afr/src/afr.c b/xlators/cluster/afr/src/afr.c
+index 33258a0..8f9e71f 100644
+--- a/xlators/cluster/afr/src/afr.c
++++ b/xlators/cluster/afr/src/afr.c
+@@ -141,6 +141,7 @@ reconfigure(xlator_t *this, dict_t *options)
+     afr_private_t *priv = NULL;
+     xlator_t *read_subvol = NULL;
+     int read_subvol_index = -1;
++    int timeout_old = 0;
+     int ret = -1;
+     int index = -1;
+     char *qtype = NULL;
+@@ -150,6 +151,7 @@ reconfigure(xlator_t *this, dict_t *options)
+     char *locking_scheme = NULL;
+     gf_boolean_t consistent_io = _gf_false;
+     gf_boolean_t choose_local_old = _gf_false;
++    gf_boolean_t enabled_old = _gf_false;
+ 
+     priv = this->private;
+ 
+@@ -255,11 +257,13 @@ reconfigure(xlator_t *this, dict_t *options)
+     GF_OPTION_RECONF("ensure-durability", priv->ensure_durability, options,
+                      bool, out);
+ 
++    enabled_old = priv->shd.enabled;
+     GF_OPTION_RECONF("self-heal-daemon", priv->shd.enabled, options, bool, out);
+ 
+     GF_OPTION_RECONF("iam-self-heal-daemon", priv->shd.iamshd, options, bool,
+                      out);
+ 
++    timeout_old = priv->shd.timeout;
+     GF_OPTION_RECONF("heal-timeout", priv->shd.timeout, options, int32, out);
+ 
+     GF_OPTION_RECONF("consistent-metadata", priv->consistent_metadata, options,
+@@ -283,6 +287,12 @@ reconfigure(xlator_t *this, dict_t *options)
+         consistent_io = _gf_false;
+     priv->consistent_io = consistent_io;
+ 
++    if (priv->shd.enabled) {
++        if ((priv->shd.enabled != enabled_old) ||
++            (timeout_old != priv->shd.timeout))
++            afr_selfheal_childup(this, priv);
++    }
++
+     ret = 0;
+ out:
+     return ret;
+diff --git a/xlators/cluster/afr/src/afr.h b/xlators/cluster/afr/src/afr.h
+index e731cfa..18f1a6a 100644
+--- a/xlators/cluster/afr/src/afr.h
++++ b/xlators/cluster/afr/src/afr.h
+@@ -1332,4 +1332,6 @@ afr_lookup_has_quorum(call_frame_t *frame, xlator_t *this,
+ void
+ afr_mark_new_entry_changelog(call_frame_t *frame, xlator_t *this);
+ 
++void
++afr_selfheal_childup(xlator_t *this, afr_private_t *priv);
+ #endif /* __AFR_H__ */
+-- 
+1.8.3.1
+

@@ -1,0 +1,92 @@
+From 79fff98f9ca5f815cf0227312b9a997d555dad29 Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Wed, 22 May 2019 13:32:23 +0530
+Subject: [PATCH 166/169] glusterd/svc: glusterd_svcs_stop should call
+ individual wrapper function
+
+glusterd_svcs_stop should call individual wrapper function to stop a
+daemon rather than calling glusterd_svc_stop. For example for shd,
+it should call glusterd_shdsvc_stop instead of calling basic API
+function to stop. Because the individual functions for each daemon
+could be doing some specific operation in their wrapper function.
+
+Upstream patch: https://review.gluster.org/#/c/glusterfs/+/22761/
+
+>Change-Id: Ie6d40590251ad470ef3901d1141ab7b22c3498f5
+>fixes: bz#1712741
+>Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+
+Change-Id: I6df03e53f08c337d5d9b0e855a0b77894a2aacc9
+BUG: 1716865
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172288
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-shd-svc.c    | 12 ++++++++++--
+ xlators/mgmt/glusterd/src/glusterd-svc-helper.c | 10 +++++-----
+ 2 files changed, 15 insertions(+), 7 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+index 75f9a07..981cc87 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+@@ -656,10 +656,18 @@ glusterd_shdsvc_stop(glusterd_svc_t *svc, int sig)
+     int pid = -1;
+ 
+     conf = THIS->private;
++    GF_VALIDATE_OR_GOTO("glusterd", conf, out);
+     GF_VALIDATE_OR_GOTO("glusterd", svc, out);
+     svc_proc = svc->svc_proc;
+-    GF_VALIDATE_OR_GOTO("glusterd", svc_proc, out);
+-    GF_VALIDATE_OR_GOTO("glusterd", conf, out);
++    if (!svc_proc) {
++        /*
++         * This can happen when stop was called on a volume that is not shd
++         * compatible.
++         */
++        gf_msg_debug("glusterd", 0, "svc_proc is null, ie shd already stopped");
++        ret = 0;
++        goto out;
++    }
+ 
+     /* Get volinfo->shd from svc object */
+     shd = cds_list_entry(svc, glusterd_shdsvc_t, svc);
+diff --git a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+index f7be394..6a3ca52 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
++++ b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+@@ -86,25 +86,25 @@ glusterd_svcs_stop(glusterd_volinfo_t *volinfo)
+     priv = this->private;
+     GF_ASSERT(priv);
+ 
+-    ret = glusterd_svc_stop(&(priv->nfs_svc), SIGKILL);
++    ret = priv->nfs_svc.stop(&(priv->nfs_svc), SIGKILL);
+     if (ret)
+         goto out;
+ 
+-    ret = glusterd_svc_stop(&(priv->quotad_svc), SIGTERM);
++    ret = priv->quotad_svc.stop(&(priv->quotad_svc), SIGTERM);
+     if (ret)
+         goto out;
+ 
+     if (volinfo) {
+-        ret = glusterd_svc_stop(&(volinfo->shd.svc), PROC_START_NO_WAIT);
++        ret = volinfo->shd.svc.stop(&(volinfo->shd.svc), SIGTERM);
+         if (ret)
+             goto out;
+     }
+ 
+-    ret = glusterd_svc_stop(&(priv->bitd_svc), SIGTERM);
++    ret = priv->bitd_svc.stop(&(priv->bitd_svc), SIGTERM);
+     if (ret)
+         goto out;
+ 
+-    ret = glusterd_svc_stop(&(priv->scrub_svc), SIGTERM);
++    ret = priv->scrub_svc.stop(&(priv->scrub_svc), SIGTERM);
+ out:
+     return ret;
+ }
+-- 
+1.8.3.1
+

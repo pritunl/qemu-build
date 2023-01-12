@@ -1,0 +1,111 @@
+From 5b3fcc8db86b4dc7af1eb63315ca2ff41c60fdea Mon Sep 17 00:00:00 2001
+From: kshithijiyer <kshithij.ki@gmail.com>
+Date: Sat, 30 Nov 2019 15:25:11 +0530
+Subject: [PATCH 395/449] [Cli] Removing old log rotate command.
+
+The old command for log rotate is still present removing
+it completely. Also adding testcase to test the
+log rotate command with both the old as well as the new command
+and fixing testcase which use the old syntax to use the new
+one.
+
+Code to be removed:
+1. In cli-cmd-volume.c from struct cli_cmd volume_cmds[]:
+{"volume log rotate <VOLNAME> [BRICK]", cli_cmd_log_rotate_cbk,
+ "rotate the log file for corresponding volume/brick"
+ " NOTE: This is an old syntax, will be deprecated from next release."},
+
+2. In cli-cmd-volume.c from cli_cmd_log_rotate_cbk():
+ ||(strcmp("rotate", words[2]) == 0)))
+
+3. In cli-cmd-parser.c from cli_cmd_log_rotate_parse()
+if (strcmp("rotate", words[2]) == 0)
+   volname = (char *)words[3];
+else
+
+> upstream patch link: https://review.gluster.org/#/c/glusterfs/+/23392/
+> fixes: bz#1750387
+> Change-Id: I56e4d295044e8d5fd1fc0d848bc87e135e9e32b4
+> Signed-off-by: kshithijiyer <kshithij.ki@gmail.com>
+
+BUG: 1784415
+Change-Id: I56e4d295044e8d5fd1fc0d848bc87e135e9e32b4
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202334
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ cli/src/cli-cmd-parser.c                        | 2 --
+ cli/src/cli-cmd-volume.c                        | 7 +------
+ tests/bugs/glusterd/optimized-basic-testcases.t | 3 ++-
+ tests/bugs/glusterfs-server/bug-852147.t        | 2 +-
+ 4 files changed, 4 insertions(+), 10 deletions(-)
+
+diff --git a/cli/src/cli-cmd-parser.c b/cli/src/cli-cmd-parser.c
+index 4456a7b..ac0a263 100644
+--- a/cli/src/cli-cmd-parser.c
++++ b/cli/src/cli-cmd-parser.c
+@@ -2592,8 +2592,6 @@ cli_cmd_log_rotate_parse(const char **words, int wordcount, dict_t **options)
+ 
+     if (strcmp("rotate", words[3]) == 0)
+         volname = (char *)words[2];
+-    else if (strcmp("rotate", words[2]) == 0)
+-        volname = (char *)words[3];
+     GF_ASSERT(volname);
+ 
+     ret = dict_set_str(dict, "volname", volname);
+diff --git a/cli/src/cli-cmd-volume.c b/cli/src/cli-cmd-volume.c
+index 754d333..f33fc99 100644
+--- a/cli/src/cli-cmd-volume.c
++++ b/cli/src/cli-cmd-volume.c
+@@ -2349,8 +2349,7 @@ cli_cmd_log_rotate_cbk(struct cli_state *state, struct cli_cmd_word *word,
+         goto out;
+     }
+ 
+-    if (!((strcmp("rotate", words[2]) == 0) ||
+-          (strcmp("rotate", words[3]) == 0))) {
++    if (!(strcmp("rotate", words[3]) == 0)) {
+         cli_usage_out(word->pattern);
+         parse_error = 1;
+         goto out;
+@@ -3401,10 +3400,6 @@ struct cli_cmd volume_cmds[] = {
+     {"volume log <VOLNAME> rotate [BRICK]", cli_cmd_log_rotate_cbk,
+      "rotate the log file for corresponding volume/brick"},
+ 
+-    {"volume log rotate <VOLNAME> [BRICK]", cli_cmd_log_rotate_cbk,
+-     "rotate the log file for corresponding volume/brick"
+-     " NOTE: This is an old syntax, will be deprecated from next release."},
+-
+     {"volume sync <HOSTNAME> [all|<VOLNAME>]", cli_cmd_sync_volume_cbk,
+      "sync the volume information from a peer"},
+ 
+diff --git a/tests/bugs/glusterd/optimized-basic-testcases.t b/tests/bugs/glusterd/optimized-basic-testcases.t
+index c7e8c32..862f329 100644
+--- a/tests/bugs/glusterd/optimized-basic-testcases.t
++++ b/tests/bugs/glusterd/optimized-basic-testcases.t
+@@ -129,7 +129,8 @@ TEST ! $CLI volume set all $V0 cluster.op-version $OP_VERS_NEW
+ 
+ #bug-1022055 - validate log rotate command
+ 
+-TEST $CLI volume log rotate $V0;
++TEST ! $CLI volume log rotate $V0;
++TEST $CLI volume log $V0 rotate;
+ 
+ #bug-1092841 - validating barrier enable/disable
+ 
+diff --git a/tests/bugs/glusterfs-server/bug-852147.t b/tests/bugs/glusterfs-server/bug-852147.t
+index c644cfa..75db2a2 100755
+--- a/tests/bugs/glusterfs-server/bug-852147.t
++++ b/tests/bugs/glusterfs-server/bug-852147.t
+@@ -66,7 +66,7 @@ ren_file=$log_file".*"
+ rm -rf $ren_file
+ 
+ #Initiating log rotate
+-TEST $CLI volume log rotate $V0
++TEST $CLI volume log $V0 rotate
+ 
+ #Capturing new log file's size
+ new_file_size=`file-size $log_file`
+-- 
+1.8.3.1
+

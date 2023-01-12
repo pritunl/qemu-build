@@ -1,0 +1,412 @@
+From 02a93265fe4e78e7fc3fa8c6caa773cbe02f50b6 Mon Sep 17 00:00:00 2001
+From: Anoop C S <anoopcs@redhat.com>
+Date: Fri, 20 Dec 2019 16:01:59 +0530
+Subject: [PATCH 344/344] Revert all fixes to include SELinux hook scripts
+
+Following are the reverts included with this change:
+
+Revert "extras/hooks: syntactical errors in SELinux hooks, scipt logic improved"
+Revert "Revert "hooks: remove selinux hooks""
+Revert "tests: subdir-mount.t is failing for brick_mux regrssion"
+Revert "extras/hooks: Install and package newly added post add-brick hook script"
+Revert "extras/hooks: Add SELinux label on new bricks during add-brick"
+
+Label: DOWNSTREAM ONLY
+
+See bug for more details.
+
+Change-Id: I5c9b9e0e6446568ce16af17257fa39338198a827
+BUG: 1686800
+Signed-off-by: Anoop C S <anoopcs@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/188169
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ configure.ac                                       |   4 -
+ extras/hook-scripts/Makefile.am                    |   2 +-
+ extras/hook-scripts/add-brick/post/Makefile.am     |   4 +-
+ .../add-brick/post/S10selinux-label-brick.sh       | 100 ---------------------
+ extras/hook-scripts/create/Makefile.am             |   1 -
+ extras/hook-scripts/create/post/Makefile.am        |   6 --
+ .../create/post/S10selinux-label-brick.sh          |  13 ++-
+ extras/hook-scripts/delete/Makefile.am             |   1 -
+ extras/hook-scripts/delete/pre/Makefile.am         |   6 --
+ .../delete/pre/S10selinux-del-fcontext.sh          |  60 ++++++-------
+ glusterfs.spec.in                                  |   3 -
+ tests/bugs/glusterfs-server/bug-877992.t           |   4 +-
+ tests/features/subdir-mount.t                      |  11 +--
+ 13 files changed, 37 insertions(+), 178 deletions(-)
+ delete mode 100755 extras/hook-scripts/add-brick/post/S10selinux-label-brick.sh
+ delete mode 100644 extras/hook-scripts/create/Makefile.am
+ delete mode 100644 extras/hook-scripts/create/post/Makefile.am
+ delete mode 100644 extras/hook-scripts/delete/Makefile.am
+ delete mode 100644 extras/hook-scripts/delete/pre/Makefile.am
+
+diff --git a/configure.ac b/configure.ac
+index 98ee311..327733e 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -221,10 +221,6 @@ AC_CONFIG_FILES([Makefile
+                 extras/hook-scripts/add-brick/Makefile
+                 extras/hook-scripts/add-brick/pre/Makefile
+                 extras/hook-scripts/add-brick/post/Makefile
+-                extras/hook-scripts/create/Makefile
+-                extras/hook-scripts/create/post/Makefile
+-                extras/hook-scripts/delete/Makefile
+-                extras/hook-scripts/delete/pre/Makefile
+                 extras/hook-scripts/start/Makefile
+                 extras/hook-scripts/start/post/Makefile
+                 extras/hook-scripts/set/Makefile
+diff --git a/extras/hook-scripts/Makefile.am b/extras/hook-scripts/Makefile.am
+index 26059d7..771b37e 100644
+--- a/extras/hook-scripts/Makefile.am
++++ b/extras/hook-scripts/Makefile.am
+@@ -1,5 +1,5 @@
+ EXTRA_DIST = S40ufo-stop.py S56glusterd-geo-rep-create-post.sh
+-SUBDIRS = add-brick create delete set start stop reset
++SUBDIRS = add-brick set start stop reset
+ 
+ scriptsdir = $(GLUSTERD_WORKDIR)/hooks/1/gsync-create/post/
+ if USE_GEOREP
+diff --git a/extras/hook-scripts/add-brick/post/Makefile.am b/extras/hook-scripts/add-brick/post/Makefile.am
+index 9b236df..bfc0c1c 100644
+--- a/extras/hook-scripts/add-brick/post/Makefile.am
++++ b/extras/hook-scripts/add-brick/post/Makefile.am
+@@ -1,6 +1,6 @@
+-EXTRA_DIST = disabled-quota-root-xattr-heal.sh S10selinux-label-brick.sh S13create-subdir-mounts.sh
++EXTRA_DIST = disabled-quota-root-xattr-heal.sh S13create-subdir-mounts.sh
+ 
+ hookdir = $(GLUSTERD_WORKDIR)/hooks/1/add-brick/post/
+ if WITH_SERVER
+-hook_SCRIPTS = disabled-quota-root-xattr-heal.sh S10selinux-label-brick.sh S13create-subdir-mounts.sh
++hook_SCRIPTS = disabled-quota-root-xattr-heal.sh S13create-subdir-mounts.sh
+ endif
+diff --git a/extras/hook-scripts/add-brick/post/S10selinux-label-brick.sh b/extras/hook-scripts/add-brick/post/S10selinux-label-brick.sh
+deleted file mode 100755
+index 4a17c99..0000000
+--- a/extras/hook-scripts/add-brick/post/S10selinux-label-brick.sh
++++ /dev/null
+@@ -1,100 +0,0 @@
+-#!/bin/bash
+-#
+-# Install to hooks/<HOOKS_VER>/add-brick/post
+-#
+-# Add an SELinux file context for each brick using the glusterd_brick_t type.
+-# This ensures that the brick is relabeled correctly on an SELinux restart or
+-# restore. Subsequently, run a restore on the brick path to set the selinux
+-# labels.
+-#
+-###
+-
+-PROGNAME="Sselinux"
+-OPTSPEC="volname:,version:,gd-workdir:,volume-op:"
+-VOL=
+-
+-parse_args () {
+-  ARGS=$(getopt -o '' -l ${OPTSPEC} -n ${PROGNAME} -- "$@")
+-  eval set -- "${ARGS}"
+-
+-  while true; do
+-    case ${1} in
+-      --volname)
+-        shift
+-        VOL=${1}
+-        ;;
+-      --gd-workdir)
+-          shift
+-          GLUSTERD_WORKDIR=$1
+-          ;;
+-      --version)
+-          shift
+-          ;;
+-      --volume-op)
+-          shift
+-          ;;
+-      *)
+-          shift
+-          break
+-          ;;
+-    esac
+-    shift
+-  done
+-}
+-
+-set_brick_labels()
+-{
+-  local volname="${1}"
+-  local fctx
+-  local list=()
+-
+-  fctx="$(semanage fcontext --list -C)"
+-
+-  # wait for new brick path to be updated under
+-  # ${GLUSTERD_WORKDIR}/vols/${volname}/bricks/
+-  sleep 5
+-
+-  # grab the path for each local brick
+-  brickpath="${GLUSTERD_WORKDIR}/vols/${volname}/bricks/"
+-  brickdirs=$(
+-    find "${brickpath}" -type f -exec grep '^path=' {} \; | \
+-    cut -d= -f 2 | \
+-    sort -u
+-  )
+-
+-  # create a list of bricks for which custom SELinux
+-  # label doesn't exist
+-  for b in ${brickdirs}; do
+-    pattern="${b}(/.*)?"
+-    echo "${fctx}" | grep "^${pattern}\s" >/dev/null
+-    if [[ $? -ne 0 ]]; then
+-      list+=("${pattern}")
+-    fi
+-  done
+-
+-  # Add a file context for each brick path in the list and associate with the
+-  # glusterd_brick_t SELinux type.
+-  for p in ${list[@]}
+-  do
+-    semanage fcontext --add -t glusterd_brick_t -r s0 "${p}"
+-  done
+-
+-  # Set the labels for which SELinux label was added above
+-  for b in ${brickdirs}
+-  do
+-    echo "${list[@]}" | grep "${b}" >/dev/null
+-    if [[ $? -eq 0 ]]; then
+-      restorecon -R "${b}"
+-    fi
+-  done
+-}
+-
+-SELINUX_STATE=$(which getenforce && getenforce)
+-[ "${SELINUX_STATE}" = 'Disabled' ] && exit 0
+-
+-parse_args "$@"
+-[ -z "${VOL}" ] && exit 1
+-
+-set_brick_labels "${VOL}"
+-
+-exit 0
+diff --git a/extras/hook-scripts/create/Makefile.am b/extras/hook-scripts/create/Makefile.am
+deleted file mode 100644
+index b083a91..0000000
+--- a/extras/hook-scripts/create/Makefile.am
++++ /dev/null
+@@ -1 +0,0 @@
+-SUBDIRS = post
+diff --git a/extras/hook-scripts/create/post/Makefile.am b/extras/hook-scripts/create/post/Makefile.am
+deleted file mode 100644
+index 919801a..0000000
+--- a/extras/hook-scripts/create/post/Makefile.am
++++ /dev/null
+@@ -1,6 +0,0 @@
+-EXTRA_DIST = S10selinux-label-brick.sh
+-
+-scriptsdir = $(GLUSTERD_WORKDIR)/hooks/1/create/post/
+-if WITH_SERVER
+-scripts_SCRIPTS = S10selinux-label-brick.sh
+-endif
+diff --git a/extras/hook-scripts/create/post/S10selinux-label-brick.sh b/extras/hook-scripts/create/post/S10selinux-label-brick.sh
+index f9b4b1a..de242d2 100755
+--- a/extras/hook-scripts/create/post/S10selinux-label-brick.sh
++++ b/extras/hook-scripts/create/post/S10selinux-label-brick.sh
+@@ -34,21 +34,18 @@ parse_args () {
+ 
+ set_brick_labels()
+ {
+-  volname="${1}"
++  volname=${1}
+ 
+   # grab the path for each local brick
+-  brickpath="/var/lib/glusterd/vols/${volname}/bricks/"
+-  brickdirs=$(
+-    find "${brickpath}" -type f -exec grep '^path=' {} \; | \
+-    cut -d= -f 2 | \
+-    sort -u
+-  )
++  brickpath="/var/lib/glusterd/vols/${volname}/bricks/*"
++  brickdirs=$(grep '^path=' "${brickpath}" | cut -d= -f 2 | sort -u)
+ 
+   for b in ${brickdirs}; do
+     # Add a file context for each brick path and associate with the
+     # glusterd_brick_t SELinux type.
+-    pattern="${b}(/.*)?"
++    pattern="${b}\(/.*\)?"
+     semanage fcontext --add -t glusterd_brick_t -r s0 "${pattern}"
++
+     # Set the labels on the new brick path.
+     restorecon -R "${b}"
+   done
+diff --git a/extras/hook-scripts/delete/Makefile.am b/extras/hook-scripts/delete/Makefile.am
+deleted file mode 100644
+index c98a05d..0000000
+--- a/extras/hook-scripts/delete/Makefile.am
++++ /dev/null
+@@ -1 +0,0 @@
+-SUBDIRS = pre
+diff --git a/extras/hook-scripts/delete/pre/Makefile.am b/extras/hook-scripts/delete/pre/Makefile.am
+deleted file mode 100644
+index 93a6b85..0000000
+--- a/extras/hook-scripts/delete/pre/Makefile.am
++++ /dev/null
+@@ -1,6 +0,0 @@
+-EXTRA_DIST = S10selinux-del-fcontext.sh
+-
+-scriptsdir = $(GLUSTERD_WORKDIR)/hooks/1/delete/pre/
+-if WITH_SERVER
+-scripts_SCRIPTS = S10selinux-del-fcontext.sh
+-endif
+diff --git a/extras/hook-scripts/delete/pre/S10selinux-del-fcontext.sh b/extras/hook-scripts/delete/pre/S10selinux-del-fcontext.sh
+index e7f4e8f..6eba66f 100755
+--- a/extras/hook-scripts/delete/pre/S10selinux-del-fcontext.sh
++++ b/extras/hook-scripts/delete/pre/S10selinux-del-fcontext.sh
+@@ -15,55 +15,45 @@ OPTSPEC="volname:"
+ VOL=
+ 
+ function parse_args () {
+-  ARGS=$(getopt -o '' -l ${OPTSPEC} -n ${PROGNAME} -- "$@")
+-  eval set -- "${ARGS}"
+-
+-  while true; do
+-    case ${1} in
+-      --volname)
+-        shift
+-        VOL=${1}
+-      ;;
+-      *)
++        ARGS=$(getopt -o '' -l $OPTSPEC -n $PROGNAME -- "$@")
++        eval set -- "$ARGS"
++
++        while true; do
++        case $1 in
++        --volname)
++         shift
++         VOL=$1
++         ;;
++        *)
++         shift
++         break
++         ;;
++        esac
+         shift
+-        break
+-      ;;
+-    esac
+-    shift
+-  done
++        done
+ }
+ 
+ function delete_brick_fcontext()
+ {
+-  volname="${1}"
+-
+-  # grab the path for each local brick
+-  brickpath="/var/lib/glusterd/vols/${volname}/bricks/"
+-  brickdirs=$(
+-    find "${brickpath}" -type f -exec grep '^path=' {} \; | \
+-    cut -d= -f 2 | \
+-    sort -u
+-  )
+-
+-  for b in ${brickdirs}
+-  do
+-    # remove the file context associated with the brick path
+-    pattern="${b}(/.*)?"
+-    semanage fcontext --delete "${pattern}"
++        volname=$1
+ 
+-    # remove the labels on brick path.
+-    restorecon -R "${b}"
+- done
++        # grab the path for each local brick
++        brickdirs=$(grep '^path=' /var/lib/glusterd/vols/${volname}/bricks/* | cut -d= -f 2)
+ 
++        for b in $brickdirs
++        do
++                # remove the file context associated with the brick path
++                semanage fcontext --delete $b\(/.*\)?
++        done
+ }
+ 
+ SELINUX_STATE=$(which getenforce && getenforce)
+ [ "${SELINUX_STATE}" = 'Disabled' ] && exit 0
+ 
+ parse_args "$@"
+-[ -z "${VOL}" ] && exit 1
++[ -z "$VOL" ] && exit 1
+ 
+-delete_brick_fcontext "${VOL}"
++delete_brick_fcontext $VOL
+ 
+ # failure to delete the fcontext is not fatal
+ exit 0
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 012989a..671ee27 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -1447,13 +1447,11 @@ exit 0
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick/post
+             %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick/post/disabled-quota-root-xattr-heal.sh
+-            %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick/post/S10selinux-label-brick.sh
+             %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick/post/S13create-subdir-mounts.sh
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick/pre
+             %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick/pre/S28Quota-enable-root-xattr-heal.sh
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/create
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/create/post
+-            %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/create/post/S10selinux-label-brick.sh
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/create/pre
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/copy-file
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/copy-file/post
+@@ -1462,7 +1460,6 @@ exit 0
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/delete/post
+                             %{_sharedstatedir}/glusterd/hooks/1/delete/post/S57glusterfind-delete-post
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/delete/pre
+-            %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/delete/pre/S10selinux-del-fcontext.sh
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/remove-brick
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/remove-brick/post
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/remove-brick/pre
+diff --git a/tests/bugs/glusterfs-server/bug-877992.t b/tests/bugs/glusterfs-server/bug-877992.t
+index 300000b..aeb73ed 100755
+--- a/tests/bugs/glusterfs-server/bug-877992.t
++++ b/tests/bugs/glusterfs-server/bug-877992.t
+@@ -46,9 +46,7 @@ TEST $CLI volume create $V0 $H0:$B0/${V0}1;
+ EXPECT "$V0" volinfo_field $V0 'Volume Name';
+ EXPECT 'Created' volinfo_field $V0 'Status';
+ EXPECT 'createPre' cat /tmp/pre.out;
+-# Spost.sh comes after S10selinux-label-brick.sh under create post hook script
+-# list. So consider the delay in setting SELinux context on bricks
+-EXPECT_WITHIN 5 'createPost' cat /tmp/post.out;
++EXPECT 'createPost' cat /tmp/post.out;
+ hooks_cleanup 'create'
+ 
+ 
+diff --git a/tests/features/subdir-mount.t b/tests/features/subdir-mount.t
+index a02bd6b..8401946 100644
+--- a/tests/features/subdir-mount.t
++++ b/tests/features/subdir-mount.t
+@@ -85,17 +85,12 @@ TEST $CLI volume start $V0
+ TEST $GFS --subdir-mount /subdir1/subdir1.1/subdir1.2 -s $H0 --volfile-id $V0 $M2
+ TEST stat $M2
+ 
+-initcnt=`grep -i create-subdir-mounts /var/log/glusterfs/glusterd.log  | wc -l`
+ # mount shouldn't fail even after add-brick
+ TEST $CLI volume add-brick $V0 replica 2 $H0:$B0/${V0}{5,6};
+ 
+-# Wait to execute create-subdir-mounts.sh script by glusterd
+-newcnt=`grep -i create-subdir-mounts /var/log/glusterfs/glusterd.log  | wc -l`
+-while [ $newcnt -eq $initcnt ]
+-do
+-   newcnt=`grep -i create-subdir-mounts /var/log/glusterfs/glusterd.log  | wc -l`
+-   sleep 1
+-done
++# Give time for client process to get notified and use the new
++# volfile after add-brick
++sleep 1
+ 
+ # Existing mount should still be active
+ mount_inode=$(stat --format "%i" "$M2")
+-- 
+1.8.3.1
+

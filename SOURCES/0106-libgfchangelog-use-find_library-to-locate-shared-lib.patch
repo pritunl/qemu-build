@@ -1,0 +1,111 @@
+From 55d945603bb52f0787c5200118673d6206ec3492 Mon Sep 17 00:00:00 2001
+From: Sunny Kumar <sunkumar@redhat.com>
+Date: Fri, 12 Apr 2019 19:55:10 +0530
+Subject: [PATCH 106/124] libgfchangelog : use find_library to locate shared
+ library
+
+Issue:
+
+libgfchangelog.so: cannot open shared object file
+
+Due to hardcoded shared library name runtime loader looks for particular version of
+a shared library.
+
+Solution:
+
+Using find_library to locate shared library at runtime solves this issue.
+
+Traceback (most recent call last):
+  File "/usr/libexec/glusterfs/python/syncdaemon/gsyncd.py", line 323, in main
+    func(args)
+  File "/usr/libexec/glusterfs/python/syncdaemon/subcmds.py", line 82, in subcmd_worker
+    local.service_loop(remote)
+  File "/usr/libexec/glusterfs/python/syncdaemon/resource.py", line 1261, in service_loop
+    changelog_agent.init()
+  File "/usr/libexec/glusterfs/python/syncdaemon/repce.py", line 233, in __call__
+    return self.ins(self.meth, *a)
+  File "/usr/libexec/glusterfs/python/syncdaemon/repce.py", line 215, in __call__
+    raise res
+OSError: libgfchangelog.so: cannot open shared object file: No such file or directory
+
+>Upstream Patch: https://review.gluster.org/#/c/glusterfs/+/22557/
+>Change-Id: I3dd013d701ed1cd99ba7ef20d1898f343e1db8f5
+>fixes: bz#1699394
+>Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+
+fixes: bz#1699271
+Change-Id: If8b5827cdac658eb3a211109bd397db9a6fee8e6
+Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167907
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ geo-replication/syncdaemon/libgfchangelog.py                     | 3 ++-
+ tools/glusterfind/src/libgfchangelog.py                          | 7 +++----
+ xlators/features/changelog/lib/examples/python/libgfchangelog.py | 4 +++-
+ 3 files changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/geo-replication/syncdaemon/libgfchangelog.py b/geo-replication/syncdaemon/libgfchangelog.py
+index fff9d24..8d12956 100644
+--- a/geo-replication/syncdaemon/libgfchangelog.py
++++ b/geo-replication/syncdaemon/libgfchangelog.py
+@@ -10,13 +10,14 @@
+ 
+ import os
+ from ctypes import CDLL, RTLD_GLOBAL, get_errno, byref, c_ulong
++from ctypes.util import find_library
+ from syncdutils import ChangelogException, ChangelogHistoryNotAvailable
+ from py2py3 import gr_cl_history_changelog, gr_cl_done, gr_create_string_buffer
+ from py2py3 import gr_cl_register, gr_cl_history_done, bytearray_to_str
+ 
+ 
+ class Changes(object):
+-    libgfc = CDLL("libgfchangelog.so", mode=RTLD_GLOBAL,
++    libgfc = CDLL(find_library("gfchangelog"), mode=RTLD_GLOBAL,
+                   use_errno=True)
+ 
+     @classmethod
+diff --git a/tools/glusterfind/src/libgfchangelog.py b/tools/glusterfind/src/libgfchangelog.py
+index 1ef177a..513bb10 100644
+--- a/tools/glusterfind/src/libgfchangelog.py
++++ b/tools/glusterfind/src/libgfchangelog.py
+@@ -9,8 +9,8 @@
+ # cases as published by the Free Software Foundation.
+ 
+ import os
+-from ctypes import CDLL, get_errno, create_string_buffer, c_ulong, byref
+-from ctypes import RTLD_GLOBAL
++from ctypes import CDLL, RTLD_GLOBAL, get_errno, create_string_buffer, c_ulong, byref
++from ctypes.util import find_library
+ from gfind_py2py3 import bytearray_to_str, gf_create_string_buffer
+ from gfind_py2py3 import gfind_history_changelog, gfind_changelog_register
+ from gfind_py2py3 import gfind_history_changelog_done
+@@ -19,8 +19,7 @@ from gfind_py2py3 import gfind_history_changelog_done
+ class ChangelogException(OSError):
+     pass
+ 
+-
+-libgfc = CDLL("libgfchangelog.so", use_errno=True, mode=RTLD_GLOBAL)
++libgfc = CDLL(find_library("gfchangelog"), mode=RTLD_GLOBAL, use_errno=True)
+ 
+ 
+ def raise_oserr(prefix=None):
+diff --git a/xlators/features/changelog/lib/examples/python/libgfchangelog.py b/xlators/features/changelog/lib/examples/python/libgfchangelog.py
+index 2cdbf11..2da9f2d 100644
+--- a/xlators/features/changelog/lib/examples/python/libgfchangelog.py
++++ b/xlators/features/changelog/lib/examples/python/libgfchangelog.py
+@@ -1,8 +1,10 @@
+ import os
+ from ctypes import *
++from ctypes.util import find_library
+ 
+ class Changes(object):
+-    libgfc = CDLL("libgfchangelog.so", mode=RTLD_GLOBAL, use_errno=True)
++    libgfc = CDLL(find_library("gfchangelog"), mode=RTLD_GLOBAL,
++                  use_errno=True)
+ 
+     @classmethod
+     def geterrno(cls):
+-- 
+1.8.3.1
+

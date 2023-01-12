@@ -1,0 +1,56 @@
+From c961ee1d7c1abb2552b79ed39ed7fd1bd1b3962f Mon Sep 17 00:00:00 2001
+From: srijan-sivakumar <ssivakum@redhat.com>
+Date: Fri, 7 Aug 2020 15:02:07 +0530
+Subject: [PATCH 487/511] Events: Log file not re-opened after logrotate.
+
+Issue: The logging is being done in the same file
+even after the logrotate utility has changed the file.
+This causes the logfile to grow indefinitely.
+
+Code Changes: Using the WatchedFileHandler class instead
+of FileHandler class. This watches the file it is logging
+into and if the file changes, it is closed and reopened
+using the file name. Hence after file rotate, a new file
+will be used for logging instead of continuing with
+the same old file.
+
+>Fixes: #1289
+>Change-Id: I773d04f17613a03709cb682692efb39fd8e664e2
+>Signed-off-by: srijan-sivakumar <ssivakum@redhat.com>
+Upstream Patch : https://review.gluster.org/c/glusterfs/+/24820
+
+BUG: 1814744
+Change-Id: I773d04f17613a03709cb682692efb39fd8e664e2
+Signed-off-by: srijan-sivakumar <ssivakum@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/220370
+Reviewed-by: Shwetha Acharya <sacharya@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ events/src/utils.py | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/events/src/utils.py b/events/src/utils.py
+index 38b707a..6d4e079 100644
+--- a/events/src/utils.py
++++ b/events/src/utils.py
+@@ -13,6 +13,7 @@ import sys
+ import json
+ import os
+ import logging
++import logging.handlers
+ import fcntl
+ from errno import EBADF
+ from threading import Thread
+@@ -98,7 +99,7 @@ def setup_logger():
+     logger.setLevel(logging.INFO)
+ 
+     # create the logging file handler
+-    fh = logging.FileHandler(LOG_FILE)
++    fh = logging.handlers.WatchedFileHandler(LOG_FILE)
+ 
+     formatter = logging.Formatter("[%(asctime)s] %(levelname)s "
+                                   "[%(module)s - %(lineno)s:%(funcName)s] "
+-- 
+1.8.3.1
+

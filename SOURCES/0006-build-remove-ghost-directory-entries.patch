@@ -1,0 +1,58 @@
+From 1f28e008825ae291208a9e6c714dd642f715a2a1 Mon Sep 17 00:00:00 2001
+From: "Bala.FA" <barumuga@redhat.com>
+Date: Mon, 7 Apr 2014 15:24:10 +0530
+Subject: [PATCH 06/52] build: remove ghost directory entries
+
+ovirt requires hook directories for gluster management and ghost
+directories are no more ghost entries
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Iaf1066ba0655619024f87eaaa039f0010578c567
+Signed-off-by: Bala.FA <barumuga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/60133
+Tested-by: Milind Changire <mchangir@redhat.com>
+---
+ glusterfs.spec.in | 19 +++++++++++++++++--
+ 1 file changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index f5c1f79..6be492e 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -799,15 +799,30 @@ install -D -p -m 0644 extras/glusterfs-logrotate \
+     %{buildroot}%{_sysconfdir}/logrotate.d/glusterfs
+ 
+ %if ( 0%{!?_without_georeplication:1} )
+-# geo-rep ghosts
+ mkdir -p %{buildroot}%{_sharedstatedir}/glusterd/geo-replication
+ touch %{buildroot}%{_sharedstatedir}/glusterd/geo-replication/gsyncd_template.conf
+ install -D -p -m 0644 extras/glusterfs-georep-logrotate \
+     %{buildroot}%{_sysconfdir}/logrotate.d/glusterfs-georep
+ %endif
+ 
++%if ( 0%{!?_without_syslog:1} )
++%if ( 0%{?fedora} ) || ( 0%{?rhel} && 0%{?rhel} > 6 )
++install -D -p -m 0644 extras/gluster-rsyslog-7.2.conf \
++    %{buildroot}%{_sysconfdir}/rsyslog.d/gluster.conf.example
++%endif
++
++%if ( 0%{?rhel} && 0%{?rhel} == 6 )
++install -D -p -m 0644 extras/gluster-rsyslog-5.8.conf \
++    %{buildroot}%{_sysconfdir}/rsyslog.d/gluster.conf.example
++%endif
++
++%if ( 0%{?fedora} ) || ( 0%{?rhel} && 0%{?rhel} >= 6 )
++install -D -p -m 0644 extras/logger.conf.example \
++    %{buildroot}%{_sysconfdir}/glusterfs/logger.conf.example
++%endif
++%endif
++
+ %if ( 0%{!?_without_server:1} )
+-# the rest of the ghosts
+ touch %{buildroot}%{_sharedstatedir}/glusterd/glusterd.info
+ touch %{buildroot}%{_sharedstatedir}/glusterd/options
+ subdirs=(add-brick create copy-file delete gsync-create remove-brick reset set start stop)
+-- 
+1.8.3.1
+

@@ -1,0 +1,48 @@
+From ffd428d07036531b7ed98c7393b87490aaa223ec Mon Sep 17 00:00:00 2001
+From: Niels de Vos <ndevos@redhat.com>
+Date: Fri, 3 May 2019 09:18:31 +0200
+Subject: [PATCH 437/449] glusterd: prevent use-after-free in
+ glusterd_op_ac_send_brick_op()
+
+Coverity reported that GF_FREE(req_ctx) could be called 2x on req_ctx.
+
+> upstream patch link: https://review.gluster.org/#/c/glusterfs/+/22656/
+> Change-Id: I9120686e5920de8c27688e10de0db6aa26292064
+> CID: 1401115
+> Updates: bz#789278
+> Signed-off-by: Niels de Vos <ndevos@redhat.com>
+
+BUG: 1787310
+Change-Id: I9120686e5920de8c27688e10de0db6aa26292064
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202619
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-op-sm.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-op-sm.c b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+index 46fc607..1e84f5f 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-op-sm.c
++++ b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+@@ -7575,7 +7575,6 @@ glusterd_op_ac_send_brick_op(glusterd_op_sm_event_t *event, void *ctx)
+             if (op_errstr == NULL)
+                 gf_asprintf(&op_errstr, OPERRSTR_BUILD_PAYLOAD);
+             opinfo.op_errstr = op_errstr;
+-            GF_FREE(req_ctx);
+             goto out;
+         }
+     }
+@@ -7594,7 +7593,7 @@ glusterd_op_ac_send_brick_op(glusterd_op_sm_event_t *event, void *ctx)
+     }
+ 
+ out:
+-    if (ret && req_ctx && free_req_ctx)
++    if (ret && free_req_ctx)
+         GF_FREE(req_ctx);
+     gf_msg_debug(this->name, 0, "Returning with %d", ret);
+ 
+-- 
+1.8.3.1
+

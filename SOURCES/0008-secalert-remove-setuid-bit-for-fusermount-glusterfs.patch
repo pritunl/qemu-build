@@ -1,0 +1,35 @@
+From 0ab54c5b274f29fcdd4787325c7183a84e875bbc Mon Sep 17 00:00:00 2001
+From: "Bala.FA" <barumuga@redhat.com>
+Date: Thu, 22 May 2014 08:37:27 +0530
+Subject: [PATCH 08/52] secalert: remove setuid bit for fusermount-glusterfs
+
+glusterfs-fuse: File /usr/bin/fusermount-glusterfs on x86_64 is setuid
+root but is not on the setxid whitelist
+
+Label: DOWNSTREAM ONLY
+
+Bug-Url: https://bugzilla.redhat.com/show_bug.cgi?id=989480
+Change-Id: Icf6e5db72ae15ccc60b02be6713fb6c4f4c8a15f
+Signed-off-by: Bala.FA <barumuga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/25453
+Signed-off-by: Bala.FA <barumuga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/60135
+Tested-by: Milind Changire <mchangir@redhat.com>
+---
+ contrib/fuse-util/Makefile.am | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/contrib/fuse-util/Makefile.am b/contrib/fuse-util/Makefile.am
+index abbc10e..a071c81 100644
+--- a/contrib/fuse-util/Makefile.am
++++ b/contrib/fuse-util/Makefile.am
+@@ -9,6 +9,5 @@ AM_CFLAGS = -Wall $(GF_CFLAGS)
+ 
+ install-exec-hook:
+ 	-chown root $(DESTDIR)$(bindir)/fusermount-glusterfs
+-	chmod u+s $(DESTDIR)$(bindir)/fusermount-glusterfs
+ 
+ CLEANFILES =
+-- 
+1.8.3.1
+

@@ -1,0 +1,104 @@
+From 60789c658ea22063c26168cb4ce15ac5fd279e58 Mon Sep 17 00:00:00 2001
+From: Ravishankar N <ravishankar@redhat.com>
+Date: Mon, 14 Dec 2020 10:57:03 +0530
+Subject: [PATCH 500/511] features/shard: Convert shard block indices to uint64
+
+This patch fixes a crash in FOPs that operate on really large sharded
+files where number of participant shards could sometimes exceed
+signed int32 max.
+
+The patch also adds GF_ASSERTs to ensure that number of participating
+shards is always greater than 0 for files that do have more than one
+shard.
+
+Upstream:
+> https://review.gluster.org/#/c/glusterfs/+/23407/
+> Change-Id: I354de58796f350eb1aa42fcdf8092ca2e69ccbb6
+> Fixes: #1348
+> Signed-off-by: Krutika Dhananjay <kdhananj@redhat.com>
+
+BUG: 1752739
+Change-Id: I354de58796f350eb1aa42fcdf8092ca2e69ccbb6
+Signed-off-by: Vinayakswami Hariharmath <vharihar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/221061
+Tested-by: Ravishankar Narayanankutty <ravishankar@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Ravishankar Narayanankutty <ravishankar@redhat.com>
+---
+ xlators/features/shard/src/shard.c | 14 ++++++++------
+ xlators/features/shard/src/shard.h |  6 +++---
+ 2 files changed, 11 insertions(+), 9 deletions(-)
+
+diff --git a/xlators/features/shard/src/shard.c b/xlators/features/shard/src/shard.c
+index 16d557b..a967f35 100644
+--- a/xlators/features/shard/src/shard.c
++++ b/xlators/features/shard/src/shard.c
+@@ -1855,10 +1855,9 @@ int shard_truncate_last_shard(call_frame_t *frame, xlator_t *this,
+    */
+   if (!inode) {
+     gf_msg_debug(this->name, 0,
+-                 "Last shard to be truncated absent"
+-                 " in backend: %s. Directly proceeding to update "
+-                 "file size",
+-                 uuid_utoa(inode->gfid));
++                 "Last shard to be truncated absent in backend: " PRIu64
++                 " of gfid: %s. Directly proceeding to update file size",
++                 local->first_block, uuid_utoa(local->loc.inode->gfid));
+     shard_update_file_size(frame, this, NULL, &local->loc,
+                            shard_post_update_size_truncate_handler);
+     return 0;
+@@ -2389,6 +2388,7 @@ int shard_truncate_begin(call_frame_t *frame, xlator_t *this) {
+       get_highest_block(0, local->prebuf.ia_size, local->block_size);
+ 
+   local->num_blocks = local->last_block - local->first_block + 1;
++  GF_ASSERT(local->num_blocks > 0);
+   local->resolver_base_inode =
+       (local->fop == GF_FOP_TRUNCATE) ? local->loc.inode : local->fd->inode;
+ 
+@@ -4809,6 +4809,7 @@ int shard_post_lookup_readv_handler(call_frame_t *frame, xlator_t *this) {
+       get_highest_block(local->offset, local->total_size, local->block_size);
+ 
+   local->num_blocks = local->last_block - local->first_block + 1;
++  GF_ASSERT(local->num_blocks > 0);
+   local->resolver_base_inode = local->loc.inode;
+ 
+   local->inode_list =
+@@ -5266,6 +5267,7 @@ int shard_common_inode_write_post_lookup_handler(call_frame_t *frame,
+   local->last_block =
+       get_highest_block(local->offset, local->total_size, local->block_size);
+   local->num_blocks = local->last_block - local->first_block + 1;
++  GF_ASSERT(local->num_blocks > 0);
+   local->inode_list =
+       GF_CALLOC(local->num_blocks, sizeof(inode_t *), gf_shard_mt_inode_list);
+   if (!local->inode_list) {
+@@ -5274,8 +5276,8 @@ int shard_common_inode_write_post_lookup_handler(call_frame_t *frame,
+   }
+ 
+   gf_msg_trace(
+-      this->name, 0, "%s: gfid=%s first_block=%" PRIu32 " "
+-                     "last_block=%" PRIu32 " num_blocks=%" PRIu32
++      this->name, 0, "%s: gfid=%s first_block=%" PRIu64 " "
++                     "last_block=%" PRIu64 " num_blocks=%" PRIu64
+                      " offset=%" PRId64 " total_size=%zu flags=%" PRId32 "",
+       gf_fop_list[local->fop], uuid_utoa(local->resolver_base_inode->gfid),
+       local->first_block, local->last_block, local->num_blocks, local->offset,
+diff --git a/xlators/features/shard/src/shard.h b/xlators/features/shard/src/shard.h
+index 1721417..4fe181b 100644
+--- a/xlators/features/shard/src/shard.h
++++ b/xlators/features/shard/src/shard.h
+@@ -254,9 +254,9 @@ typedef int32_t (*shard_post_update_size_fop_handler_t)(call_frame_t *frame,
+ typedef struct shard_local {
+     int op_ret;
+     int op_errno;
+-    int first_block;
+-    int last_block;
+-    int num_blocks;
++    uint64_t first_block;
++    uint64_t last_block;
++    uint64_t num_blocks;
+     int call_count;
+     int eexist_count;
+     int create_count;
+-- 
+1.8.3.1
+

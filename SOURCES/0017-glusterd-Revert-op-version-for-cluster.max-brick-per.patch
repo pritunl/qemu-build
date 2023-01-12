@@ -1,0 +1,37 @@
+From 5d3315a53611f23a69f88bc8266448e258e2e10f Mon Sep 17 00:00:00 2001
+From: Samikshan Bairagya <sbairagy@redhat.com>
+Date: Mon, 10 Jul 2017 11:54:52 +0530
+Subject: [PATCH 17/52] glusterd: Revert op-version for
+ "cluster.max-brick-per-process"
+
+The op-version for the "cluster.max-brick-per-process" option was
+set to 3.12.0 in the upstream patch and was backported here:
+https://code.engineering.redhat.com/gerrit/#/c/111799. This commit
+reverts the op-version for this option to 3.11.1 instead.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I23639cef43d41915eea0394d019b1e0796a99d7b
+Signed-off-by: Samikshan Bairagya <sbairagy@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/111804
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index a31ecda..9a6fe9f 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -2794,7 +2794,7 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+     {.key = GLUSTERD_BRICKMUX_LIMIT_KEY,
+      .voltype = "mgmt/glusterd",
+      .value = GLUSTERD_BRICKMUX_LIMIT_DFLT_VALUE,
+-     .op_version = GD_OP_VERSION_3_12_0,
++     .op_version = GD_OP_VERSION_3_11_1,
+      .validate_fn = validate_mux_limit,
+      .type = GLOBAL_DOC,
+      .description = "This option can be used to limit the number of brick "
+-- 
+1.8.3.1
+

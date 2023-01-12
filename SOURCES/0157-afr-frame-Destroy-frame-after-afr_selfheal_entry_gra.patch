@@ -1,0 +1,68 @@
+From 4a72ac20f728aa5c3141359ff89f1b61d4cd210a Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Fri, 17 May 2019 23:03:35 +0530
+Subject: [PATCH 157/169] afr/frame: Destroy frame after
+ afr_selfheal_entry_granular
+
+In function "afr_selfheal_entry_granular", after completing the
+heal we are not destroying the frame. This will lead to crash.
+when we execute statedump operation, where it tried to access
+xlator object. If this xlator object is freed as part of the
+graph destroy this will lead to an invalid memory access
+
+Upstream patch:https://review.gluster.org/22743
+
+>Change-Id: I0a5e78e704ef257c3ac0087eab2c310e78fbe36d
+>fixes: bz#1708926
+>Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+
+Change-Id: I326354008e6d98376c8333d270f2f80036ad07f0
+BUG: 1716626
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172282
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ xlators/cluster/afr/src/afr-self-heal-entry.c | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/xlators/cluster/afr/src/afr-self-heal-entry.c b/xlators/cluster/afr/src/afr-self-heal-entry.c
+index fc09b4c..a6890fa 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-entry.c
++++ b/xlators/cluster/afr/src/afr-self-heal-entry.c
+@@ -832,6 +832,8 @@ afr_selfheal_entry_granular(call_frame_t *frame, xlator_t *this, fd_t *fd,
+     subvol = priv->children[subvol_idx];
+ 
+     args.frame = afr_copy_frame(frame);
++    if (!args.frame)
++        goto out;
+     args.xl = this;
+     /* args.heal_fd represents the fd associated with the original directory
+      * on which entry heal is being attempted.
+@@ -850,9 +852,10 @@ afr_selfheal_entry_granular(call_frame_t *frame, xlator_t *this, fd_t *fd,
+          * do not treat heal as failure.
+          */
+         if (is_src)
+-            return -errno;
++            ret = -errno;
+         else
+-            return 0;
++            ret = 0;
++        goto out;
+     }
+ 
+     ret = syncop_dir_scan(subvol, &loc, GF_CLIENT_PID_SELF_HEALD, &args,
+@@ -862,7 +865,9 @@ afr_selfheal_entry_granular(call_frame_t *frame, xlator_t *this, fd_t *fd,
+ 
+     if (args.mismatch == _gf_true)
+         ret = -1;
+-
++out:
++    if (args.frame)
++        AFR_STACK_DESTROY(args.frame);
+     return ret;
+ }
+ 
+-- 
+1.8.3.1
+

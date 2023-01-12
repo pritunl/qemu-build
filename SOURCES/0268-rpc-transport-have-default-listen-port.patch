@@ -1,0 +1,46 @@
+From 872e344c0ab40c37b1872c32f5d5fddc097a1460 Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Mon, 5 Aug 2019 21:16:35 +0530
+Subject: [PATCH 268/276] rpc/transport: have default listen-port
+
+With release-6, we now can have transport.socket.listen-port parameter
+configurable in glusterd.vol. However the default value wasn't defined
+in the code and this breaks the backward compatibility where if one has
+a modified glusterd.vol file, then post upgrade the same file will be
+retained and the new changes introduced as part of the release wouldn't
+be available in the glusterd.vol. So it's important that for each new
+options introduced in glusterd.vol file backward compatibility is
+guaranteed.
+
+> upstream patch : https://review.gluster.org/#/c/glusterfs/+/23160/
+
+>Fixes: bz#1737676
+>Change-Id: I776b28bff786320cda299fe673d824024dc9803e
+>Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+
+BUG: 1734534
+Change-Id: I776b28bff786320cda299fe673d824024dc9803e
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/177862
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ rpc/rpc-transport/socket/src/name.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/rpc/rpc-transport/socket/src/name.c b/rpc/rpc-transport/socket/src/name.c
+index ca14402..7f18cc4 100644
+--- a/rpc/rpc-transport/socket/src/name.c
++++ b/rpc/rpc-transport/socket/src/name.c
+@@ -367,6 +367,8 @@ af_inet_server_get_local_sockaddr(rpc_transport_t *this, struct sockaddr *addr,
+     listen_port_data = dict_get(options, "transport.socket.listen-port");
+     if (listen_port_data) {
+         listen_port = data_to_uint16(listen_port_data);
++    } else {
++        listen_port = GF_DEFAULT_SOCKET_LISTEN_PORT;
+     }
+ 
+     listen_host_data = dict_get(options, "transport.socket.bind-address");
+-- 
+1.8.3.1
+

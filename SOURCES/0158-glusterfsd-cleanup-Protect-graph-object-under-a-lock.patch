@@ -1,0 +1,162 @@
+From 11b64d494c52004002f900888694d20ef8af6df6 Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Sat, 11 May 2019 22:40:22 +0530
+Subject: [PATCH 158/169] glusterfsd/cleanup: Protect graph object under a lock
+
+While processing a cleanup_and_exit function, we are
+accessing a graph object. But this has not been protected
+under a lock. Because a parallel cleanup of a graph is quite
+possible which might lead to an invalid memory access
+
+Upstream patch:https://review.gluster.org/#/c/glusterfs/+/22709/
+
+>Change-Id: Id05ca70d5b57e172b0401d07b6a1f5386c044e79
+>fixes: bz#1708926
+>Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+
+Change-Id: I55ab0525c79baa99a3bd929ee979c5519be5ab21
+BUG: 1716626
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172283
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ libglusterfs/src/graph.c                        | 58 +++++++++++++++----------
+ libglusterfs/src/statedump.c                    | 16 +++++--
+ tests/bugs/glusterd/optimized-basic-testcases.t |  4 +-
+ 3 files changed, 50 insertions(+), 28 deletions(-)
+
+diff --git a/libglusterfs/src/graph.c b/libglusterfs/src/graph.c
+index 4c8b02d..18fb2d9 100644
+--- a/libglusterfs/src/graph.c
++++ b/libglusterfs/src/graph.c
+@@ -1392,8 +1392,12 @@ glusterfs_graph_cleanup(void *arg)
+     }
+     pthread_mutex_unlock(&ctx->notify_lock);
+ 
+-    glusterfs_graph_fini(graph);
+-    glusterfs_graph_destroy(graph);
++    pthread_mutex_lock(&ctx->cleanup_lock);
++    {
++        glusterfs_graph_fini(graph);
++        glusterfs_graph_destroy(graph);
++    }
++    pthread_mutex_unlock(&ctx->cleanup_lock);
+ out:
+     return NULL;
+ }
+@@ -1468,31 +1472,37 @@ glusterfs_process_svc_detach(glusterfs_ctx_t *ctx, gf_volfile_t *volfile_obj)
+ 
+     if (!ctx || !ctx->active || !volfile_obj)
+         goto out;
+-    parent_graph = ctx->active;
+-    graph = volfile_obj->graph;
+-    if (!graph)
+-        goto out;
+-    if (graph->first)
+-        xl = graph->first;
+ 
+-    last_xl = graph->last_xl;
+-    if (last_xl)
+-        last_xl->next = NULL;
+-    if (!xl || xl->cleanup_starting)
+-        goto out;
++    pthread_mutex_lock(&ctx->cleanup_lock);
++    {
++        parent_graph = ctx->active;
++        graph = volfile_obj->graph;
++        if (!graph)
++            goto unlock;
++        if (graph->first)
++            xl = graph->first;
++
++        last_xl = graph->last_xl;
++        if (last_xl)
++            last_xl->next = NULL;
++        if (!xl || xl->cleanup_starting)
++            goto unlock;
+ 
+-    xl->cleanup_starting = 1;
+-    gf_msg("mgmt", GF_LOG_INFO, 0, LG_MSG_GRAPH_DETACH_STARTED,
+-           "detaching child %s", volfile_obj->vol_id);
++        xl->cleanup_starting = 1;
++        gf_msg("mgmt", GF_LOG_INFO, 0, LG_MSG_GRAPH_DETACH_STARTED,
++               "detaching child %s", volfile_obj->vol_id);
+ 
+-    list_del_init(&volfile_obj->volfile_list);
+-    glusterfs_mux_xlator_unlink(parent_graph->top, xl);
+-    parent_graph->last_xl = glusterfs_get_last_xlator(parent_graph);
+-    parent_graph->xl_count -= graph->xl_count;
+-    parent_graph->leaf_count -= graph->leaf_count;
+-    default_notify(xl, GF_EVENT_PARENT_DOWN, xl);
+-    parent_graph->id++;
+-    ret = 0;
++        list_del_init(&volfile_obj->volfile_list);
++        glusterfs_mux_xlator_unlink(parent_graph->top, xl);
++        parent_graph->last_xl = glusterfs_get_last_xlator(parent_graph);
++        parent_graph->xl_count -= graph->xl_count;
++        parent_graph->leaf_count -= graph->leaf_count;
++        default_notify(xl, GF_EVENT_PARENT_DOWN, xl);
++        parent_graph->id++;
++        ret = 0;
++    }
++unlock:
++    pthread_mutex_unlock(&ctx->cleanup_lock);
+ out:
+     if (!ret) {
+         list_del_init(&volfile_obj->volfile_list);
+diff --git a/libglusterfs/src/statedump.c b/libglusterfs/src/statedump.c
+index 0cf80c0..0d58f8f 100644
+--- a/libglusterfs/src/statedump.c
++++ b/libglusterfs/src/statedump.c
+@@ -805,11 +805,17 @@ gf_proc_dump_info(int signum, glusterfs_ctx_t *ctx)
+     int brick_count = 0;
+     int len = 0;
+ 
+-    gf_proc_dump_lock();
+-
+     if (!ctx)
+         goto out;
+ 
++    /*
++     * Multiplexed daemons can change the active graph when attach/detach
++     * is called. So this has to be protected with the cleanup lock.
++     */
++    if (mgmt_is_multiplexed_daemon(ctx->cmd_args.process_name))
++        pthread_mutex_lock(&ctx->cleanup_lock);
++    gf_proc_dump_lock();
++
+     if (!mgmt_is_multiplexed_daemon(ctx->cmd_args.process_name) &&
+         (ctx && ctx->active)) {
+         top = ctx->active->first;
+@@ -923,7 +929,11 @@ gf_proc_dump_info(int signum, glusterfs_ctx_t *ctx)
+ out:
+     GF_FREE(dump_options.dump_path);
+     dump_options.dump_path = NULL;
+-    gf_proc_dump_unlock();
++    if (ctx) {
++        gf_proc_dump_unlock();
++        if (mgmt_is_multiplexed_daemon(ctx->cmd_args.process_name))
++            pthread_mutex_unlock(&ctx->cleanup_lock);
++    }
+ 
+     return;
+ }
+diff --git a/tests/bugs/glusterd/optimized-basic-testcases.t b/tests/bugs/glusterd/optimized-basic-testcases.t
+index d700b5e..110f1b9 100644
+--- a/tests/bugs/glusterd/optimized-basic-testcases.t
++++ b/tests/bugs/glusterd/optimized-basic-testcases.t
+@@ -289,7 +289,9 @@ mkdir -p /xyz/var/lib/glusterd/abc
+ TEST  $CLI volume create "test" $H0:/xyz/var/lib/glusterd/abc
+ EXPECT 'Created' volinfo_field "test" 'Status';
+ 
+-EXPECT "1" generate_statedump_and_check_for_glusterd_info
++#While taking a statedump, there is a TRY_LOCK on call_frame, which might may cause
++#failure. So Adding a EXPECT_WITHIN
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "^1$" generate_statedump_and_check_for_glusterd_info
+ 
+ cleanup_statedump `pidof glusterd`
+ cleanup
+-- 
+1.8.3.1
+

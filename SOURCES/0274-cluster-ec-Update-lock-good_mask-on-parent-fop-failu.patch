@@ -1,0 +1,49 @@
+From 4c2aa7adef3df500043dd45614d20c9987e6c0d9 Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Fri, 2 Aug 2019 12:05:09 +0530
+Subject: [PATCH 274/276] cluster/ec: Update lock->good_mask on parent fop
+ failure
+
+When discard/truncate performs write fop, it should do so
+after updating lock->good_mask to make sure readv happens
+on the correct mask
+
+Upstream-patch: https://review.gluster.org/c/glusterfs/+/23147
+fixes: bz#1730914
+Change-Id: Idfef0bbcca8860d53707094722e6ba3f81c583b7
+Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/177978
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/ec/src/ec-common.h      | 2 ++
+ xlators/cluster/ec/src/ec-inode-write.c | 2 ++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/xlators/cluster/ec/src/ec-common.h b/xlators/cluster/ec/src/ec-common.h
+index e948342..3c69471 100644
+--- a/xlators/cluster/ec/src/ec-common.h
++++ b/xlators/cluster/ec/src/ec-common.h
+@@ -204,4 +204,6 @@ void
+ ec_reset_entry_healing(ec_fop_data_t *fop);
+ char *
+ ec_msg_str(ec_fop_data_t *fop);
++void
++ec_lock_update_good(ec_lock_t *lock, ec_fop_data_t *fop);
+ #endif /* __EC_COMMON_H__ */
+diff --git a/xlators/cluster/ec/src/ec-inode-write.c b/xlators/cluster/ec/src/ec-inode-write.c
+index 2f28e11..8bfa3b4 100644
+--- a/xlators/cluster/ec/src/ec-inode-write.c
++++ b/xlators/cluster/ec/src/ec-inode-write.c
+@@ -89,6 +89,8 @@ ec_update_write(ec_fop_data_t *fop, uintptr_t mask, off_t offset, uint64_t size)
+         goto out;
+     }
+ 
++    if (fop->locks[0].lock)
++        ec_lock_update_good(fop->locks[0].lock, fop);
+     vector.iov_base = iobuf->ptr;
+     vector.iov_len = size;
+     memset(vector.iov_base, 0, vector.iov_len);
+-- 
+1.8.3.1
+

@@ -1,0 +1,347 @@
+From 27f799563c1c2c1986662ed4a3a83d834c04fd98 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Mon, 14 Oct 2019 15:42:31 +0530
+Subject: [PATCH 308/308] dht: Rebalance causing IO Error - File descriptor in
+ bad state
+
+Problem : When a file is migrated, dht attempts to re-open all open
+          fds on the new cached subvol. Earlier, if dht had not opened the fd,
+          the client xlator would be unable to find the remote fd and would
+          fall back to using an anon fd for the fop. That behavior changed with
+          https://review.gluster.org/#/c/glusterfs/+/15804, causing fops to fail
+          with EBADFD if the fd was not available on the cached subvol.
+          The client xlator returns EBADFD if the remote fd is not found but
+          dht only checks for EBADF before re-opening fds on the new cached subvol.
+
+Solution: Handle EBADFD at dht code path to avoid the issue
+
+> Change-Id: I43c51995cdd48d05b12e4b2889c8dbe2bb2a72d8
+> Fixes: bz#1758579
+> Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+> (Cherry pick from commit 9314a9fbf487614c736cf6c4c1b93078d37bb9df)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/23518/)
+
+Change-Id: I43c51995cdd48d05b12e4b2889c8dbe2bb2a72d8
+BUG: 1758432
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/183370
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/dht/src/dht-common.c      | 27 +++++++++++++++++---
+ xlators/cluster/dht/src/dht-common.h      | 19 ++++++++++++++
+ xlators/cluster/dht/src/dht-helper.c      | 29 +++++++++++++++++++++
+ xlators/cluster/dht/src/dht-inode-read.c  | 42 +++++++++++++++++++++++++++----
+ xlators/cluster/dht/src/dht-inode-write.c | 16 ++++++------
+ 5 files changed, 116 insertions(+), 17 deletions(-)
+
+diff --git a/xlators/cluster/dht/src/dht-common.c b/xlators/cluster/dht/src/dht-common.c
+index 99cccd6..37952ba 100644
+--- a/xlators/cluster/dht/src/dht-common.c
++++ b/xlators/cluster/dht/src/dht-common.c
+@@ -53,6 +53,17 @@ dht_set_dir_xattr_req(xlator_t *this, loc_t *loc, dict_t *xattr_req);
+ int
+ dht_do_fresh_lookup(call_frame_t *frame, xlator_t *this, loc_t *loc);
+ 
++/* Check the xdata to make sure EBADF has been set by client xlator */
++int32_t
++dht_check_remote_fd_failed_error(dht_local_t *local, int op_ret, int op_errno)
++{
++    if (op_ret == -1 && (op_errno == EBADF || op_errno == EBADFD) &&
++        !(local->fd_checked)) {
++        return 1;
++    }
++    return 0;
++}
++
+ /* Sets the blocks and size values to fixed values. This is to be called
+  * only for dirs. The caller is responsible for checking the type
+  */
+@@ -4529,6 +4540,7 @@ dht_getxattr_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int op_ret,
+     int this_call_cnt = 0;
+     dht_local_t *local = NULL;
+     dht_conf_t *conf = NULL;
++    int ret = 0;
+ 
+     VALIDATE_OR_GOTO(frame, err);
+     VALIDATE_OR_GOTO(frame->local, err);
+@@ -4537,6 +4549,13 @@ dht_getxattr_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int op_ret,
+     conf = this->private;
+     local = frame->local;
+ 
++    if (dht_check_remote_fd_failed_error(local, op_ret, op_errno)) {
++        ret = dht_check_and_open_fd_on_subvol(this, frame);
++        if (ret)
++            goto err;
++        return 0;
++    }
++
+     LOCK(&frame->lock);
+     {
+         if (!xattr || (op_ret == -1)) {
+@@ -5204,8 +5223,8 @@ dht_file_setxattr_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+ 
+     local->op_errno = op_errno;
+ 
+-    if ((local->fop == GF_FOP_FSETXATTR) && op_ret == -1 &&
+-        (op_errno == EBADF) && !(local->fd_checked)) {
++    if ((local->fop == GF_FOP_FSETXATTR) &&
++        dht_check_remote_fd_failed_error(local, op_ret, op_errno)) {
+         ret = dht_check_and_open_fd_on_subvol(this, frame);
+         if (ret)
+             goto out;
+@@ -5929,8 +5948,8 @@ dht_file_removexattr_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+ 
+     local->op_errno = op_errno;
+ 
+-    if ((local->fop == GF_FOP_FREMOVEXATTR) && (op_ret == -1) &&
+-        (op_errno == EBADF) && !(local->fd_checked)) {
++    if ((local->fop == GF_FOP_FREMOVEXATTR) &&
++        dht_check_remote_fd_failed_error(local, op_ret, op_errno)) {
+         ret = dht_check_and_open_fd_on_subvol(this, frame);
+         if (ret)
+             goto out;
+diff --git a/xlators/cluster/dht/src/dht-common.h b/xlators/cluster/dht/src/dht-common.h
+index c516271..ce11f02 100644
+--- a/xlators/cluster/dht/src/dht-common.h
++++ b/xlators/cluster/dht/src/dht-common.h
+@@ -1230,6 +1230,22 @@ dht_newfile_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int op_ret,
+                 struct iatt *preparent, struct iatt *postparent, dict_t *xdata);
+ 
+ int
++dht_finodelk_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
++                 int32_t op_ret, int32_t op_errno, dict_t *xdata);
++
++int
++dht_getxattr_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int op_ret,
++                 int op_errno, dict_t *xattr, dict_t *xdata);
++
++int
++dht_common_xattrop_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
++                       int32_t op_ret, int32_t op_errno, dict_t *dict,
++                       dict_t *xdata);
++int
++dht_fxattrop_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
++                 int32_t op_ret, int32_t op_errno, dict_t *dict, dict_t *xdata);
++
++int
+ gf_defrag_status_get(dht_conf_t *conf, dict_t *dict);
+ 
+ void
+@@ -1525,4 +1541,7 @@ int
+ dht_pt_rename(call_frame_t *frame, xlator_t *this, loc_t *oldloc, loc_t *newloc,
+               dict_t *xdata);
+ 
++int32_t
++dht_check_remote_fd_failed_error(dht_local_t *local, int op_ret, int op_errno);
++
+ #endif /* _DHT_H */
+diff --git a/xlators/cluster/dht/src/dht-helper.c b/xlators/cluster/dht/src/dht-helper.c
+index 1e9fee0..4f7370d 100644
+--- a/xlators/cluster/dht/src/dht-helper.c
++++ b/xlators/cluster/dht/src/dht-helper.c
+@@ -366,6 +366,23 @@ dht_check_and_open_fd_on_subvol_complete(int ret, call_frame_t *frame,
+ 
+             break;
+ 
++        case GF_FOP_FXATTROP:
++            STACK_WIND(frame, dht_common_xattrop_cbk, subvol,
++                       subvol->fops->fxattrop, local->fd,
++                       local->rebalance.flags, local->rebalance.xattr,
++                       local->xattr_req);
++            break;
++
++        case GF_FOP_FGETXATTR:
++            STACK_WIND(frame, dht_getxattr_cbk, subvol, subvol->fops->fgetxattr,
++                       local->fd, local->key, NULL);
++            break;
++
++        case GF_FOP_FINODELK:
++            STACK_WIND(frame, dht_finodelk_cbk, subvol, subvol->fops->finodelk,
++                       local->key, local->fd, local->rebalance.lock_cmd,
++                       &local->rebalance.flock, local->xattr_req);
++            break;
+         default:
+             gf_msg(this->name, GF_LOG_ERROR, 0, DHT_MSG_UNKNOWN_FOP,
+                    "Unknown FOP on fd (%p) on file %s @ %s", fd,
+@@ -429,6 +446,18 @@ handle_err:
+             DHT_STACK_UNWIND(fremovexattr, frame, -1, op_errno, NULL);
+             break;
+ 
++        case GF_FOP_FXATTROP:
++            DHT_STACK_UNWIND(fxattrop, frame, -1, op_errno, NULL, NULL);
++            break;
++
++        case GF_FOP_FGETXATTR:
++            DHT_STACK_UNWIND(fgetxattr, frame, -1, op_errno, NULL, NULL);
++            break;
++
++        case GF_FOP_FINODELK:
++            DHT_STACK_UNWIND(finodelk, frame, -1, op_errno, NULL);
++            break;
++
+         default:
+             gf_msg(this->name, GF_LOG_ERROR, 0, DHT_MSG_UNKNOWN_FOP,
+                    "Unknown FOP on fd (%p) on file %s @ %s", fd,
+diff --git a/xlators/cluster/dht/src/dht-inode-read.c b/xlators/cluster/dht/src/dht-inode-read.c
+index cacfe35..0c209a5 100644
+--- a/xlators/cluster/dht/src/dht-inode-read.c
++++ b/xlators/cluster/dht/src/dht-inode-read.c
+@@ -162,8 +162,8 @@ dht_file_attr_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int op_ret,
+     local = frame->local;
+     prev = cookie;
+ 
+-    if ((local->fop == GF_FOP_FSTAT) && (op_ret == -1) && (op_errno == EBADF) &&
+-        !(local->fd_checked)) {
++    if ((local->fop == GF_FOP_FSTAT) &&
++        dht_check_remote_fd_failed_error(local, op_ret, op_errno)) {
+         ret = dht_check_and_open_fd_on_subvol(this, frame);
+         if (ret)
+             goto out;
+@@ -431,7 +431,7 @@ dht_readv_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int op_ret,
+     if (local->call_cnt != 1)
+         goto out;
+ 
+-    if (op_ret == -1 && (op_errno == EBADF) && !(local->fd_checked)) {
++    if (dht_check_remote_fd_failed_error(local, op_ret, op_errno)) {
+         ret = dht_check_and_open_fd_on_subvol(this, frame);
+         if (ret)
+             goto out;
+@@ -703,7 +703,7 @@ dht_flush_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int op_ret,
+     if (local->call_cnt != 1)
+         goto out;
+ 
+-    if (op_ret == -1 && (op_errno == EBADF) && !(local->fd_checked)) {
++    if (dht_check_remote_fd_failed_error(local, op_ret, op_errno)) {
+         ret = dht_check_and_open_fd_on_subvol(this, frame);
+         if (ret)
+             goto out;
+@@ -820,7 +820,7 @@ dht_fsync_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int op_ret,
+ 
+     local->op_errno = op_errno;
+ 
+-    if (op_ret == -1 && (op_errno == EBADF) && !(local->fd_checked)) {
++    if (dht_check_remote_fd_failed_error(local, op_ret, op_errno)) {
+         ret = dht_check_and_open_fd_on_subvol(this, frame);
+         if (ret)
+             goto out;
+@@ -1223,6 +1223,13 @@ dht_common_xattrop_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+     if (local->call_cnt != 1)
+         goto out;
+ 
++    if (dht_check_remote_fd_failed_error(local, op_ret, op_errno)) {
++        ret = dht_check_and_open_fd_on_subvol(this, frame);
++        if (ret)
++            goto out;
++        return 0;
++    }
++
+     ret = dht_read_iatt_from_xdata(this, xdata, &stbuf);
+ 
+     if ((!op_ret) && (ret)) {
+@@ -1535,8 +1542,26 @@ dht_finodelk_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+                  int32_t op_ret, int32_t op_errno, dict_t *xdata)
+ 
+ {
++    dht_local_t *local = NULL;
++    int ret = 0;
++
++    GF_VALIDATE_OR_GOTO("dht", frame, out);
++    GF_VALIDATE_OR_GOTO("dht", this, out);
++    GF_VALIDATE_OR_GOTO("dht", frame->local, out);
++
++    local = frame->local;
++
++    if (dht_check_remote_fd_failed_error(local, op_ret, op_errno)) {
++        ret = dht_check_and_open_fd_on_subvol(this, frame);
++        if (ret)
++            goto out;
++        return 0;
++    }
++
++out:
+     dht_lk_inode_unref(frame, op_ret);
+     DHT_STACK_UNWIND(finodelk, frame, op_ret, op_errno, xdata);
++
+     return 0;
+ }
+ 
+@@ -1574,6 +1599,13 @@ dht_finodelk(call_frame_t *frame, xlator_t *this, const char *volume, fd_t *fd,
+             if (ret)
+                     goto err;
+     */
++    local->rebalance.flock = *lock;
++    local->rebalance.lock_cmd = cmd;
++    local->key = gf_strdup(volume);
++
++    if (xdata)
++        local->xattr_req = dict_ref(xdata);
++
+     STACK_WIND(frame, dht_finodelk_cbk, lock_subvol,
+                lock_subvol->fops->finodelk, volume, fd, cmd, lock, xdata);
+ 
+diff --git a/xlators/cluster/dht/src/dht-inode-write.c b/xlators/cluster/dht/src/dht-inode-write.c
+index b26b705..b6b349d 100644
+--- a/xlators/cluster/dht/src/dht-inode-write.c
++++ b/xlators/cluster/dht/src/dht-inode-write.c
+@@ -49,7 +49,7 @@ dht_writev_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int op_ret,
+      * We only check once as this could be a valid bad fd error.
+      */
+ 
+-    if (op_ret == -1 && (op_errno == EBADF) && !(local->fd_checked)) {
++    if (dht_check_remote_fd_failed_error(local, op_ret, op_errno)) {
+         ret = dht_check_and_open_fd_on_subvol(this, frame);
+         if (ret)
+             goto out;
+@@ -262,8 +262,8 @@ dht_truncate_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int op_ret,
+      * We only check once as this could actually be a valid error.
+      */
+ 
+-    if ((local->fop == GF_FOP_FTRUNCATE) && (op_ret == -1) &&
+-        ((op_errno == EBADF) || (op_errno == EINVAL)) && !(local->fd_checked)) {
++    if ((local->fop == GF_FOP_FTRUNCATE) &&
++        dht_check_remote_fd_failed_error(local, op_ret, op_errno)) {
+         ret = dht_check_and_open_fd_on_subvol(this, frame);
+         if (ret)
+             goto out;
+@@ -489,7 +489,7 @@ dht_fallocate_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int op_ret,
+      * We only check once as this could actually be a valid error.
+      */
+ 
+-    if ((op_ret == -1) && (op_errno == EBADF) && !(local->fd_checked)) {
++    if (dht_check_remote_fd_failed_error(local, op_ret, op_errno)) {
+         ret = dht_check_and_open_fd_on_subvol(this, frame);
+         if (ret)
+             goto out;
+@@ -666,7 +666,7 @@ dht_discard_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int op_ret,
+      * and a lookup updated the cached subvol in the inode ctx.
+      * We only check once as this could actually be a valid error.
+      */
+-    if ((op_ret == -1) && (op_errno == EBADF) && !(local->fd_checked)) {
++    if (dht_check_remote_fd_failed_error(local, op_ret, op_errno)) {
+         ret = dht_check_and_open_fd_on_subvol(this, frame);
+         if (ret)
+             goto out;
+@@ -838,7 +838,7 @@ dht_zerofill_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int op_ret,
+      * and a lookup updated the cached subvol in the inode ctx.
+      * We only check once as this could actually be a valid error.
+      */
+-    if ((op_ret == -1) && (op_errno == EBADF) && !(local->fd_checked)) {
++    if (dht_check_remote_fd_failed_error(local, op_ret, op_errno)) {
+         ret = dht_check_and_open_fd_on_subvol(this, frame);
+         if (ret)
+             goto out;
+@@ -1005,8 +1005,8 @@ dht_file_setattr_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+ 
+     local->op_errno = op_errno;
+ 
+-    if ((local->fop == GF_FOP_FSETATTR) && (op_ret == -1) &&
+-        (op_errno == EBADF) && !(local->fd_checked)) {
++    if ((local->fop == GF_FOP_FSETATTR) &&
++        dht_check_remote_fd_failed_error(local, op_ret, op_errno)) {
+         ret = dht_check_and_open_fd_on_subvol(this, frame);
+         if (ret)
+             goto out;
+-- 
+1.8.3.1
+

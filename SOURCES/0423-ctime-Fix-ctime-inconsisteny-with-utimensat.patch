@@ -1,0 +1,128 @@
+From c140d30382306d08eaf2bc5c53e5be26d3e381e1 Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Mon, 18 Nov 2019 05:24:33 -0500
+Subject: [PATCH 423/449] ctime: Fix ctime inconsisteny with utimensat
+
+Problem:
+When touch is used to create a file, the ctime is not matching
+atime and mtime which ideally should match. There is a difference
+in nano seconds.
+
+Cause:
+When touch is used modify atime or mtime to current time (UTIME_NOW),
+the current time is taken from kernel. The ctime gets updated to current
+time when atime or mtime is updated. But the current time to update
+ctime is taken from utime xlator. Hence the difference in nano seconds.
+
+Fix:
+When utimesat uses UTIME_NOW, use the current time from kernel.
+
+>fixes: bz#1773530
+>Change-Id: I9ccfa47dcd39df23396852b4216f1773c49250ce
+>Signed-off-by: Kotresh HR <khiremat@redhat.com>
+
+backport of: https://review.gluster.org/#/c/glusterfs/+/23719/
+BUG: 1761932
+Change-Id: I9ccfa47dcd39df23396852b4216f1773c49250ce
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202541
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/glusterfs/xlator.h            |  2 ++
+ tests/basic/ctime/ctime-utimesat.t             | 28 ++++++++++++++++++++++++++
+ xlators/features/utime/src/utime-gen-fops-c.py | 10 +++++++++
+ xlators/mount/fuse/src/fuse-bridge.c           |  8 ++++++++
+ 4 files changed, 48 insertions(+)
+ create mode 100644 tests/basic/ctime/ctime-utimesat.t
+
+diff --git a/libglusterfs/src/glusterfs/xlator.h b/libglusterfs/src/glusterfs/xlator.h
+index da551e9..db04c4d 100644
+--- a/libglusterfs/src/glusterfs/xlator.h
++++ b/libglusterfs/src/glusterfs/xlator.h
+@@ -35,6 +35,8 @@
+ #define GF_SET_ATTR_ATIME 0x10
+ #define GF_SET_ATTR_MTIME 0x20
+ #define GF_SET_ATTR_CTIME 0x40
++#define GF_ATTR_ATIME_NOW 0x80
++#define GF_ATTR_MTIME_NOW 0x100
+ 
+ #define gf_attr_mode_set(mode) ((mode)&GF_SET_ATTR_MODE)
+ #define gf_attr_uid_set(mode) ((mode)&GF_SET_ATTR_UID)
+diff --git a/tests/basic/ctime/ctime-utimesat.t b/tests/basic/ctime/ctime-utimesat.t
+new file mode 100644
+index 0000000..540e57a
+--- /dev/null
++++ b/tests/basic/ctime/ctime-utimesat.t
+@@ -0,0 +1,28 @@
++#!/bin/bash
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../afr.rc
++cleanup;
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 replica 3 $H0:$B0/${V0}{0,1,2}
++TEST $CLI volume set $V0 performance.stat-prefetch off
++TEST $CLI volume set $V0 performance.read-ahead off
++TEST $CLI volume set $V0 performance.quick-read off
++TEST $CLI volume set $V0 performance.read-after-open off
++TEST $CLI volume set $V0 performance.open-behind off
++TEST $CLI volume set $V0 performance.write-behind off
++TEST $CLI volume set $V0 performance.io-cache off
++
++TEST $CLI volume start $V0
++
++TEST glusterfs --volfile-id=$V0 --volfile-server=$H0 --entry-timeout=0 $M0;
++
++touch $M0/FILE
++
++atime=$(stat -c "%.X" $M0/FILE)
++EXPECT $atime stat -c "%.Y" $M0/FILE
++EXPECT $atime stat -c "%.Z" $M0/FILE
++
++cleanup
+diff --git a/xlators/features/utime/src/utime-gen-fops-c.py b/xlators/features/utime/src/utime-gen-fops-c.py
+index 8730a51..9fb3e1b 100755
+--- a/xlators/features/utime/src/utime-gen-fops-c.py
++++ b/xlators/features/utime/src/utime-gen-fops-c.py
+@@ -95,6 +95,16 @@ gf_utime_@NAME@ (call_frame_t *frame, xlator_t *this,
+                 frame->root->flags |= MDATA_CTIME;
+         }
+ 
++        if (valid & (GF_SET_ATTR_ATIME | GF_SET_ATTR_MTIME)) {
++            if (valid & GF_ATTR_ATIME_NOW) {
++                frame->root->ctime.tv_sec = stbuf->ia_atime;
++                frame->root->ctime.tv_nsec = stbuf->ia_atime_nsec;
++            } else if (valid & GF_ATTR_MTIME_NOW) {
++                frame->root->ctime.tv_sec = stbuf->ia_mtime;
++                frame->root->ctime.tv_nsec = stbuf->ia_mtime_nsec;
++            }
++        }
++
+         STACK_WIND (frame, gf_utime_@NAME@_cbk, FIRST_CHILD(this),
+                     FIRST_CHILD(this)->fops->@NAME@, @SHORT_ARGS@);
+         return 0;
+diff --git a/xlators/mount/fuse/src/fuse-bridge.c b/xlators/mount/fuse/src/fuse-bridge.c
+index 6e99053..fdeec49 100644
+--- a/xlators/mount/fuse/src/fuse-bridge.c
++++ b/xlators/mount/fuse/src/fuse-bridge.c
+@@ -1706,6 +1706,14 @@ fattr_to_gf_set_attr(int32_t valid)
+         gf_valid |= GF_SET_ATTR_CTIME;
+ #endif
+ 
++#if FUSE_KERNEL_MINOR_VERSION >= 9
++    if (valid & FATTR_ATIME_NOW)
++        gf_valid |= GF_ATTR_ATIME_NOW;
++
++    if (valid & FATTR_MTIME_NOW)
++        gf_valid |= GF_ATTR_MTIME_NOW;
++#endif
++
+     if (valid & FATTR_SIZE)
+         gf_valid |= GF_SET_ATTR_SIZE;
+ 
+-- 
+1.8.3.1
+

@@ -1,0 +1,86 @@
+From d5f931b334ac7abccaf30d277ce3ca9cfae0da5b Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Mon, 29 Jul 2019 14:08:37 +0530
+Subject: [PATCH 273/276] cluster/ec: Fix reopen flags to avoid misbehavior
+
+Problem:
+when a file needs to be re-opened O_APPEND and O_EXCL
+flags are not filtered in EC.
+
+- O_APPEND should be filtered because EC doesn't send O_APPEND below EC for
+open to make sure writes happen on the individual fragments instead of at the
+end of the file.
+
+- O_EXCL should be filtered because shd could have created the file so even
+when file exists open should succeed
+
+- O_CREAT should be filtered because open happens with gfid as parameter. So
+open fop will create just the gfid which will lead to problems.
+
+Fix:
+Filter out these two flags in reopen.
+
+Upstream-patch:https://review.gluster.org/#/c/glusterfs/+/23121/
+Change-Id: Ia280470fcb5188a09caa07bf665a2a94bce23bc4
+fixes: bz#1735514
+Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/177977
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/ec/src/ec-common.c      | 4 +++-
+ xlators/cluster/ec/src/ec-inode-write.c | 7 +++++--
+ 2 files changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/xlators/cluster/ec/src/ec-common.c b/xlators/cluster/ec/src/ec-common.c
+index 28b31c9..5fb4610 100644
+--- a/xlators/cluster/ec/src/ec-common.c
++++ b/xlators/cluster/ec/src/ec-common.c
+@@ -101,6 +101,7 @@ ec_fix_open(ec_fop_data_t *fop, uintptr_t mask)
+ {
+     uintptr_t need_open = 0;
+     int ret = 0;
++    int32_t flags = 0;
+     loc_t loc = {
+         0,
+     };
+@@ -121,6 +122,7 @@ ec_fix_open(ec_fop_data_t *fop, uintptr_t mask)
+         goto out;
+     }
+ 
++    flags = fop->fd->flags & (~(O_TRUNC | O_APPEND | O_CREAT | O_EXCL));
+     if (IA_IFDIR == fop->fd->inode->ia_type) {
+         ec_opendir(fop->frame, fop->xl, need_open,
+                    EC_MINIMUM_ONE | EC_FOP_NO_PROPAGATE_ERROR, NULL, NULL,
+@@ -128,7 +130,7 @@ ec_fix_open(ec_fop_data_t *fop, uintptr_t mask)
+     } else {
+         ec_open(fop->frame, fop->xl, need_open,
+                 EC_MINIMUM_ONE | EC_FOP_NO_PROPAGATE_ERROR, NULL, NULL, &loc,
+-                fop->fd->flags & (~O_TRUNC), fop->fd, NULL);
++                flags, fop->fd, NULL);
+     }
+ 
+ out:
+diff --git a/xlators/cluster/ec/src/ec-inode-write.c b/xlators/cluster/ec/src/ec-inode-write.c
+index 4f35b6d..2f28e11 100644
+--- a/xlators/cluster/ec/src/ec-inode-write.c
++++ b/xlators/cluster/ec/src/ec-inode-write.c
+@@ -1985,10 +1985,13 @@ ec_get_lock_good_mask(inode_t *inode, xlator_t *xl)
+     LOCK(&inode->lock);
+     {
+         ictx = __ec_inode_get(inode, xl);
+-        lock = ictx->inode_lock;
++        if (ictx)
++            lock = ictx->inode_lock;
+     }
+     UNLOCK(&inode->lock);
+-    return lock->good_mask;
++    if (lock)
++        return lock->good_mask;
++    return 0;
+ }
+ 
+ void
+-- 
+1.8.3.1
+

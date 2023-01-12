@@ -1,0 +1,107 @@
+From 6e15fca1621b06270983f57ac146f0f8e52f0797 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Tue, 9 Jun 2020 15:38:12 +0530
+Subject: [PATCH 449/449] test: Test case brick-mux-validation-in-cluster.t is
+ failing on RHEL-8
+
+Brick process are not properly attached on any cluster node while
+some volume options are changed on peer node and glusterd is down on
+that specific node.
+
+Solution: At the time of restart glusterd it got a friend update request
+from a peer node if peer node having some changes on volume.If the brick
+process is started before received a friend update request in that case
+brick_mux behavior is not workingproperly. All bricks are attached to
+the same process even volumes options are not the same. To avoid the
+issue introduce an atomic flag volpeerupdate and update the value while
+glusterd has received a friend update request from peer for a specific
+volume.If volpeerupdate flag is 1 volume is started by
+glusterd_import_friend_volume synctask
+
+> Change-Id: I4c026f1e7807ded249153670e6967a2be8d22cb7
+> Credit: Sanju Rakaonde <srakonde@redhat.com>
+> fixes: #1290
+> Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/24540/)
+> (Cherry pick from commit 955bfd567329cf7fe63e9c3b89d333a55e5e9a20)
+
+BUG: 1844359
+Change-Id: I4c026f1e7807ded249153670e6967a2be8d22cb7
+Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202812
+Tested-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-by: Sanju Rakonde <srakonde@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/glusterd/brick-mux-validation-in-cluster.t | 4 +---
+ xlators/mgmt/glusterd/src/glusterd-utils.c            | 7 +++++--
+ xlators/mgmt/glusterd/src/glusterd.h                  | 4 ++++
+ 3 files changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/tests/bugs/glusterd/brick-mux-validation-in-cluster.t b/tests/bugs/glusterd/brick-mux-validation-in-cluster.t
+index f088dbb..b6af487 100644
+--- a/tests/bugs/glusterd/brick-mux-validation-in-cluster.t
++++ b/tests/bugs/glusterd/brick-mux-validation-in-cluster.t
+@@ -100,10 +100,8 @@ $CLI_2 volume set $V0 performance.readdir-ahead on
+ $CLI_2 volume set $V1 performance.readdir-ahead on
+ 
+ TEST $glusterd_1;
++EXPECT_WITHIN $PROBE_TIMEOUT 2 peer_count
+ 
+-sleep 10
+-
+-EXPECT 4 count_brick_processes
+ EXPECT_WITHIN $PROCESS_UP_TIMEOUT 4 count_brick_pids
+ EXPECT_WITHIN $PROCESS_UP_TIMEOUT 0  count_N/A_brick_pids
+ 
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index 2eb2a76..6f904ae 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -3758,6 +3758,7 @@ glusterd_compare_friend_volume(dict_t *peer_data, int32_t count,
+                "Version of volume %s differ. local version = %d, "
+                "remote version = %d on peer %s",
+                volinfo->volname, volinfo->version, version, hostname);
++        GF_ATOMIC_INIT(volinfo->volpeerupdate, 1);
+         *status = GLUSTERD_VOL_COMP_UPDATE_REQ;
+         goto out;
+     } else if (version < volinfo->version) {
+@@ -4784,7 +4785,8 @@ glusterd_volinfo_stop_stale_bricks(glusterd_volinfo_t *new_volinfo,
+          * or if it's part of the new volume and is pending a snap,
+          * then stop the brick process
+          */
+-        if (ret || (new_brickinfo->snap_status == -1)) {
++        if (ret || (new_brickinfo->snap_status == -1) ||
++            GF_ATOMIC_GET(old_volinfo->volpeerupdate)) {
+             /*TODO: may need to switch to 'atomic' flavour of
+              * brick_stop, once we make peer rpc program also
+              * synctask enabled*/
+@@ -6490,7 +6492,8 @@ glusterd_brick_start(glusterd_volinfo_t *volinfo,
+      * three different triggers for an attempt to start the brick process
+      * due to the quorum handling code in glusterd_friend_sm.
+      */
+-    if (brickinfo->status == GF_BRICK_STARTING || brickinfo->start_triggered) {
++    if (brickinfo->status == GF_BRICK_STARTING || brickinfo->start_triggered ||
++        GF_ATOMIC_GET(volinfo->volpeerupdate)) {
+         gf_msg_debug(this->name, 0,
+                      "brick %s is already in starting "
+                      "phase",
+diff --git a/xlators/mgmt/glusterd/src/glusterd.h b/xlators/mgmt/glusterd/src/glusterd.h
+index 1c6c3b1..f739b5d 100644
+--- a/xlators/mgmt/glusterd/src/glusterd.h
++++ b/xlators/mgmt/glusterd/src/glusterd.h
+@@ -523,6 +523,10 @@ struct glusterd_volinfo_ {
+     pthread_mutex_t store_volinfo_lock; /* acquire lock for
+                                          * updating the volinfo
+                                          */
++    gf_atomic_t volpeerupdate;
++    /* Flag to check about volume has received updates
++       from peer
++    */
+ };
+ 
+ typedef enum gd_snap_status_ {
+-- 
+1.8.3.1
+

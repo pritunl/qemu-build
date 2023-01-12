@@ -1,0 +1,162 @@
+From 0021a4bbc9af2bfe28d4a79f76c3cd33f23dd118 Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Fri, 5 Apr 2019 12:33:55 +0530
+Subject: [PATCH 101/124] shd/mux: Fix coverity issues introduced by shd mux
+ patch
+
+CID 1400475:  Null pointer dereferences  (FORWARD_NULL)
+CID 1400474:  Null pointer dereferences  (FORWARD_NULL)
+CID 1400471:  Code maintainability issues  (UNUSED_VALUE)
+CID 1400470:  Null pointer dereferences  (FORWARD_NULL)
+CID 1400469:  Memory - illegal accesses  (USE_AFTER_FREE)
+CID 1400467:  Code maintainability issues  (UNUSED_VALUE)
+
+Backport of: https://review.gluster.org/#/c/glusterfs/+/22514/
+
+>Change-Id: I0ca1c733be335c6e5844f44850f8066626ac40d4
+>updates: bz#789278
+>Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+
+Change-Id: I0425efca9ab5a95801eff9e99259219449a16380
+BUG: 1471742
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167832
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ libglusterfs/src/graph.c                        | 21 +++++++++++++--------
+ xlators/mgmt/glusterd/src/glusterd-shd-svc.c    |  6 ++++++
+ xlators/mgmt/glusterd/src/glusterd-svc-helper.c | 24 +++++++++++++++++-------
+ 3 files changed, 36 insertions(+), 15 deletions(-)
+
+diff --git a/libglusterfs/src/graph.c b/libglusterfs/src/graph.c
+index a492dd8..4c8b02d 100644
+--- a/libglusterfs/src/graph.c
++++ b/libglusterfs/src/graph.c
+@@ -1470,7 +1470,9 @@ glusterfs_process_svc_detach(glusterfs_ctx_t *ctx, gf_volfile_t *volfile_obj)
+         goto out;
+     parent_graph = ctx->active;
+     graph = volfile_obj->graph;
+-    if (graph && graph->first)
++    if (!graph)
++        goto out;
++    if (graph->first)
+         xl = graph->first;
+ 
+     last_xl = graph->last_xl;
+@@ -1591,12 +1593,10 @@ glusterfs_process_svc_attach_volfp(glusterfs_ctx_t *ctx, FILE *fp,
+     parent_graph->leaf_count += graph->leaf_count;
+     parent_graph->id++;
+ 
++    volfile_obj = GF_CALLOC(1, sizeof(gf_volfile_t), gf_common_volfile_t);
+     if (!volfile_obj) {
+-        volfile_obj = GF_CALLOC(1, sizeof(gf_volfile_t), gf_common_volfile_t);
+-        if (!volfile_obj) {
+-            ret = -1;
+-            goto out;
+-        }
++        ret = -1;
++        goto out;
+     }
+ 
+     graph->used = 1;
+@@ -1641,6 +1641,7 @@ glusterfs_mux_volfile_reconfigure(FILE *newvolfile_fp, glusterfs_ctx_t *ctx,
+ {
+     glusterfs_graph_t *oldvolfile_graph = NULL;
+     glusterfs_graph_t *newvolfile_graph = NULL;
++    char vol_id[NAME_MAX + 1];
+ 
+     int ret = -1;
+ 
+@@ -1672,6 +1673,9 @@ glusterfs_mux_volfile_reconfigure(FILE *newvolfile_fp, glusterfs_ctx_t *ctx,
+     glusterfs_graph_prepare(newvolfile_graph, ctx, newvolfile_graph->first);
+ 
+     if (!is_graph_topology_equal(oldvolfile_graph, newvolfile_graph)) {
++        ret = snprintf(vol_id, sizeof(vol_id), "%s", volfile_obj->vol_id);
++        if (ret < 0)
++            goto out;
+         ret = glusterfs_process_svc_detach(ctx, volfile_obj);
+         if (ret) {
+             gf_msg("glusterfsd-mgmt", GF_LOG_ERROR, EINVAL,
+@@ -1680,8 +1684,9 @@ glusterfs_mux_volfile_reconfigure(FILE *newvolfile_fp, glusterfs_ctx_t *ctx,
+                    "old graph. Aborting the reconfiguration operation");
+             goto out;
+         }
+-        ret = glusterfs_process_svc_attach_volfp(ctx, newvolfile_fp,
+-                                                 volfile_obj->vol_id, checksum);
++        volfile_obj = NULL;
++        ret = glusterfs_process_svc_attach_volfp(ctx, newvolfile_fp, vol_id,
++                                                 checksum);
+         goto out;
+     }
+ 
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+index 937ea30..04a4b2e 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+@@ -101,6 +101,8 @@ glusterd_shdsvc_init(void *data, glusterd_conn_t *mux_conn,
+         svc->conn.rpc = rpc_clnt_ref(mux_svc->rpc);
+         ret = snprintf(svc->conn.sockpath, sizeof(svc->conn.sockpath), "%s",
+                        mux_conn->sockpath);
++        if (ret < 0)
++            goto out;
+     } else {
+         ret = mkdir_p(logdir, 0755, _gf_true);
+         if ((ret == -1) && (EEXIST != errno)) {
+@@ -663,6 +665,10 @@ glusterd_shdsvc_stop(glusterd_svc_t *svc, int sig)
+         glusterd_volinfo_ref(volinfo);
+         svc_proc->data = volinfo;
+         ret = glusterd_svc_stop(svc, sig);
++        if (ret) {
++            glusterd_volinfo_unref(volinfo);
++            goto out;
++        }
+     }
+     if (!empty && pid != -1) {
+         ret = glusterd_detach_svc(svc, volinfo, sig);
+diff --git a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+index e42703c..02945b1 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
++++ b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+@@ -411,9 +411,14 @@ __gf_find_compatible_svc(gd_node_type daemon)
+     conf = THIS->private;
+     GF_VALIDATE_OR_GOTO("glusterd", conf, out);
+ 
+-    if (daemon == GD_NODE_SHD) {
+-        svc_procs = &conf->shd_procs;
+-        if (!svc_procs)
++    switch (daemon) {
++        case GD_NODE_SHD: {
++            svc_procs = &conf->shd_procs;
++            if (!svc_procs)
++                goto out;
++        } break;
++        default:
++            /* Add support for other client daemons here */
+             goto out;
+     }
+ 
+@@ -540,11 +545,16 @@ __gf_find_compatible_svc_from_pid(gd_node_type daemon, pid_t pid)
+     if (!conf)
+         return NULL;
+ 
+-    if (daemon == GD_NODE_SHD) {
+-        svc_procs = &conf->shd_procs;
+-        if (!svc_proc)
++    switch (daemon) {
++        case GD_NODE_SHD: {
++            svc_procs = &conf->shd_procs;
++            if (!svc_procs)
++                return NULL;
++        } break;
++        default:
++            /* Add support for other client daemons here */
+             return NULL;
+-    } /* Can be moved to switch when mux is implemented for other daemon; */
++    }
+ 
+     cds_list_for_each_entry(svc_proc, svc_procs, svc_proc_list)
+     {
+-- 
+1.8.3.1
+

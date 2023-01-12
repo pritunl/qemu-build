@@ -1,0 +1,84 @@
+From b311385a3c4bd56d69d1fa7e9bd3d9a2ae5c344e Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Mon, 7 Oct 2019 12:27:01 +0530
+Subject: [PATCH 403/449] Fix spurious failure in bug-1744548-heal-timeout.t
+
+Script was assuming that the heal would have triggered
+by the time test was executed, which may not be the case.
+It can lead to following failures when the race happens:
+
+...
+18:29:45 not ok  14 [     85/      1] <  26> '[ 331 == 333 ]' -> ''
+...
+18:29:45 not ok  16 [  10097/      1] <  33> '[ 668 == 666 ]' -> ''
+
+Heal on 3rd brick didn't start completely first time the command was executed.
+So the extra count got added to the next profile info.
+
+Fixed it by depending on cumulative stats and waiting until the count is
+satisfied using EXPECT_WITHIN
+
+> Upstream patch link:https://review.gluster.org/23523
+>fixes: bz#1759002
+>Change-Id: I3b410671c902d6b1458a757fa245613cb29d967d
+>Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+
+BUG: 1764091
+Change-Id: Ic4d16b6c8a1bbc35735567d60fd0383456b9f534
+Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202369
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/replicate/bug-1744548-heal-timeout.t | 17 +++++++++++------
+ 1 file changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/tests/bugs/replicate/bug-1744548-heal-timeout.t b/tests/bugs/replicate/bug-1744548-heal-timeout.t
+index 3cb73bc..0aaa3ea 100644
+--- a/tests/bugs/replicate/bug-1744548-heal-timeout.t
++++ b/tests/bugs/replicate/bug-1744548-heal-timeout.t
+@@ -4,6 +4,11 @@
+ . $(dirname $0)/../../volume.rc
+ . $(dirname $0)/../../afr.rc
+ 
++function get_cumulative_opendir_count {
++#sed 'n:d' prints odd-numbered lines
++    $CLI volume profile $V0 info |grep OPENDIR|sed 'n;d' | awk '{print $8}'|tr -d '\n'
++}
++
+ cleanup;
+ 
+ TEST glusterd;
+@@ -20,23 +25,23 @@ TEST ! $CLI volume heal $V0
+ TEST $CLI volume profile $V0 start
+ TEST $CLI volume profile $V0 info clear
+ TEST $CLI volume heal $V0 enable
+-TEST $CLI volume heal $V0
+ # Each brick does 3 opendirs, corresponding to dirty, xattrop and entry-changes
+-COUNT=`$CLI volume profile $V0 info incremental |grep OPENDIR|awk '{print $8}'|tr -d '\n'`
+-TEST [ "$COUNT" == "333" ]
++EXPECT_WITHIN $HEAL_TIMEOUT "^333$" get_cumulative_opendir_count
+ 
+ # Check that a change in heal-timeout is honoured immediately.
+ TEST $CLI volume set $V0 cluster.heal-timeout 5
+ sleep 10
+-COUNT=`$CLI volume profile $V0 info incremental |grep OPENDIR|awk '{print $8}'|tr -d '\n'`
+ # Two crawls must have happened.
+-TEST [ "$COUNT" == "666" ]
++EXPECT_WITHIN $HEAL_TIMEOUT "^999$" get_cumulative_opendir_count
+ 
+ # shd must not heal if it is disabled and heal-timeout is changed.
+ TEST $CLI volume heal $V0 disable
++#Wait for configuration update and any opendir fops to complete
++sleep 10
+ TEST $CLI volume profile $V0 info clear
+ TEST $CLI volume set $V0 cluster.heal-timeout 6
+-sleep 6
++#Better to wait for more than 6 seconds to account for configuration updates
++sleep 10
+ COUNT=`$CLI volume profile $V0 info incremental |grep OPENDIR|awk '{print $8}'|tr -d '\n'`
+ TEST [ -z $COUNT ]
+ cleanup;
+-- 
+1.8.3.1
+

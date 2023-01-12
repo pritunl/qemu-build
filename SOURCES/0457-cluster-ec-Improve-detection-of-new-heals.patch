@@ -1,0 +1,409 @@
+From 3e8b3a2c2c6f83635486035fc8040c87d89813d2 Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez <xhernandez@redhat.com>
+Date: Thu, 2 Jul 2020 18:08:52 +0200
+Subject: [PATCH 457/465] cluster/ec: Improve detection of new heals
+
+When EC successfully healed a directory it assumed that maybe other
+entries inside that directory could have been created, which could
+require additional heal cycles. For this reason, when the heal happened
+as part of one index heal iteration, it triggered a new iteration.
+
+The problem happened when the directory was healthy, so no new entries
+were added, but its index entry was not removed for some reason. In
+this case self-heal started and endless loop healing the same directory
+continuously, cause high CPU utilization.
+
+This patch improves detection of new files added to the heal index so
+that a new index heal iteration is only triggered if there is new work
+to do.
+
+>Upstream patch: https://review.gluster.org/#/c/glusterfs/+/24665/
+>Fixes: #1354
+
+Change-Id: I2355742b85fbfa6de758bccc5d2e1a283c82b53f
+BUG: 1852736
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/208041
+Tested-by: Ashish Pandey <aspandey@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Ashish Pandey <aspandey@redhat.com>
+---
+ xlators/cluster/ec/src/ec-common.c     |  2 +-
+ xlators/cluster/ec/src/ec-heal.c       | 58 +++++++++++++++++++++++-----------
+ xlators/cluster/ec/src/ec-heald.c      | 24 ++++++++++----
+ xlators/cluster/ec/src/ec-inode-read.c | 27 ++++++++++++++--
+ xlators/cluster/ec/src/ec-types.h      |  4 +--
+ xlators/cluster/ec/src/ec.h            |  1 +
+ 6 files changed, 86 insertions(+), 30 deletions(-)
+
+diff --git a/xlators/cluster/ec/src/ec-common.c b/xlators/cluster/ec/src/ec-common.c
+index e580bfb..e3f8769 100644
+--- a/xlators/cluster/ec/src/ec-common.c
++++ b/xlators/cluster/ec/src/ec-common.c
+@@ -230,7 +230,7 @@ ec_child_next(ec_t *ec, ec_fop_data_t *fop, uint32_t idx)
+ int32_t
+ ec_heal_report(call_frame_t *frame, void *cookie, xlator_t *this,
+                int32_t op_ret, int32_t op_errno, uintptr_t mask, uintptr_t good,
+-               uintptr_t bad, dict_t *xdata)
++               uintptr_t bad, uint32_t pending, dict_t *xdata)
+ {
+     if (op_ret < 0) {
+         gf_msg(this->name, GF_LOG_DEBUG, op_errno, EC_MSG_HEAL_FAIL,
+diff --git a/xlators/cluster/ec/src/ec-heal.c b/xlators/cluster/ec/src/ec-heal.c
+index 06a7016..e2de879 100644
+--- a/xlators/cluster/ec/src/ec-heal.c
++++ b/xlators/cluster/ec/src/ec-heal.c
+@@ -72,6 +72,7 @@ struct ec_name_data {
+     char *name;
+     inode_t *parent;
+     default_args_cbk_t *replies;
++    uint32_t heal_pending;
+ };
+ 
+ static char *ec_ignore_xattrs[] = {GF_SELINUX_XATTR_KEY, QUOTA_SIZE_KEY, NULL};
+@@ -996,6 +997,7 @@ ec_set_new_entry_dirty(ec_t *ec, loc_t *loc, struct iatt *ia,
+         ret = -ENOTCONN;
+         goto out;
+     }
++
+ out:
+     if (xattr)
+         dict_unref(xattr);
+@@ -1164,6 +1166,7 @@ ec_create_name(call_frame_t *frame, ec_t *ec, inode_t *parent, char *name,
+     dict_t *xdata = NULL;
+     char *linkname = NULL;
+     ec_config_t config;
++
+     /* There should be just one gfid key */
+     EC_REPLIES_ALLOC(replies, ec->nodes);
+     if (gfid_db->count != 1) {
+@@ -1408,6 +1411,11 @@ __ec_heal_name(call_frame_t *frame, ec_t *ec, inode_t *parent, char *name,
+ 
+     ret = ec_create_name(frame, ec, parent, name, replies, gfid_db, enoent,
+                          participants);
++    if (ret >= 0) {
++        /* If ec_create_name() succeeded we return 1 to indicate that a new
++         * file has been created and it will need to be healed. */
++        ret = 1;
++    }
+ out:
+     cluster_replies_wipe(replies, ec->nodes);
+     loc_wipe(&loc);
+@@ -1485,18 +1493,22 @@ ec_name_heal_handler(xlator_t *subvol, gf_dirent_t *entry, loc_t *parent,
+     ret = ec_heal_name(name_data->frame, ec, parent->inode, entry->d_name,
+                        name_on);
+ 
+-    if (ret < 0)
++    if (ret < 0) {
+         memset(name_on, 0, ec->nodes);
++    } else {
++        name_data->heal_pending += ret;
++    }
+ 
+     for (i = 0; i < ec->nodes; i++)
+         if (name_data->participants[i] && !name_on[i])
+             name_data->failed_on[i] = 1;
++
+     return 0;
+ }
+ 
+ int
+ ec_heal_names(call_frame_t *frame, ec_t *ec, inode_t *inode,
+-              unsigned char *participants)
++              unsigned char *participants, uint32_t *pending)
+ {
+     int i = 0;
+     int j = 0;
+@@ -1509,7 +1521,7 @@ ec_heal_names(call_frame_t *frame, ec_t *ec, inode_t *inode,
+     name_data.frame = frame;
+     name_data.participants = participants;
+     name_data.failed_on = alloca0(ec->nodes);
+-    ;
++    name_data.heal_pending = 0;
+ 
+     for (i = 0; i < ec->nodes; i++) {
+         if (!participants[i])
+@@ -1528,6 +1540,8 @@ ec_heal_names(call_frame_t *frame, ec_t *ec, inode_t *inode,
+             break;
+         }
+     }
++    *pending += name_data.heal_pending;
++
+     loc_wipe(&loc);
+     return ret;
+ }
+@@ -1535,7 +1549,7 @@ ec_heal_names(call_frame_t *frame, ec_t *ec, inode_t *inode,
+ int
+ __ec_heal_entry(call_frame_t *frame, ec_t *ec, inode_t *inode,
+                 unsigned char *heal_on, unsigned char *sources,
+-                unsigned char *healed_sinks)
++                unsigned char *healed_sinks, uint32_t *pending)
+ {
+     unsigned char *locked_on = NULL;
+     unsigned char *output = NULL;
+@@ -1580,7 +1594,7 @@ unlock:
+         if (sources[i] || healed_sinks[i])
+             participants[i] = 1;
+     }
+-    ret = ec_heal_names(frame, ec, inode, participants);
++    ret = ec_heal_names(frame, ec, inode, participants, pending);
+ 
+     if (EC_COUNT(participants, ec->nodes) <= ec->fragments)
+         goto out;
+@@ -1601,7 +1615,8 @@ out:
+ 
+ int
+ ec_heal_entry(call_frame_t *frame, ec_t *ec, inode_t *inode,
+-              unsigned char *sources, unsigned char *healed_sinks)
++              unsigned char *sources, unsigned char *healed_sinks,
++              uint32_t *pending)
+ {
+     unsigned char *locked_on = NULL;
+     unsigned char *up_subvols = NULL;
+@@ -1632,7 +1647,7 @@ ec_heal_entry(call_frame_t *frame, ec_t *ec, inode_t *inode,
+             goto unlock;
+         }
+         ret = __ec_heal_entry(frame, ec, inode, locked_on, sources,
+-                              healed_sinks);
++                              healed_sinks, pending);
+     }
+ unlock:
+     cluster_uninodelk(ec->xl_list, locked_on, ec->nodes, replies, output, frame,
+@@ -1953,14 +1968,14 @@ ec_manager_heal_block(ec_fop_data_t *fop, int32_t state)
+             if (fop->cbks.heal) {
+                 fop->cbks.heal(fop->req_frame, fop, fop->xl, 0, 0,
+                                (heal->good | heal->bad), heal->good, heal->bad,
+-                               NULL);
++                               0, NULL);
+             }
+ 
+             return EC_STATE_END;
+         case -EC_STATE_REPORT:
+             if (fop->cbks.heal) {
+-                fop->cbks.heal(fop->req_frame, fop, fop->xl, -1, fop->error, 0,
+-                               0, 0, NULL);
++                fop->cbks.heal(fop->req_frame, fop->data, fop->xl, -1,
++                               fop->error, 0, 0, 0, 0, NULL);
+             }
+ 
+             return EC_STATE_END;
+@@ -1997,14 +2012,15 @@ out:
+     if (fop != NULL) {
+         ec_manager(fop, error);
+     } else {
+-        func(frame, NULL, this, -1, error, 0, 0, 0, NULL);
++        func(frame, heal, this, -1, error, 0, 0, 0, 0, NULL);
+     }
+ }
+ 
+ int32_t
+ ec_heal_block_done(call_frame_t *frame, void *cookie, xlator_t *this,
+                    int32_t op_ret, int32_t op_errno, uintptr_t mask,
+-                   uintptr_t good, uintptr_t bad, dict_t *xdata)
++                   uintptr_t good, uintptr_t bad, uint32_t pending,
++                   dict_t *xdata)
+ {
+     ec_fop_data_t *fop = cookie;
+     ec_heal_t *heal = fop->data;
+@@ -2489,6 +2505,7 @@ ec_heal_do(xlator_t *this, void *data, loc_t *loc, int32_t partial)
+     intptr_t mbad = 0;
+     intptr_t good = 0;
+     intptr_t bad = 0;
++    uint32_t pending = 0;
+     ec_fop_data_t *fop = data;
+     gf_boolean_t blocking = _gf_false;
+     ec_heal_need_t need_heal = EC_HEAL_NONEED;
+@@ -2524,7 +2541,7 @@ ec_heal_do(xlator_t *this, void *data, loc_t *loc, int32_t partial)
+     if (loc->name && strlen(loc->name)) {
+         ret = ec_heal_name(frame, ec, loc->parent, (char *)loc->name,
+                            participants);
+-        if (ret == 0) {
++        if (ret >= 0) {
+             gf_msg_debug(this->name, 0,
+                          "%s: name heal "
+                          "successful on %" PRIXPTR,
+@@ -2542,7 +2559,7 @@ ec_heal_do(xlator_t *this, void *data, loc_t *loc, int32_t partial)
+ 
+     /* Mount triggers heal only when it detects that it must need heal, shd
+      * triggers heals periodically which need not be thorough*/
+-    if (ec->shd.iamshd) {
++    if (ec->shd.iamshd && (ret <= 0)) {
+         ec_heal_inspect(frame, ec, loc->inode, up_subvols, _gf_false, _gf_false,
+                         &need_heal);
+ 
+@@ -2552,13 +2569,15 @@ ec_heal_do(xlator_t *this, void *data, loc_t *loc, int32_t partial)
+             goto out;
+         }
+     }
++
+     sources = alloca0(ec->nodes);
+     healed_sinks = alloca0(ec->nodes);
+     if (IA_ISREG(loc->inode->ia_type)) {
+         ret = ec_heal_data(frame, ec, blocking, loc->inode, sources,
+                            healed_sinks);
+     } else if (IA_ISDIR(loc->inode->ia_type) && !partial) {
+-        ret = ec_heal_entry(frame, ec, loc->inode, sources, healed_sinks);
++        ret = ec_heal_entry(frame, ec, loc->inode, sources, healed_sinks,
++                            &pending);
+     } else {
+         ret = 0;
+         memcpy(sources, participants, ec->nodes);
+@@ -2588,10 +2607,11 @@ out:
+     if (fop->cbks.heal) {
+         fop->cbks.heal(fop->req_frame, fop, fop->xl, op_ret, op_errno,
+                        ec_char_array_to_mask(participants, ec->nodes),
+-                       mgood & good, mbad & bad, NULL);
++                       mgood & good, mbad & bad, pending, NULL);
+     }
+     if (frame)
+         STACK_DESTROY(frame->root);
++
+     return;
+ }
+ 
+@@ -2638,8 +2658,8 @@ void
+ ec_heal_fail(ec_t *ec, ec_fop_data_t *fop)
+ {
+     if (fop->cbks.heal) {
+-        fop->cbks.heal(fop->req_frame, NULL, ec->xl, -1, fop->error, 0, 0, 0,
+-                       NULL);
++        fop->cbks.heal(fop->req_frame, fop->data, ec->xl, -1, fop->error, 0, 0,
++                       0, 0, NULL);
+     }
+     ec_fop_data_release(fop);
+ }
+@@ -2826,7 +2846,7 @@ fail:
+     if (fop)
+         ec_fop_data_release(fop);
+     if (func)
+-        func(frame, NULL, this, -1, err, 0, 0, 0, NULL);
++        func(frame, data, this, -1, err, 0, 0, 0, 0, NULL);
+ }
+ 
+ int
+diff --git a/xlators/cluster/ec/src/ec-heald.c b/xlators/cluster/ec/src/ec-heald.c
+index cba111a..4f4b6aa 100644
+--- a/xlators/cluster/ec/src/ec-heald.c
++++ b/xlators/cluster/ec/src/ec-heald.c
+@@ -156,15 +156,27 @@ int
+ ec_shd_selfheal(struct subvol_healer *healer, int child, loc_t *loc,
+                 gf_boolean_t full)
+ {
++    dict_t *xdata = NULL;
++    uint32_t count;
+     int32_t ret;
+ 
+-    ret = syncop_getxattr(healer->this, loc, NULL, EC_XATTR_HEAL, NULL, NULL);
+-    if (!full && (ret >= 0) && (loc->inode->ia_type == IA_IFDIR)) {
++    ret = syncop_getxattr(healer->this, loc, NULL, EC_XATTR_HEAL, NULL, &xdata);
++    if (!full && (loc->inode->ia_type == IA_IFDIR)) {
+         /* If we have just healed a directory, it's possible that
+-         * other index entries have appeared to be healed. We put a
+-         * mark so that we can check it later and restart a scan
+-         * without delay. */
+-        healer->rerun = _gf_true;
++         * other index entries have appeared to be healed. */
++        if ((xdata != NULL) &&
++            (dict_get_uint32(xdata, EC_XATTR_HEAL_NEW, &count) == 0) &&
++            (count > 0)) {
++            /* Force a rerun of the index healer. */
++            gf_msg_debug(healer->this->name, 0, "%d more entries to heal",
++                         count);
++
++            healer->rerun = _gf_true;
++        }
++    }
++
++    if (xdata != NULL) {
++        dict_unref(xdata);
+     }
+ 
+     return ret;
+diff --git a/xlators/cluster/ec/src/ec-inode-read.c b/xlators/cluster/ec/src/ec-inode-read.c
+index f87a94a..e82e8f6 100644
+--- a/xlators/cluster/ec/src/ec-inode-read.c
++++ b/xlators/cluster/ec/src/ec-inode-read.c
+@@ -393,7 +393,8 @@ ec_manager_getxattr(ec_fop_data_t *fop, int32_t state)
+ int32_t
+ ec_getxattr_heal_cbk(call_frame_t *frame, void *cookie, xlator_t *xl,
+                      int32_t op_ret, int32_t op_errno, uintptr_t mask,
+-                     uintptr_t good, uintptr_t bad, dict_t *xdata)
++                     uintptr_t good, uintptr_t bad, uint32_t pending,
++                     dict_t *xdata)
+ {
+     ec_fop_data_t *fop = cookie;
+     fop_getxattr_cbk_t func = fop->data;
+@@ -402,6 +403,25 @@ ec_getxattr_heal_cbk(call_frame_t *frame, void *cookie, xlator_t *xl,
+     char *str;
+     char bin1[65], bin2[65];
+ 
++    /* We try to return the 'pending' information in xdata, but if this cannot
++     * be set, we will ignore it silently. We prefer to report the success or
++     * failure of the heal itself. */
++    if (xdata == NULL) {
++        xdata = dict_new();
++    } else {
++        dict_ref(xdata);
++    }
++    if (xdata != NULL) {
++        if (dict_set_uint32(xdata, EC_XATTR_HEAL_NEW, pending) != 0) {
++            /* dict_set_uint32() is marked as 'warn_unused_result' and gcc
++             * enforces to check the result in this case. However we don't
++             * really care if it succeeded or not. We'll just do the same.
++             *
++             * This empty 'if' avoids the warning, and it will be removed by
++             * the optimizer. */
++        }
++    }
++
+     if (op_ret >= 0) {
+         dict = dict_new();
+         if (dict == NULL) {
+@@ -435,11 +455,14 @@ ec_getxattr_heal_cbk(call_frame_t *frame, void *cookie, xlator_t *xl,
+     }
+ 
+ out:
+-    func(frame, NULL, xl, op_ret, op_errno, dict, NULL);
++    func(frame, NULL, xl, op_ret, op_errno, dict, xdata);
+ 
+     if (dict != NULL) {
+         dict_unref(dict);
+     }
++    if (xdata != NULL) {
++        dict_unref(xdata);
++    }
+ 
+     return 0;
+ }
+diff --git a/xlators/cluster/ec/src/ec-types.h b/xlators/cluster/ec/src/ec-types.h
+index 34a9768..f15429d 100644
+--- a/xlators/cluster/ec/src/ec-types.h
++++ b/xlators/cluster/ec/src/ec-types.h
+@@ -186,10 +186,10 @@ struct _ec_inode {
+ 
+ typedef int32_t (*fop_heal_cbk_t)(call_frame_t *, void *, xlator_t *, int32_t,
+                                   int32_t, uintptr_t, uintptr_t, uintptr_t,
+-                                  dict_t *);
++                                  uint32_t, dict_t *);
+ typedef int32_t (*fop_fheal_cbk_t)(call_frame_t *, void *, xlator_t *, int32_t,
+                                    int32_t, uintptr_t, uintptr_t, uintptr_t,
+-                                   dict_t *);
++                                   uint32_t, dict_t *);
+ 
+ union _ec_cbk {
+     fop_access_cbk_t access;
+diff --git a/xlators/cluster/ec/src/ec.h b/xlators/cluster/ec/src/ec.h
+index 1b210d9..6f6de6d 100644
+--- a/xlators/cluster/ec/src/ec.h
++++ b/xlators/cluster/ec/src/ec.h
+@@ -18,6 +18,7 @@
+ #define EC_XATTR_SIZE EC_XATTR_PREFIX "size"
+ #define EC_XATTR_VERSION EC_XATTR_PREFIX "version"
+ #define EC_XATTR_HEAL EC_XATTR_PREFIX "heal"
++#define EC_XATTR_HEAL_NEW EC_XATTR_PREFIX "heal-new"
+ #define EC_XATTR_DIRTY EC_XATTR_PREFIX "dirty"
+ #define EC_STRIPE_CACHE_MAX_SIZE 10
+ #define EC_VERSION_SIZE 2
+-- 
+1.8.3.1
+

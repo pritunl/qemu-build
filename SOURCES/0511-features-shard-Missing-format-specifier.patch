@@ -1,0 +1,39 @@
+From 868d346cc35c222d19b95bd9c367674c9ea859df Mon Sep 17 00:00:00 2001
+From: Vinayakswami Hariharmath <vharihar@redhat.com>
+Date: Tue, 15 Dec 2020 16:23:49 +0530
+Subject: [PATCH 511/511] features/shard: Missing format specifier
+
+PRIu64 format specifier explicitly needs (percent sign) as
+prefix and that was missing as part of the below commit on
+downstream
+
+https://code.engineering.redhat.com/gerrit/#/c/221061/
+
+BUG: 1752739
+Change-Id: I354de58796f350eb1aa42fcdf8092ca2e69ccbb6
+
+Signed-off-by: Vinayakswami Hariharmath <vharihar@redhat.com>
+Change-Id: I4598893e3fcca3a2b3e6e8ef9b64b3e5e98923e6
+Reviewed-on: https://code.engineering.redhat.com/gerrit/221217
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Ravishankar Narayanankutty <ravishankar@redhat.com>
+---
+ xlators/features/shard/src/shard.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/features/shard/src/shard.c b/xlators/features/shard/src/shard.c
+index a967f35..099b062 100644
+--- a/xlators/features/shard/src/shard.c
++++ b/xlators/features/shard/src/shard.c
+@@ -1855,7 +1855,7 @@ int shard_truncate_last_shard(call_frame_t *frame, xlator_t *this,
+    */
+   if (!inode) {
+     gf_msg_debug(this->name, 0,
+-                 "Last shard to be truncated absent in backend: " PRIu64
++                 "Last shard to be truncated absent in backend:%" PRIu64
+                  " of gfid: %s. Directly proceeding to update file size",
+                  local->first_block, uuid_utoa(local->loc.inode->gfid));
+     shard_update_file_size(frame, this, NULL, &local->loc,
+-- 
+1.8.3.1
+

@@ -1,0 +1,39 @@
+From b504052d003aa41fbd44eec286d1733b6f2a168e Mon Sep 17 00:00:00 2001
+From: Krutika Dhananjay <kdhananj@redhat.com>
+Date: Tue, 6 Nov 2018 18:44:55 +0530
+Subject: [PATCH 29/52] glusterd: Reset op-version for
+ "features.shard-lru-limit"
+
+The op-version for the "features.shard-lru-limit" option was set to
+4.2.0 in the upstream patch and backported at
+41e7e33c6512e98a1567e5a5532d3898b59cfa98
+
+This commit reverts the op-version for this option to 3.13.4.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I7d3ed6b373851267c78fc6815a83bee2c0906413
+Signed-off-by: Krutika Dhananjay <kdhananj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/155127
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Xavi Hernandez <xhernandez@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index 2f3271f..4bf89a6 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -2546,7 +2546,7 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+     {
+         .key = "features.shard-lru-limit",
+         .voltype = "features/shard",
+-        .op_version = GD_OP_VERSION_5_0,
++        .op_version = GD_OP_VERSION_3_13_4,
+         .flags = VOLOPT_FLAG_CLIENT_OPT,
+         .type = NO_DOC,
+     },
+-- 
+1.8.3.1
+

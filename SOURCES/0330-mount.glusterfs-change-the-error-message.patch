@@ -1,0 +1,59 @@
+From 72168245761592a2cd0ebec05dd9bd9bc00745ca Mon Sep 17 00:00:00 2001
+From: Amar Tumballi <amarts@redhat.com>
+Date: Wed, 13 Mar 2019 08:51:31 +0530
+Subject: [PATCH 330/335] mount.glusterfs: change the error message
+
+In scenarios where a mount fails before creating log file, doesn't
+make sense to give message to 'check log file'. See below:
+
+```
+ERROR: failed to create logfile "/var/log/glusterfs/mnt.log" (No space left on device)
+ERROR: failed to open logfile /var/log/glusterfs/mnt.log
+Mount failed. Please check the log file for more details.
+```
+
+>upstream patch: https://review.gluster.org/#/c/glusterfs/+/22346/
+>Fixes: bz#1688068
+>Change-Id: I1d837caa4f9bc9f1a37780783e95007e01ae4e3f
+>Signed-off-by: Amar Tumballi <amarts@redhat.com>
+
+BUG: 1685406
+Change-Id: I1d837caa4f9bc9f1a37780783e95007e01ae4e3f
+Signed-off-by: Sheetal Pamecha <spamecha@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/185828
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mount/fuse/utils/mount.glusterfs.in | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/mount/fuse/utils/mount.glusterfs.in b/xlators/mount/fuse/utils/mount.glusterfs.in
+index 3f5d76d..cbde42d 100755
+--- a/xlators/mount/fuse/utils/mount.glusterfs.in
++++ b/xlators/mount/fuse/utils/mount.glusterfs.in
+@@ -361,7 +361,10 @@ start_glusterfs ()
+     cmd_line=$(echo "$cmd_line $mount_point");
+     $cmd_line;
+     if [ $? -ne 0 ]; then
+-        warn "Mount failed. Please check the log file for more details."
++        # If this is true, then glusterfs process returned error without
++        # getting daemonized. We have made sure the logs are posted to
++        # 'stderr', so no need to point them to logfile.
++        warn "Mounting glusterfs on $mount_point failed."
+         exit 1;
+     fi
+ 
+@@ -369,7 +372,9 @@ start_glusterfs ()
+     inode=$( ${getinode} $mount_point 2>/dev/null);
+     # this is required if the stat returns error
+     if [ $? -ne 0 ]; then
+-        warn "Mount failed. Please check the log file for more details."
++        # At this time, glusterfs got daemonized, and then later exited.
++        # These failures are only logged in log file.
++        warn "Mount failed. Check the log file ${log_file} for more details."
+         umount $mount_point > /dev/null 2>&1;
+         exit 1;
+     fi
+-- 
+1.8.3.1
+

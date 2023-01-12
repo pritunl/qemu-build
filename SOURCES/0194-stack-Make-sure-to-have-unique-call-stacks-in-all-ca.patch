@@ -1,0 +1,144 @@
+From 783f53b0b09845cd6c38f145eac685a094767ce0 Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Mon, 27 May 2019 11:43:26 +0530
+Subject: [PATCH 194/221] stack: Make sure to have unique call-stacks in all
+ cases
+
+At the moment new stack doesn't populate frame->root->unique in all cases. This
+makes it difficult to debug hung frames by examining successive state dumps.
+Fuse and server xlators populate it whenever they can, but other xlators won't
+be able to assign 'unique' when they need to create a new frame/stack because
+they don't know what 'unique' fuse/server xlators already used. What we need is
+for unique to be correct. If a stack with same unique is present in successive
+statedumps, that means the same operation is still in progress. This makes
+'finding hung frames' part of debugging hung frames easier.
+
+ >upstream: bz#1714098
+ >Upstream-patch: https://review.gluster.org/c/glusterfs/+/22773
+fixes bz#1716760
+Change-Id: I3e9a8f6b4111e260106c48a2ac3a41ef29361b9e
+Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172304
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ libglusterfs/src/stack.c                     |  2 ++
+ xlators/features/quota/src/quotad-helpers.c  |  3 ---
+ xlators/mount/fuse/src/fuse-bridge.c         | 15 ++++++++-------
+ xlators/mount/fuse/src/fuse-helpers.c        |  1 -
+ xlators/protocol/server/src/server-helpers.c |  3 ---
+ 5 files changed, 10 insertions(+), 14 deletions(-)
+
+diff --git a/libglusterfs/src/stack.c b/libglusterfs/src/stack.c
+index 82b3577..371f60c 100644
+--- a/libglusterfs/src/stack.c
++++ b/libglusterfs/src/stack.c
+@@ -17,6 +17,7 @@ create_frame(xlator_t *xl, call_pool_t *pool)
+ {
+     call_stack_t *stack = NULL;
+     call_frame_t *frame = NULL;
++    static uint64_t unique = 0;
+ 
+     if (!xl || !pool) {
+         return NULL;
+@@ -52,6 +53,7 @@ create_frame(xlator_t *xl, call_pool_t *pool)
+     {
+         list_add(&stack->all_frames, &pool->all_frames);
+         pool->cnt++;
++        stack->unique = unique++;
+     }
+     UNLOCK(&pool->lock);
+     GF_ATOMIC_INC(pool->total_count);
+diff --git a/xlators/features/quota/src/quotad-helpers.c b/xlators/features/quota/src/quotad-helpers.c
+index be8f908..d9f0351 100644
+--- a/xlators/features/quota/src/quotad-helpers.c
++++ b/xlators/features/quota/src/quotad-helpers.c
+@@ -73,7 +73,6 @@ quotad_aggregator_alloc_frame(rpcsvc_request_t *req)
+         goto out;
+ 
+     frame->root->state = state;
+-    frame->root->unique = 0;
+ 
+     frame->this = this;
+ out:
+@@ -93,8 +92,6 @@ quotad_aggregator_get_frame_from_req(rpcsvc_request_t *req)
+ 
+     frame->root->op = req->procnum;
+ 
+-    frame->root->unique = req->xid;
+-
+     frame->root->uid = req->uid;
+     frame->root->gid = req->gid;
+     frame->root->pid = req->pid;
+diff --git a/xlators/mount/fuse/src/fuse-bridge.c b/xlators/mount/fuse/src/fuse-bridge.c
+index c3945d7..c05866b 100644
+--- a/xlators/mount/fuse/src/fuse-bridge.c
++++ b/xlators/mount/fuse/src/fuse-bridge.c
+@@ -3270,11 +3270,11 @@ fuse_release(xlator_t *this, fuse_in_header_t *finh, void *msg,
+ 
+     priv = this->private;
+ 
+-    fuse_log_eh(this, "RELEASE(): %" PRIu64 ":, fd: %p, gfid: %s", finh->unique,
+-                fd, uuid_utoa(fd->inode->gfid));
++    fuse_log_eh(this, "RELEASE(): finh->unique: %" PRIu64 ":, fd: %p, gfid: %s",
++                finh->unique, fd, uuid_utoa(fd->inode->gfid));
+ 
+-    gf_log("glusterfs-fuse", GF_LOG_TRACE, "%" PRIu64 ": RELEASE %p",
+-           finh->unique, state->fd);
++    gf_log("glusterfs-fuse", GF_LOG_TRACE,
++           "finh->unique: %" PRIu64 ": RELEASE %p", finh->unique, state->fd);
+ 
+     fuse_fd_ctx_destroy(this, state->fd);
+     fd_unref(fd);
+@@ -3759,11 +3759,12 @@ fuse_releasedir(xlator_t *this, fuse_in_header_t *finh, void *msg,
+ 
+     priv = this->private;
+ 
+-    fuse_log_eh(this, "RELEASEDIR (): %" PRIu64 ": fd: %p, gfid: %s",
++    fuse_log_eh(this,
++                "RELEASEDIR (): finh->unique: %" PRIu64 ": fd: %p, gfid: %s",
+                 finh->unique, state->fd, uuid_utoa(state->fd->inode->gfid));
+ 
+-    gf_log("glusterfs-fuse", GF_LOG_TRACE, "%" PRIu64 ": RELEASEDIR %p",
+-           finh->unique, state->fd);
++    gf_log("glusterfs-fuse", GF_LOG_TRACE,
++           "finh->unique: %" PRIu64 ": RELEASEDIR %p", finh->unique, state->fd);
+ 
+     fuse_fd_ctx_destroy(this, state->fd);
+     fd_unref(state->fd);
+diff --git a/xlators/mount/fuse/src/fuse-helpers.c b/xlators/mount/fuse/src/fuse-helpers.c
+index cf4f8e1..5bfc40c 100644
+--- a/xlators/mount/fuse/src/fuse-helpers.c
++++ b/xlators/mount/fuse/src/fuse-helpers.c
+@@ -358,7 +358,6 @@ get_call_frame_for_req(fuse_state_t *state)
+         frame->root->uid = finh->uid;
+         frame->root->gid = finh->gid;
+         frame->root->pid = finh->pid;
+-        frame->root->unique = finh->unique;
+         set_lk_owner_from_uint64(&frame->root->lk_owner, state->lk_owner);
+     }
+ 
+diff --git a/xlators/protocol/server/src/server-helpers.c b/xlators/protocol/server/src/server-helpers.c
+index 1a34239..e74a24d 100644
+--- a/xlators/protocol/server/src/server-helpers.c
++++ b/xlators/protocol/server/src/server-helpers.c
+@@ -459,7 +459,6 @@ server_alloc_frame(rpcsvc_request_t *req)
+ 
+     frame->root->client = client;
+     frame->root->state = state; /* which socket */
+-    frame->root->unique = 0;    /* which call */
+ 
+     frame->this = client->this;
+ out:
+@@ -487,8 +486,6 @@ get_frame_from_request(rpcsvc_request_t *req)
+ 
+     frame->root->op = req->procnum;
+ 
+-    frame->root->unique = req->xid;
+-
+     client = req->trans->xl_private;
+     this = req->trans->xl;
+     priv = this->private;
+-- 
+1.8.3.1
+

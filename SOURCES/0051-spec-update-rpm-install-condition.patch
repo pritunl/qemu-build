@@ -1,0 +1,67 @@
+From 71f4d55770287288f39b31a0435916ac3d9f742b Mon Sep 17 00:00:00 2001
+From: Sunil Kumar Acharya <sheggodu@redhat.com>
+Date: Fri, 5 Apr 2019 22:27:52 +0530
+Subject: [PATCH 51/52] spec: update rpm install condition
+
+Update code to allow rpm install without gluster process shutdown.
+
+Label: DOWNSTREAM ONLY
+
+BUG: 1493284
+Change-Id: I308e7e4629a2428927a6df34536e3cd645a54f8c
+Signed-off-by: Sunil Kumar Acharya <sheggodu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167089
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Milind Changire <mchangir@redhat.com>
+---
+ glusterfs.spec.in | 34 ----------------------------------
+ 1 file changed, 34 deletions(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 7c7f7c0..0d57b49 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -1629,40 +1629,6 @@ if not (ok == 0) then
+ end
+ 
+ 
+-%pretrans devel -p <lua>
+-if not posix.access("/bin/bash", "x") then
+-    -- initial installation, no shell, no running glusterfsd
+-    return 0
+-end
+-
+--- TODO: move this completely to a lua script
+--- For now, we write a temporary bash script and execute that.
+-
+-script = [[#!/bin/sh
+-pidof -c -o %PPID -x glusterfsd &>/dev/null
+-
+-if [ $? -eq 0 ]; then
+-   pushd . > /dev/null 2>&1
+-   for volume in /var/lib/glusterd/vols/*; do cd $volume;
+-       vol_type=`grep '^type=' info | awk -F'=' '{print $2}'`
+-       volume_started=`grep '^status=' info | awk -F'=' '{print $2}'`
+-       if [ $vol_type -eq 0 ] && [ $volume_started -eq 1 ] ; then
+-          exit 1;
+-       fi
+-   done
+-
+-   popd > /dev/null 2>&1
+-   exit 1;
+-fi
+-]]
+-
+-ok, how, val = os.execute(script)
+-if not (ok == 0) then
+-   error("Detected running glusterfs processes", ok)
+-end
+-
+-
+-
+ %pretrans fuse -p <lua>
+ if not posix.access("/bin/bash", "x") then
+     -- initial installation, no shell, no running glusterfsd
+-- 
+1.8.3.1
+

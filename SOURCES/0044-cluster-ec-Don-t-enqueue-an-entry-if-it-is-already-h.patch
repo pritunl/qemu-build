@@ -1,0 +1,360 @@
+From bc6588890ce94101a63b861178cf38db5549d8a8 Mon Sep 17 00:00:00 2001
+From: Ashish Pandey <aspandey@redhat.com>
+Date: Wed, 28 Nov 2018 11:22:52 +0530
+Subject: [PATCH 44/52] cluster/ec: Don't enqueue an entry if it is already
+ healing
+
+Problem:
+1 - heal-wait-qlength is by default 128. If shd is disabled
+and we need to heal files, client side heal is needed.
+If we access these files that will trigger the heal.
+However, it has been observed that a file will be enqueued
+multiple times in the heal wait queue, which in turn causes
+queue to be filled and prevent other files to be enqueued.
+
+2 - While a file is going through healing and a write fop from
+mount comes on that file, it sends write on all the bricks including
+healing one. At the end it updates version and size on all the
+bricks. However, it does not unset dirty flag on all the bricks,
+even if this write fop was successful on all the bricks.
+After healing completion this dirty flag remain set and never
+gets cleaned up if SHD is disabled.
+
+Solution:
+1 - If an entry is already in queue or going through heal process,
+don't enqueue next client side request to heal the same file.
+
+2 - Unset dirty on all the bricks at the end if fop has succeeded on
+all the bricks even if some of the bricks are going through heal.
+
+backport of : https://review.gluster.org/#/c/glusterfs/+/21744/
+
+Change-Id: Ia61ffe230c6502ce6cb934425d55e2f40dd1a727
+BUG: 1600918
+Signed-off-by: Ashish Pandey <aspandey@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/166296
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/ec/bug-1236065.t         |   1 -
+ xlators/cluster/ec/src/ec-common.c  |  43 +++++++++------
+ xlators/cluster/ec/src/ec-common.h  |   8 +++
+ xlators/cluster/ec/src/ec-heal.c    | 104 +++++++++++++++++++++++++++++++-----
+ xlators/cluster/ec/src/ec-helpers.c |   1 +
+ xlators/cluster/ec/src/ec-types.h   |   1 +
+ 6 files changed, 127 insertions(+), 31 deletions(-)
+
+diff --git a/tests/bugs/ec/bug-1236065.t b/tests/bugs/ec/bug-1236065.t
+index 76d25d7..9181e73 100644
+--- a/tests/bugs/ec/bug-1236065.t
++++ b/tests/bugs/ec/bug-1236065.t
+@@ -85,7 +85,6 @@ TEST pidof glusterd
+ EXPECT "$V0" volinfo_field $V0 'Volume Name'
+ EXPECT 'Started' volinfo_field $V0 'Status'
+ EXPECT '7' online_brick_count
+-
+ ## cleanup
+ cd
+ EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
+diff --git a/xlators/cluster/ec/src/ec-common.c b/xlators/cluster/ec/src/ec-common.c
+index 8d65670..5183680 100644
+--- a/xlators/cluster/ec/src/ec-common.c
++++ b/xlators/cluster/ec/src/ec-common.c
+@@ -313,14 +313,15 @@ ec_check_status(ec_fop_data_t *fop)
+ 
+     gf_msg(fop->xl->name, GF_LOG_WARNING, 0, EC_MSG_OP_FAIL_ON_SUBVOLS,
+            "Operation failed on %d of %d subvolumes.(up=%s, mask=%s, "
+-           "remaining=%s, good=%s, bad=%s)",
++           "remaining=%s, good=%s, bad=%s, %s)",
+            gf_bits_count(ec->xl_up & ~(fop->remaining | fop->good)), ec->nodes,
+            ec_bin(str1, sizeof(str1), ec->xl_up, ec->nodes),
+            ec_bin(str2, sizeof(str2), fop->mask, ec->nodes),
+            ec_bin(str3, sizeof(str3), fop->remaining, ec->nodes),
+            ec_bin(str4, sizeof(str4), fop->good, ec->nodes),
+            ec_bin(str5, sizeof(str5), ec->xl_up & ~(fop->remaining | fop->good),
+-                  ec->nodes));
++                  ec->nodes),
++           ec_msg_str(fop));
+     if (fop->use_fd) {
+         if (fop->fd != NULL) {
+             ec_fheal(NULL, fop->xl, -1, EC_MINIMUM_ONE, ec_heal_report, NULL,
+@@ -2371,37 +2372,47 @@ ec_update_info(ec_lock_link_t *link)
+     uint64_t dirty[2] = {0, 0};
+     uint64_t size;
+     ec_t *ec = NULL;
++    uintptr_t mask;
+ 
+     lock = link->lock;
+     ctx = lock->ctx;
+     ec = link->fop->xl->private;
+ 
+     /* pre_version[*] will be 0 if have_version is false */
+-    version[0] = ctx->post_version[0] - ctx->pre_version[0];
+-    version[1] = ctx->post_version[1] - ctx->pre_version[1];
++    version[EC_DATA_TXN] = ctx->post_version[EC_DATA_TXN] -
++                           ctx->pre_version[EC_DATA_TXN];
++    version[EC_METADATA_TXN] = ctx->post_version[EC_METADATA_TXN] -
++                               ctx->pre_version[EC_METADATA_TXN];
+ 
+     size = ctx->post_size - ctx->pre_size;
+     /* If we set the dirty flag for update fop, we have to unset it.
+      * If fop has failed on some bricks, leave the dirty as marked. */
++
+     if (lock->unlock_now) {
++        if (version[EC_DATA_TXN]) {
++            /*A data fop will have difference in post and pre version
++             *and for data fop we send writes on healing bricks also */
++            mask = lock->good_mask | lock->healing;
++        } else {
++            mask = lock->good_mask;
++        }
+         /* Ensure that nodes are up while doing final
+          * metadata update.*/
+-        if (!(ec->node_mask & ~lock->good_mask) &&
+-            !(ec->node_mask & ~ec->xl_up)) {
+-            if (ctx->dirty[0] != 0) {
+-                dirty[0] = -1;
++        if (!(ec->node_mask & ~(mask)) && !(ec->node_mask & ~ec->xl_up)) {
++            if (ctx->dirty[EC_DATA_TXN] != 0) {
++                dirty[EC_DATA_TXN] = -1;
+             }
+-            if (ctx->dirty[1] != 0) {
+-                dirty[1] = -1;
++            if (ctx->dirty[EC_METADATA_TXN] != 0) {
++                dirty[EC_METADATA_TXN] = -1;
+             }
+             /*If everything is fine and we already
+              *have version xattr set on entry, there
+              *is no need to update version again*/
+-            if (ctx->pre_version[0]) {
+-                version[0] = 0;
++            if (ctx->pre_version[EC_DATA_TXN]) {
++                version[EC_DATA_TXN] = 0;
+             }
+-            if (ctx->pre_version[1]) {
+-                version[1] = 0;
++            if (ctx->pre_version[EC_METADATA_TXN]) {
++                version[EC_METADATA_TXN] = 0;
+             }
+         } else {
+             link->optimistic_changelog = _gf_false;
+@@ -2410,8 +2421,8 @@ ec_update_info(ec_lock_link_t *link)
+         memset(ctx->dirty, 0, sizeof(ctx->dirty));
+     }
+ 
+-    if ((version[0] != 0) || (version[1] != 0) || (dirty[0] != 0) ||
+-        (dirty[1] != 0)) {
++    if ((version[EC_DATA_TXN] != 0) || (version[EC_METADATA_TXN] != 0) ||
++        (dirty[EC_DATA_TXN] != 0) || (dirty[EC_METADATA_TXN] != 0)) {
+         ec_update_size_version(link, version, size, dirty);
+         return _gf_true;
+     }
+diff --git a/xlators/cluster/ec/src/ec-common.h b/xlators/cluster/ec/src/ec-common.h
+index 115e147..54aaa77 100644
+--- a/xlators/cluster/ec/src/ec-common.h
++++ b/xlators/cluster/ec/src/ec-common.h
+@@ -190,4 +190,12 @@ ec_lock_unlocked(call_frame_t *frame, void *cookie, xlator_t *this,
+ void
+ ec_update_fd_status(fd_t *fd, xlator_t *xl, int child_index,
+                     int32_t ret_status);
++gf_boolean_t
++ec_is_entry_healing(ec_fop_data_t *fop);
++void
++ec_set_entry_healing(ec_fop_data_t *fop);
++void
++ec_reset_entry_healing(ec_fop_data_t *fop);
++char *
++ec_msg_str(ec_fop_data_t *fop);
+ #endif /* __EC_COMMON_H__ */
+diff --git a/xlators/cluster/ec/src/ec-heal.c b/xlators/cluster/ec/src/ec-heal.c
+index eaf80e0..1ca12c1 100644
+--- a/xlators/cluster/ec/src/ec-heal.c
++++ b/xlators/cluster/ec/src/ec-heal.c
+@@ -103,6 +103,48 @@ ec_sh_key_match(dict_t *dict, char *key, data_t *val, void *mdata)
+ }
+ /* FOP: heal */
+ 
++void
++ec_set_entry_healing(ec_fop_data_t *fop)
++{
++    ec_inode_t *ctx = NULL;
++    loc_t *loc = NULL;
++
++    if (!fop)
++        return;
++
++    loc = &fop->loc[0];
++    LOCK(&loc->inode->lock);
++    {
++        ctx = __ec_inode_get(loc->inode, fop->xl);
++        if (ctx) {
++            ctx->heal_count += 1;
++        }
++    }
++    UNLOCK(&loc->inode->lock);
++}
++
++void
++ec_reset_entry_healing(ec_fop_data_t *fop)
++{
++    ec_inode_t *ctx = NULL;
++    loc_t *loc = NULL;
++    int32_t heal_count = 0;
++    if (!fop)
++        return;
++
++    loc = &fop->loc[0];
++    LOCK(&loc->inode->lock);
++    {
++        ctx = __ec_inode_get(loc->inode, fop->xl);
++        if (ctx) {
++            ctx->heal_count += -1;
++            heal_count = ctx->heal_count;
++        }
++    }
++    UNLOCK(&loc->inode->lock);
++    GF_ASSERT(heal_count >= 0);
++}
++
+ uintptr_t
+ ec_heal_check(ec_fop_data_t *fop, uintptr_t *pgood)
+ {
+@@ -2507,17 +2549,6 @@ ec_heal_do(xlator_t *this, void *data, loc_t *loc, int32_t partial)
+                "Heal is not required for : %s ", uuid_utoa(loc->gfid));
+         goto out;
+     }
+-
+-    msources = alloca0(ec->nodes);
+-    mhealed_sinks = alloca0(ec->nodes);
+-    ret = ec_heal_metadata(frame, ec, loc->inode, msources, mhealed_sinks);
+-    if (ret == 0) {
+-        mgood = ec_char_array_to_mask(msources, ec->nodes);
+-        mbad = ec_char_array_to_mask(mhealed_sinks, ec->nodes);
+-    } else {
+-        op_ret = -1;
+-        op_errno = -ret;
+-    }
+     sources = alloca0(ec->nodes);
+     healed_sinks = alloca0(ec->nodes);
+     if (IA_ISREG(loc->inode->ia_type)) {
+@@ -2538,8 +2569,19 @@ ec_heal_do(xlator_t *this, void *data, loc_t *loc, int32_t partial)
+         op_ret = -1;
+         op_errno = -ret;
+     }
++    msources = alloca0(ec->nodes);
++    mhealed_sinks = alloca0(ec->nodes);
++    ret = ec_heal_metadata(frame, ec, loc->inode, msources, mhealed_sinks);
++    if (ret == 0) {
++        mgood = ec_char_array_to_mask(msources, ec->nodes);
++        mbad = ec_char_array_to_mask(mhealed_sinks, ec->nodes);
++    } else {
++        op_ret = -1;
++        op_errno = -ret;
++    }
+ 
+ out:
++    ec_reset_entry_healing(fop);
+     if (fop->cbks.heal) {
+         fop->cbks.heal(fop->req_frame, fop, fop->xl, op_ret, op_errno,
+                        ec_char_array_to_mask(participants, ec->nodes),
+@@ -2650,11 +2692,33 @@ ec_handle_healers_done(ec_fop_data_t *fop)
+         ec_launch_heal(ec, heal_fop);
+ }
+ 
++gf_boolean_t
++ec_is_entry_healing(ec_fop_data_t *fop)
++{
++    ec_inode_t *ctx = NULL;
++    int32_t heal_count = 0;
++    loc_t *loc = NULL;
++
++    loc = &fop->loc[0];
++
++    LOCK(&loc->inode->lock);
++    {
++        ctx = __ec_inode_get(loc->inode, fop->xl);
++        if (ctx) {
++            heal_count = ctx->heal_count;
++        }
++    }
++    UNLOCK(&loc->inode->lock);
++    GF_ASSERT(heal_count >= 0);
++    return heal_count;
++}
++
+ void
+ ec_heal_throttle(xlator_t *this, ec_fop_data_t *fop)
+ {
+     gf_boolean_t can_heal = _gf_true;
+     ec_t *ec = this->private;
++    ec_fop_data_t *fop_rel = NULL;
+ 
+     if (fop->req_frame == NULL) {
+         LOCK(&ec->lock);
+@@ -2662,8 +2726,13 @@ ec_heal_throttle(xlator_t *this, ec_fop_data_t *fop)
+             if ((ec->background_heals > 0) &&
+                 (ec->heal_wait_qlen + ec->background_heals) >
+                     (ec->heal_waiters + ec->healers)) {
+-                list_add_tail(&fop->healer, &ec->heal_waiting);
+-                ec->heal_waiters++;
++                if (!ec_is_entry_healing(fop)) {
++                    list_add_tail(&fop->healer, &ec->heal_waiting);
++                    ec->heal_waiters++;
++                    ec_set_entry_healing(fop);
++                } else {
++                    fop_rel = fop;
++                }
+                 fop = __ec_dequeue_heals(ec);
+             } else {
+                 can_heal = _gf_false;
+@@ -2673,8 +2742,12 @@ ec_heal_throttle(xlator_t *this, ec_fop_data_t *fop)
+     }
+ 
+     if (can_heal) {
+-        if (fop)
++        if (fop) {
++            if (fop->req_frame != NULL) {
++                ec_set_entry_healing(fop);
++            }
+             ec_launch_heal(ec, fop);
++        }
+     } else {
+         gf_msg_debug(this->name, 0,
+                      "Max number of heals are "
+@@ -2682,6 +2755,9 @@ ec_heal_throttle(xlator_t *this, ec_fop_data_t *fop)
+         ec_fop_set_error(fop, EBUSY);
+         ec_heal_fail(ec, fop);
+     }
++    if (fop_rel) {
++        ec_heal_done(0, NULL, fop_rel);
++    }
+ }
+ 
+ void
+diff --git a/xlators/cluster/ec/src/ec-helpers.c b/xlators/cluster/ec/src/ec-helpers.c
+index e6b0359..43f6e3b 100644
+--- a/xlators/cluster/ec/src/ec-helpers.c
++++ b/xlators/cluster/ec/src/ec-helpers.c
+@@ -717,6 +717,7 @@ __ec_inode_get(inode_t *inode, xlator_t *xl)
+             memset(ctx, 0, sizeof(*ctx));
+             INIT_LIST_HEAD(&ctx->heal);
+             INIT_LIST_HEAD(&ctx->stripe_cache.lru);
++            ctx->heal_count = 0;
+             value = (uint64_t)(uintptr_t)ctx;
+             if (__inode_ctx_set(inode, xl, &value) != 0) {
+                 GF_FREE(ctx);
+diff --git a/xlators/cluster/ec/src/ec-types.h b/xlators/cluster/ec/src/ec-types.h
+index f3d63ca..6ae4a2b 100644
+--- a/xlators/cluster/ec/src/ec-types.h
++++ b/xlators/cluster/ec/src/ec-types.h
+@@ -171,6 +171,7 @@ struct _ec_inode {
+     gf_boolean_t have_config;
+     gf_boolean_t have_version;
+     gf_boolean_t have_size;
++    int32_t heal_count;
+     ec_config_t config;
+     uint64_t pre_version[2];
+     uint64_t post_version[2];
+-- 
+1.8.3.1
+

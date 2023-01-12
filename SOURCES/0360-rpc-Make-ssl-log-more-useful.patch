@@ -1,0 +1,117 @@
+From 2b859d1a5499a215c8c37472d4fc7d7e4d70dac6 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Tue, 31 Mar 2020 16:45:35 +0530
+Subject: [PATCH 360/362] rpc: Make ssl log more useful
+
+Currently, ssl_setup_connection_params throws 4 messages for every
+rpc connection that irritates a user while reading the logs. The same
+info we can print in a single log with peerinfo to make it more
+useful.ssl_setup_connection_params try to load dh_param even user
+has not configured it and if a dh_param file is not available it throws
+a failure message.To avoid the message load dh_param only while the user
+has configured it.
+
+> Change-Id: I9ddb57f86a3fa3e519180cb5d88828e59fe0e487
+> Fixes: #1141
+> Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+> Cherry pick from commit 80dd8cceab3b860bf1bc2945c8e2d8d0b3913e48
+> Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/24270/
+
+BUG: 1812824
+Change-Id: I9ddb57f86a3fa3e519180cb5d88828e59fe0e487
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/196371
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ rpc/rpc-transport/socket/src/socket.c | 46 ++++++++++++++++++++---------------
+ 1 file changed, 26 insertions(+), 20 deletions(-)
+
+diff --git a/rpc/rpc-transport/socket/src/socket.c b/rpc/rpc-transport/socket/src/socket.c
+index f54ca83..65845ea 100644
+--- a/rpc/rpc-transport/socket/src/socket.c
++++ b/rpc/rpc-transport/socket/src/socket.c
+@@ -4240,6 +4240,7 @@ ssl_setup_connection_params(rpc_transport_t *this)
+     char *cipher_list = DEFAULT_CIPHER_LIST;
+     char *dh_param = DEFAULT_DH_PARAM;
+     char *ec_curve = DEFAULT_EC_CURVE;
++    gf_boolean_t dh_flag = _gf_false;
+ 
+     priv = this->private;
+ 
+@@ -4248,6 +4249,10 @@ ssl_setup_connection_params(rpc_transport_t *this)
+         return 0;
+     }
+ 
++    if (!priv->ssl_enabled && !priv->mgmt_ssl) {
++        return 0;
++    }
++
+     priv->ssl_own_cert = DEFAULT_CERT_PATH;
+     if (dict_get_str(this->options, SSL_OWN_CERT_OPT, &optstr) == 0) {
+         if (!priv->ssl_enabled) {
+@@ -4294,27 +4299,25 @@ ssl_setup_connection_params(rpc_transport_t *this)
+             priv->crl_path = gf_strdup(optstr);
+     }
+ 
+-    gf_log(this->name, priv->ssl_enabled ? GF_LOG_INFO : GF_LOG_DEBUG,
+-           "SSL support on the I/O path is %s",
+-           priv->ssl_enabled ? "ENABLED" : "NOT enabled");
+-    gf_log(this->name, priv->mgmt_ssl ? GF_LOG_INFO : GF_LOG_DEBUG,
+-           "SSL support for glusterd is %s",
+-           priv->mgmt_ssl ? "ENABLED" : "NOT enabled");
+-
+     if (!priv->mgmt_ssl) {
+-        if (!dict_get_int32(this->options, SSL_CERT_DEPTH_OPT, &cert_depth)) {
+-            gf_log(this->name, GF_LOG_INFO, "using certificate depth %d",
+-                   cert_depth);
++        if (!dict_get_int32_sizen(this->options, SSL_CERT_DEPTH_OPT,
++                                  &cert_depth)) {
+         }
+     } else {
+         cert_depth = this->ctx->ssl_cert_depth;
+-        gf_log(this->name, GF_LOG_INFO, "using certificate depth %d",
+-               cert_depth);
+     }
+-    if (!dict_get_str(this->options, SSL_CIPHER_LIST_OPT, &cipher_list)) {
++    gf_log(this->name, priv->ssl_enabled ? GF_LOG_INFO : GF_LOG_DEBUG,
++           "SSL support for MGMT is %s IO path is %s certificate depth is %d "
++           "for peer %s",
++           (priv->mgmt_ssl ? "ENABLED" : "NOT enabled"),
++           (priv->ssl_enabled ? "ENABLED" : "NOT enabled"), cert_depth,
++           this->peerinfo.identifier);
++
++    if (!dict_get_str_sizen(this->options, SSL_CIPHER_LIST_OPT, &cipher_list)) {
+         gf_log(this->name, GF_LOG_INFO, "using cipher list %s", cipher_list);
+     }
+-    if (!dict_get_str(this->options, SSL_DH_PARAM_OPT, &dh_param)) {
++    if (!dict_get_str_sizen(this->options, SSL_DH_PARAM_OPT, &dh_param)) {
++        dh_flag = _gf_true;
+         gf_log(this->name, GF_LOG_INFO, "using DH parameters %s", dh_param);
+     }
+     if (!dict_get_str(this->options, SSL_EC_CURVE_OPT, &ec_curve)) {
+@@ -4349,12 +4352,15 @@ ssl_setup_connection_params(rpc_transport_t *this)
+ #ifdef SSL_OP_NO_COMPRESSION
+         SSL_CTX_set_options(priv->ssl_ctx, SSL_OP_NO_COMPRESSION);
+ #endif
+-
+-        if ((bio = BIO_new_file(dh_param, "r")) == NULL) {
+-            gf_log(this->name, GF_LOG_INFO,
+-                   "failed to open %s, "
+-                   "DH ciphers are disabled",
+-                   dh_param);
++        /* Upload file to bio wrapper only if dh param is configured
++         */
++        if (dh_flag) {
++            if ((bio = BIO_new_file(dh_param, "r")) == NULL) {
++                gf_log(this->name, GF_LOG_ERROR,
++                       "failed to open %s, "
++                       "DH ciphers are disabled",
++                       dh_param);
++            }
+         }
+ 
+         if (bio != NULL) {
+-- 
+1.8.3.1
+

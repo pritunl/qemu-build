@@ -1,0 +1,4617 @@
+From 2cede2b87fb3e3e0673be9cf67e7d6eec3f7879c Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Mon, 25 Feb 2019 10:05:32 +0530
+Subject: [PATCH 098/124] mgmt/shd: Implement multiplexing in self heal daemon
+
+Problem:
+
+Shd daemon is per node, which means they create a graph
+with all volumes on it. While this is a great for utilizing
+resources, it is so good in terms of performance and managebility.
+
+Because self-heal daemons doesn't have capability to automatically
+reconfigure their graphs. So each time when any configurations
+changes happens to the volumes(replicate/disperse), we need to restart
+shd to bring the changes into the graph.
+
+Because of this all on going heal for all other volumes has to be
+stopped in the middle, and need to restart all over again.
+
+Solution:
+
+This changes makes shd as a per volume daemon, so that the graph
+will be generated for each volumes.
+
+When we want to start/reconfigure shd for a volume, we first search
+for an existing shd running on the node, if there is none, we will
+start a new process. If already a daemon is running for shd, then
+we will simply detach a graph for a volume and reatach the updated
+graph for the volume. This won't touch any of the on going operations
+for any other volumes on the shd daemon.
+
+Example of an shd graph when it is per volume
+
+                           graph
+                     -----------------------
+                     |     debug-iostat    |
+                     -----------------------
+                    /         |             \
+                   /          |              \
+              ---------    ---------      ----------
+              | AFR-1 |    | AFR-2 |      |  AFR-3 |
+              --------     ---------      ----------
+
+A running shd daemon with 3 volumes will be like-->
+
+                           graph
+                     -----------------------
+                     |     debug-iostat    |
+                     -----------------------
+                    /           |           \
+                   /            |            \
+              ------------   ------------  ------------
+              | volume-1 |   | volume-2 |  | volume-3 |
+              ------------   ------------  ------------
+
+Backport of: https://review.gluster.org/#/c/glusterfs/+/22075
+
+>Change-Id: Idcb2698be3eeb95beaac47125565c93370afbd99
+>fixes: bz#1659708
+>Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+
+Change-Id: I38b6e2bb62edd818e460ccf6e9740364dc676876
+BUG: 1471742
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167830
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ glusterfsd/src/glusterfsd-messages.h               |   3 +-
+ glusterfsd/src/glusterfsd-mgmt.c                   | 238 ++++++-
+ glusterfsd/src/glusterfsd.c                        |  18 -
+ libglusterfs/src/defaults-tmpl.c                   |  19 +-
+ libglusterfs/src/glusterfs/glusterfs.h             |   7 +
+ libglusterfs/src/glusterfs/libglusterfs-messages.h |   4 +-
+ libglusterfs/src/glusterfs/xlator.h                |   3 +
+ libglusterfs/src/graph.c                           | 451 +++++++++++++
+ libglusterfs/src/graph.y                           |   3 +
+ libglusterfs/src/libglusterfs.sym                  |   5 +
+ libglusterfs/src/statedump.c                       |   3 +-
+ libglusterfs/src/xlator.c                          |  16 +
+ rpc/rpc-lib/src/protocol-common.h                  |   2 +
+ tests/basic/glusterd/heald.t                       |  49 +-
+ .../reset-brick-and-daemons-follow-quorum.t        |   8 +-
+ tests/volume.rc                                    |   6 +-
+ xlators/mgmt/glusterd/src/Makefile.am              |   6 +-
+ xlators/mgmt/glusterd/src/glusterd-brick-ops.c     |   2 +-
+ xlators/mgmt/glusterd/src/glusterd-conn-mgmt.c     |  42 ++
+ xlators/mgmt/glusterd/src/glusterd-conn-mgmt.h     |   4 +-
+ xlators/mgmt/glusterd/src/glusterd-gfproxyd-svc.c  |   3 +-
+ xlators/mgmt/glusterd/src/glusterd-handler.c       |  11 +-
+ xlators/mgmt/glusterd/src/glusterd-handshake.c     |  21 +
+ xlators/mgmt/glusterd/src/glusterd-mem-types.h     |   1 +
+ xlators/mgmt/glusterd/src/glusterd-messages.h      |   4 +-
+ xlators/mgmt/glusterd/src/glusterd-op-sm.c         |  84 ++-
+ .../mgmt/glusterd/src/glusterd-shd-svc-helper.c    | 140 ++++
+ .../mgmt/glusterd/src/glusterd-shd-svc-helper.h    |  45 ++
+ xlators/mgmt/glusterd/src/glusterd-shd-svc.c       | 540 ++++++++++++++--
+ xlators/mgmt/glusterd/src/glusterd-shd-svc.h       |  17 +-
+ xlators/mgmt/glusterd/src/glusterd-sm.c            |  12 +-
+ xlators/mgmt/glusterd/src/glusterd-snapd-svc.c     |   3 +-
+ xlators/mgmt/glusterd/src/glusterd-statedump.c     |   3 -
+ xlators/mgmt/glusterd/src/glusterd-svc-helper.c    | 715 ++++++++++++++++++++-
+ xlators/mgmt/glusterd/src/glusterd-svc-helper.h    |  40 +-
+ xlators/mgmt/glusterd/src/glusterd-svc-mgmt.c      | 246 +++++--
+ xlators/mgmt/glusterd/src/glusterd-svc-mgmt.h      |  27 +
+ xlators/mgmt/glusterd/src/glusterd-tier.c          |   3 +-
+ xlators/mgmt/glusterd/src/glusterd-tierd-svc.c     |   4 +-
+ xlators/mgmt/glusterd/src/glusterd-utils.c         | 137 +++-
+ xlators/mgmt/glusterd/src/glusterd-utils.h         |   4 +
+ xlators/mgmt/glusterd/src/glusterd-volgen.c        |  60 +-
+ xlators/mgmt/glusterd/src/glusterd-volgen.h        |  11 +-
+ xlators/mgmt/glusterd/src/glusterd-volume-ops.c    |   8 +-
+ xlators/mgmt/glusterd/src/glusterd.c               |  12 +-
+ xlators/mgmt/glusterd/src/glusterd.h               |  30 +-
+ xlators/protocol/client/src/client.c               |  31 +-
+ 47 files changed, 2810 insertions(+), 291 deletions(-)
+ create mode 100644 xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.c
+ create mode 100644 xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.h
+
+diff --git a/glusterfsd/src/glusterfsd-messages.h b/glusterfsd/src/glusterfsd-messages.h
+index 602cd9e..94312a5 100644
+--- a/glusterfsd/src/glusterfsd-messages.h
++++ b/glusterfsd/src/glusterfsd-messages.h
+@@ -35,6 +35,7 @@ GLFS_MSGID(GLUSTERFSD, glusterfsd_msg_1, glusterfsd_msg_2, glusterfsd_msg_3,
+            glusterfsd_msg_28, glusterfsd_msg_29, glusterfsd_msg_30,
+            glusterfsd_msg_31, glusterfsd_msg_32, glusterfsd_msg_33,
+            glusterfsd_msg_34, glusterfsd_msg_35, glusterfsd_msg_36,
+-           glusterfsd_msg_37, glusterfsd_msg_38, glusterfsd_msg_39);
++           glusterfsd_msg_37, glusterfsd_msg_38, glusterfsd_msg_39,
++           glusterfsd_msg_40, glusterfsd_msg_41, glusterfsd_msg_42);
+ 
+ #endif /* !_GLUSTERFSD_MESSAGES_H_ */
+diff --git a/glusterfsd/src/glusterfsd-mgmt.c b/glusterfsd/src/glusterfsd-mgmt.c
+index a6c3db5..a89c980 100644
+--- a/glusterfsd/src/glusterfsd-mgmt.c
++++ b/glusterfsd/src/glusterfsd-mgmt.c
+@@ -48,7 +48,20 @@ int
+ glusterfs_graph_unknown_options(glusterfs_graph_t *graph);
+ int
+ emancipate(glusterfs_ctx_t *ctx, int ret);
++int
++glusterfs_process_svc_attach_volfp(glusterfs_ctx_t *ctx, FILE *fp,
++                                   char *volfile_id, char *checksum);
++int
++glusterfs_mux_volfile_reconfigure(FILE *newvolfile_fp, glusterfs_ctx_t *ctx,
++                                  gf_volfile_t *volfile_obj, char *checksum);
++int
++glusterfs_process_svc_attach_volfp(glusterfs_ctx_t *ctx, FILE *fp,
++                                   char *volfile_id, char *checksum);
++int
++glusterfs_process_svc_detach(glusterfs_ctx_t *ctx, gf_volfile_t *volfile_obj);
+ 
++gf_boolean_t
++mgmt_is_multiplexed_daemon(char *name);
+ int
+ mgmt_cbk_spec(struct rpc_clnt *rpc, void *mydata, void *data)
+ {
+@@ -62,6 +75,96 @@ mgmt_cbk_spec(struct rpc_clnt *rpc, void *mydata, void *data)
+ }
+ 
+ int
++mgmt_process_volfile(const char *volfile, ssize_t size, char *volfile_id)
++{
++    glusterfs_ctx_t *ctx = NULL;
++    int ret = 0;
++    FILE *tmpfp = NULL;
++    gf_volfile_t *volfile_obj = NULL;
++    gf_volfile_t *volfile_tmp = NULL;
++    char sha256_hash[SHA256_DIGEST_LENGTH] = {
++        0,
++    };
++    int tmp_fd = -1;
++    char template[] = "/tmp/glfs.volfile.XXXXXX";
++
++    glusterfs_compute_sha256((const unsigned char *)volfile, size, sha256_hash);
++    ctx = THIS->ctx;
++    LOCK(&ctx->volfile_lock);
++    {
++        list_for_each_entry(volfile_obj, &ctx->volfile_list, volfile_list)
++        {
++            if (!strcmp(volfile_id, volfile_obj->vol_id)) {
++                if (!memcmp(sha256_hash, volfile_obj->volfile_checksum,
++                            sizeof(volfile_obj->volfile_checksum))) {
++                    UNLOCK(&ctx->volfile_lock);
++                    gf_msg(THIS->name, GF_LOG_INFO, 0, glusterfsd_msg_40,
++                           "No change in volfile, continuing");
++                    goto out;
++                }
++                volfile_tmp = volfile_obj;
++                break;
++            }
++        }
++
++        /* coverity[secure_temp] mkstemp uses 0600 as the mode */
++        tmp_fd = mkstemp(template);
++        if (-1 == tmp_fd) {
++            UNLOCK(&ctx->volfile_lock);
++            gf_msg(THIS->name, GF_LOG_ERROR, 0, glusterfsd_msg_39,
++                   "Unable to create temporary file: %s", template);
++            ret = -1;
++            goto out;
++        }
++
++        /* Calling unlink so that when the file is closed or program
++         * terminates the temporary file is deleted.
++         */
++        ret = sys_unlink(template);
++        if (ret < 0) {
++            gf_msg(THIS->name, GF_LOG_INFO, 0, glusterfsd_msg_39,
++                   "Unable to delete temporary file: %s", template);
++            ret = 0;
++        }
++
++        tmpfp = fdopen(tmp_fd, "w+b");
++        if (!tmpfp) {
++            ret = -1;
++            goto unlock;
++        }
++
++        fwrite(volfile, size, 1, tmpfp);
++        fflush(tmpfp);
++        if (ferror(tmpfp)) {
++            ret = -1;
++            goto unlock;
++        }
++
++        if (!volfile_tmp) {
++            /* There is no checksum in the list, which means simple attach
++             * the volfile
++             */
++            ret = glusterfs_process_svc_attach_volfp(ctx, tmpfp, volfile_id,
++                                                     sha256_hash);
++            goto unlock;
++        }
++        ret = glusterfs_mux_volfile_reconfigure(tmpfp, ctx, volfile_obj,
++                                                sha256_hash);
++        if (ret < 0) {
++            gf_msg_debug("glusterfsd-mgmt", EINVAL, "Reconfigure failed !!");
++        }
++    }
++unlock:
++    UNLOCK(&ctx->volfile_lock);
++out:
++    if (tmpfp)
++        fclose(tmpfp);
++    else if (tmp_fd != -1)
++        sys_close(tmp_fd);
++    return ret;
++}
++
++int
+ mgmt_cbk_event(struct rpc_clnt *rpc, void *mydata, void *data)
+ {
+     return 0;
+@@ -966,6 +1069,110 @@ glusterfs_handle_attach(rpcsvc_request_t *req)
+ }
+ 
+ int
++glusterfs_handle_svc_attach(rpcsvc_request_t *req)
++{
++    int32_t ret = -1;
++    gd1_mgmt_brick_op_req xlator_req = {
++        0,
++    };
++    xlator_t *this = NULL;
++    glusterfs_ctx_t *ctx = NULL;
++
++    GF_ASSERT(req);
++    this = THIS;
++    GF_ASSERT(this);
++
++    ctx = this->ctx;
++    ret = xdr_to_generic(req->msg[0], &xlator_req,
++                         (xdrproc_t)xdr_gd1_mgmt_brick_op_req);
++
++    if (ret < 0) {
++        /*failed to decode msg;*/
++        req->rpc_err = GARBAGE_ARGS;
++        goto out;
++    }
++    gf_msg(THIS->name, GF_LOG_INFO, 0, glusterfsd_msg_41,
++           "received attach "
++           "request for volfile-id=%s",
++           xlator_req.name);
++    ret = 0;
++
++    if (ctx->active) {
++        ret = mgmt_process_volfile(xlator_req.input.input_val,
++                                   xlator_req.input.input_len, xlator_req.name);
++    } else {
++        gf_msg(this->name, GF_LOG_WARNING, EINVAL, glusterfsd_msg_42,
++               "got attach for %s but no active graph", xlator_req.name);
++    }
++out:
++    if (xlator_req.input.input_val)
++        free(xlator_req.input.input_val);
++    if (xlator_req.name)
++        free(xlator_req.name);
++    glusterfs_translator_info_response_send(req, ret, NULL, NULL);
++    return 0;
++}
++
++int
++glusterfs_handle_svc_detach(rpcsvc_request_t *req)
++{
++    gd1_mgmt_brick_op_req xlator_req = {
++        0,
++    };
++    ssize_t ret;
++    glusterfs_ctx_t *ctx = NULL;
++    gf_volfile_t *volfile_obj = NULL;
++    gf_volfile_t *volfile_tmp = NULL;
++
++    ret = xdr_to_generic(req->msg[0], &xlator_req,
++                         (xdrproc_t)xdr_gd1_mgmt_brick_op_req);
++    if (ret < 0) {
++        req->rpc_err = GARBAGE_ARGS;
++        return -1;
++    }
++    ctx = glusterfsd_ctx;
++
++    LOCK(&ctx->volfile_lock);
++    {
++        list_for_each_entry(volfile_obj, &ctx->volfile_list, volfile_list)
++        {
++            if (!strcmp(xlator_req.name, volfile_obj->vol_id)) {
++                volfile_tmp = volfile_obj;
++                break;
++            }
++        }
++
++        if (!volfile_tmp) {
++            UNLOCK(&ctx->volfile_lock);
++            gf_msg(THIS->name, GF_LOG_ERROR, 0, glusterfsd_msg_41,
++                   "can't detach %s - not found", xlator_req.name);
++            /*
++             * Used to be -ENOENT.  However, the caller asked us to
++             * make sure it's down and if it's already down that's
++             * good enough.
++             */
++            ret = 0;
++            goto out;
++        }
++        ret = glusterfs_process_svc_detach(ctx, volfile_tmp);
++        if (ret) {
++            UNLOCK(&ctx->volfile_lock);
++            gf_msg("glusterfsd-mgmt", GF_LOG_ERROR, EINVAL, glusterfsd_msg_41,
++                   "Could not detach "
++                   "old graph. Aborting the reconfiguration operation");
++            goto out;
++        }
++    }
++    UNLOCK(&ctx->volfile_lock);
++out:
++    glusterfs_terminate_response_send(req, ret);
++    free(xlator_req.name);
++    xlator_req.name = NULL;
++
++    return 0;
++}
++
++int
+ glusterfs_handle_dump_metrics(rpcsvc_request_t *req)
+ {
+     int32_t ret = -1;
+@@ -1849,6 +2056,13 @@ rpcsvc_actor_t glusterfs_actors[GLUSTERD_BRICK_MAXVALUE] = {
+ 
+     [GLUSTERD_DUMP_METRICS] = {"DUMP METRICS", GLUSTERD_DUMP_METRICS,
+                                glusterfs_handle_dump_metrics, NULL, 0, DRC_NA},
++
++    [GLUSTERD_SVC_ATTACH] = {"ATTACH CLIENT", GLUSTERD_SVC_ATTACH,
++                             glusterfs_handle_svc_attach, NULL, 0, DRC_NA},
++
++    [GLUSTERD_SVC_DETACH] = {"DETACH CLIENT", GLUSTERD_SVC_DETACH,
++                             glusterfs_handle_svc_detach, NULL, 0, DRC_NA},
++
+ };
+ 
+ struct rpcsvc_program glusterfs_mop_prog = {
+@@ -1996,14 +2210,17 @@ mgmt_getspec_cbk(struct rpc_req *req, struct iovec *iov, int count,
+     }
+ 
+ volfile:
+-    ret = 0;
+     size = rsp.op_ret;
++    volfile_id = frame->local;
++    if (mgmt_is_multiplexed_daemon(ctx->cmd_args.process_name)) {
++        ret = mgmt_process_volfile((const char *)rsp.spec, size, volfile_id);
++        goto post_graph_mgmt;
++    }
+ 
++    ret = 0;
+     glusterfs_compute_sha256((const unsigned char *)rsp.spec, size,
+                              sha256_hash);
+ 
+-    volfile_id = frame->local;
+-
+     LOCK(&ctx->volfile_lock);
+     {
+         locked = 1;
+@@ -2105,6 +2322,7 @@ volfile:
+             }
+ 
+             INIT_LIST_HEAD(&volfile_tmp->volfile_list);
++            volfile_tmp->graph = ctx->active;
+             list_add(&volfile_tmp->volfile_list, &ctx->volfile_list);
+             snprintf(volfile_tmp->vol_id, sizeof(volfile_tmp->vol_id), "%s",
+                      volfile_id);
+@@ -2116,6 +2334,7 @@ volfile:
+ 
+     locked = 0;
+ 
++post_graph_mgmt:
+     if (!is_mgmt_rpc_reconnect) {
+         need_emancipate = 1;
+         glusterfs_mgmt_pmap_signin(ctx);
+@@ -2269,10 +2488,21 @@ glusterfs_volfile_fetch(glusterfs_ctx_t *ctx)
+ {
+     xlator_t *server_xl = NULL;
+     xlator_list_t *trav;
+-    int ret;
++    gf_volfile_t *volfile_obj = NULL;
++    int ret = 0;
+ 
+     LOCK(&ctx->volfile_lock);
+     {
++        if (ctx->active &&
++            mgmt_is_multiplexed_daemon(ctx->cmd_args.process_name)) {
++            list_for_each_entry(volfile_obj, &ctx->volfile_list, volfile_list)
++            {
++                ret |= glusterfs_volfile_fetch_one(ctx, volfile_obj->vol_id);
++            }
++            UNLOCK(&ctx->volfile_lock);
++            return ret;
++        }
++
+         if (ctx->active) {
+             server_xl = ctx->active->first;
+             if (strcmp(server_xl->type, "protocol/server") != 0) {
+diff --git a/glusterfsd/src/glusterfsd.c b/glusterfsd/src/glusterfsd.c
+index c983882..3aa89ca 100644
+--- a/glusterfsd/src/glusterfsd.c
++++ b/glusterfsd/src/glusterfsd.c
+@@ -2589,24 +2589,6 @@ out:
+ #endif
+ 
+ int
+-glusterfs_graph_fini(glusterfs_graph_t *graph)
+-{
+-    xlator_t *trav = NULL;
+-
+-    trav = graph->first;
+-
+-    while (trav) {
+-        if (trav->init_succeeded) {
+-            trav->fini(trav);
+-            trav->init_succeeded = 0;
+-        }
+-        trav = trav->next;
+-    }
+-
+-    return 0;
+-}
+-
+-int
+ glusterfs_process_volfp(glusterfs_ctx_t *ctx, FILE *fp)
+ {
+     glusterfs_graph_t *graph = NULL;
+diff --git a/libglusterfs/src/defaults-tmpl.c b/libglusterfs/src/defaults-tmpl.c
+index 5bf64e8..82e7f78 100644
+--- a/libglusterfs/src/defaults-tmpl.c
++++ b/libglusterfs/src/defaults-tmpl.c
+@@ -127,6 +127,12 @@ default_notify(xlator_t *this, int32_t event, void *data, ...)
+     GF_UNUSED int ret = 0;
+     xlator_t *victim = data;
+ 
++    glusterfs_graph_t *graph = NULL;
++
++    GF_VALIDATE_OR_GOTO("notify", this, out);
++    graph = this->graph;
++    GF_VALIDATE_OR_GOTO(this->name, graph, out);
++
+     switch (event) {
+         case GF_EVENT_PARENT_UP:
+         case GF_EVENT_PARENT_DOWN: {
+@@ -159,6 +165,17 @@ default_notify(xlator_t *this, int32_t event, void *data, ...)
+                     xlator_notify(parent->xlator, event, this, NULL);
+                 parent = parent->next;
+             }
++
++            if (event == GF_EVENT_CHILD_DOWN &&
++                !(this->ctx && this->ctx->master) && (graph->top == this)) {
++                /* Make sure this is not a daemon with master xlator */
++                pthread_mutex_lock(&graph->mutex);
++                {
++                    graph->used = 0;
++                    pthread_cond_broadcast(&graph->child_down_cond);
++                }
++                pthread_mutex_unlock(&graph->mutex);
++            }
+         } break;
+         case GF_EVENT_UPCALL: {
+             xlator_list_t *parent = this->parents;
+@@ -205,7 +222,7 @@ default_notify(xlator_t *this, int32_t event, void *data, ...)
+              * nothing to do with readability.
+              */
+     }
+-
++out:
+     return 0;
+ }
+ 
+diff --git a/libglusterfs/src/glusterfs/glusterfs.h b/libglusterfs/src/glusterfs/glusterfs.h
+index 7c6af09..deec5ba 100644
+--- a/libglusterfs/src/glusterfs/glusterfs.h
++++ b/libglusterfs/src/glusterfs/glusterfs.h
+@@ -590,6 +590,10 @@ struct _glusterfs_graph {
+     int used; /* Should be set when fuse gets
+                         first CHILD_UP */
+     uint32_t volfile_checksum;
++    void *last_xl; /* Stores the last xl of the graph, as of now only populated
++                      in client multiplexed code path */
++    pthread_mutex_t mutex;
++    pthread_cond_t child_down_cond; /* for broadcasting CHILD_DOWN */
+ };
+ typedef struct _glusterfs_graph glusterfs_graph_t;
+ 
+@@ -732,6 +736,7 @@ typedef struct {
+     char volfile_checksum[SHA256_DIGEST_LENGTH];
+     char vol_id[NAME_MAX + 1];
+     struct list_head volfile_list;
++    glusterfs_graph_t *graph;
+ 
+ } gf_volfile_t;
+ 
+@@ -815,4 +820,6 @@ gf_free_mig_locks(lock_migration_info_t *locks);
+ 
+ int
+ glusterfs_read_secure_access_file(void);
++int
++glusterfs_graph_fini(glusterfs_graph_t *graph);
+ #endif /* _GLUSTERFS_H */
+diff --git a/libglusterfs/src/glusterfs/libglusterfs-messages.h b/libglusterfs/src/glusterfs/libglusterfs-messages.h
+index 1b72f6d..ea2aa60 100644
+--- a/libglusterfs/src/glusterfs/libglusterfs-messages.h
++++ b/libglusterfs/src/glusterfs/libglusterfs-messages.h
+@@ -109,6 +109,8 @@ GLFS_MSGID(
+     LG_MSG_PTHREAD_ATTR_INIT_FAILED, LG_MSG_INVALID_INODE_LIST,
+     LG_MSG_COMPACT_FAILED, LG_MSG_COMPACT_STATUS, LG_MSG_UTIMENSAT_FAILED,
+     LG_MSG_PTHREAD_NAMING_FAILED, LG_MSG_SYSCALL_RETURNS_WRONG,
+-    LG_MSG_XXH64_TO_GFID_FAILED);
++    LG_MSG_XXH64_TO_GFID_FAILED, LG_MSG_ASYNC_WARNING, LG_MSG_ASYNC_FAILURE,
++    LG_MSG_GRAPH_CLEANUP_FAILED, LG_MSG_GRAPH_SETUP_FAILED,
++    LG_MSG_GRAPH_DETACH_STARTED, LG_MSG_GRAPH_ATTACH_FAILED);
+ 
+ #endif /* !_LG_MESSAGES_H_ */
+diff --git a/libglusterfs/src/glusterfs/xlator.h b/libglusterfs/src/glusterfs/xlator.h
+index 7002657..06152ec 100644
+--- a/libglusterfs/src/glusterfs/xlator.h
++++ b/libglusterfs/src/glusterfs/xlator.h
+@@ -1087,4 +1087,7 @@ handle_default_options(xlator_t *xl, dict_t *options);
+ 
+ void
+ gluster_graph_take_reference(xlator_t *tree);
++
++gf_boolean_t
++mgmt_is_multiplexed_daemon(char *name);
+ #endif /* _XLATOR_H */
+diff --git a/libglusterfs/src/graph.c b/libglusterfs/src/graph.c
+index bb5e67a..a492dd8 100644
+--- a/libglusterfs/src/graph.c
++++ b/libglusterfs/src/graph.c
+@@ -114,6 +114,53 @@ out:
+     return cert_depth;
+ }
+ 
++xlator_t *
++glusterfs_get_last_xlator(glusterfs_graph_t *graph)
++{
++    xlator_t *trav = graph->first;
++    if (!trav)
++        return NULL;
++
++    while (trav->next)
++        trav = trav->next;
++
++    return trav;
++}
++
++xlator_t *
++glusterfs_mux_xlator_unlink(xlator_t *pxl, xlator_t *cxl)
++{
++    xlator_list_t *unlink = NULL;
++    xlator_list_t *prev = NULL;
++    xlator_list_t **tmp = NULL;
++    xlator_t *next_child = NULL;
++    xlator_t *xl = NULL;
++
++    for (tmp = &pxl->children; *tmp; tmp = &(*tmp)->next) {
++        if ((*tmp)->xlator == cxl) {
++            unlink = *tmp;
++            *tmp = (*tmp)->next;
++            if (*tmp)
++                next_child = (*tmp)->xlator;
++            break;
++        }
++        prev = *tmp;
++    }
++
++    if (!prev)
++        xl = pxl;
++    else if (prev->xlator)
++        xl = prev->xlator->graph->last_xl;
++
++    if (xl)
++        xl->next = next_child;
++    if (next_child)
++        next_child->prev = xl;
++
++    GF_FREE(unlink);
++    return next_child;
++}
++
+ int
+ glusterfs_xlator_link(xlator_t *pxl, xlator_t *cxl)
+ {
+@@ -1092,6 +1139,8 @@ glusterfs_graph_destroy_residual(glusterfs_graph_t *graph)
+     ret = xlator_tree_free_memacct(graph->first);
+ 
+     list_del_init(&graph->list);
++    pthread_mutex_destroy(&graph->mutex);
++    pthread_cond_destroy(&graph->child_down_cond);
+     GF_FREE(graph);
+ 
+     return ret;
+@@ -1134,6 +1183,25 @@ out:
+ }
+ 
+ int
++glusterfs_graph_fini(glusterfs_graph_t *graph)
++{
++    xlator_t *trav = NULL;
++
++    trav = graph->first;
++
++    while (trav) {
++        if (trav->init_succeeded) {
++            trav->cleanup_starting = 1;
++            trav->fini(trav);
++            trav->init_succeeded = 0;
++        }
++        trav = trav->next;
++    }
++
++    return 0;
++}
++
++int
+ glusterfs_graph_attach(glusterfs_graph_t *orig_graph, char *path,
+                        glusterfs_graph_t **newgraph)
+ {
+@@ -1256,3 +1324,386 @@ glusterfs_graph_attach(glusterfs_graph_t *orig_graph, char *path,
+ 
+     return 0;
+ }
++int
++glusterfs_muxsvc_cleanup_parent(glusterfs_ctx_t *ctx,
++                                glusterfs_graph_t *parent_graph)
++{
++    if (parent_graph) {
++        if (parent_graph->first) {
++            xlator_destroy(parent_graph->first);
++        }
++        ctx->active = NULL;
++        GF_FREE(parent_graph);
++        parent_graph = NULL;
++    }
++    return 0;
++}
++
++void *
++glusterfs_graph_cleanup(void *arg)
++{
++    glusterfs_graph_t *graph = NULL;
++    glusterfs_ctx_t *ctx = THIS->ctx;
++    int ret = -1;
++    graph = arg;
++
++    if (!graph)
++        return NULL;
++
++    /* To destroy the graph, fitst sent a GF_EVENT_PARENT_DOWN
++     * Then wait for GF_EVENT_CHILD_DOWN to get on the top
++     * xl. Once we have GF_EVENT_CHILD_DOWN event, then proceed
++     * to fini.
++     *
++     * During fini call, this will take a last unref on rpc and
++     * rpc_transport_object.
++     */
++    if (graph->first)
++        default_notify(graph->first, GF_EVENT_PARENT_DOWN, graph->first);
++
++    ret = pthread_mutex_lock(&graph->mutex);
++    if (ret != 0) {
++        gf_msg("glusterfs", GF_LOG_ERROR, EAGAIN, LG_MSG_GRAPH_CLEANUP_FAILED,
++               "Failed to aquire a lock");
++        goto out;
++    }
++    /* check and wait for CHILD_DOWN for top xlator*/
++    while (graph->used) {
++        ret = pthread_cond_wait(&graph->child_down_cond, &graph->mutex);
++        if (ret != 0)
++            gf_msg("glusterfs", GF_LOG_INFO, 0, LG_MSG_GRAPH_CLEANUP_FAILED,
++                   "cond wait failed ");
++    }
++
++    ret = pthread_mutex_unlock(&graph->mutex);
++    if (ret != 0) {
++        gf_msg("glusterfs", GF_LOG_ERROR, EAGAIN, LG_MSG_GRAPH_CLEANUP_FAILED,
++               "Failed to release a lock");
++    }
++
++    /* Though we got a child down on top xlator, we have to wait until
++     * all the notifier to exit. Because there should not be any threads
++     * that access xl variables.
++     */
++    pthread_mutex_lock(&ctx->notify_lock);
++    {
++        while (ctx->notifying)
++            pthread_cond_wait(&ctx->notify_cond, &ctx->notify_lock);
++    }
++    pthread_mutex_unlock(&ctx->notify_lock);
++
++    glusterfs_graph_fini(graph);
++    glusterfs_graph_destroy(graph);
++out:
++    return NULL;
++}
++
++glusterfs_graph_t *
++glusterfs_muxsvc_setup_parent_graph(glusterfs_ctx_t *ctx, char *name,
++                                    char *type)
++{
++    glusterfs_graph_t *parent_graph = NULL;
++    xlator_t *ixl = NULL;
++    int ret = -1;
++    parent_graph = GF_CALLOC(1, sizeof(*parent_graph),
++                             gf_common_mt_glusterfs_graph_t);
++    if (!parent_graph)
++        goto out;
++
++    INIT_LIST_HEAD(&parent_graph->list);
++
++    ctx->active = parent_graph;
++    ixl = GF_CALLOC(1, sizeof(*ixl), gf_common_mt_xlator_t);
++    if (!ixl)
++        goto out;
++
++    ixl->ctx = ctx;
++    ixl->graph = parent_graph;
++    ixl->options = dict_new();
++    if (!ixl->options)
++        goto out;
++
++    ixl->name = gf_strdup(name);
++    if (!ixl->name)
++        goto out;
++
++    ixl->is_autoloaded = 1;
++
++    if (xlator_set_type(ixl, type) == -1) {
++        gf_msg("glusterfs", GF_LOG_ERROR, EINVAL, LG_MSG_GRAPH_SETUP_FAILED,
++               "%s (%s) set type failed", name, type);
++        goto out;
++    }
++
++    glusterfs_graph_set_first(parent_graph, ixl);
++    parent_graph->top = ixl;
++    ixl = NULL;
++
++    gettimeofday(&parent_graph->dob, NULL);
++    fill_uuid(parent_graph->graph_uuid, 128);
++    parent_graph->id = ctx->graph_id++;
++    ret = 0;
++out:
++    if (ixl)
++        xlator_destroy(ixl);
++
++    if (ret) {
++        glusterfs_muxsvc_cleanup_parent(ctx, parent_graph);
++        parent_graph = NULL;
++    }
++    return parent_graph;
++}
++
++int
++glusterfs_process_svc_detach(glusterfs_ctx_t *ctx, gf_volfile_t *volfile_obj)
++{
++    xlator_t *last_xl = NULL;
++    glusterfs_graph_t *graph = NULL;
++    glusterfs_graph_t *parent_graph = NULL;
++    pthread_t clean_graph = {
++        0,
++    };
++    int ret = -1;
++    xlator_t *xl = NULL;
++
++    if (!ctx || !ctx->active || !volfile_obj)
++        goto out;
++    parent_graph = ctx->active;
++    graph = volfile_obj->graph;
++    if (graph && graph->first)
++        xl = graph->first;
++
++    last_xl = graph->last_xl;
++    if (last_xl)
++        last_xl->next = NULL;
++    if (!xl || xl->cleanup_starting)
++        goto out;
++
++    xl->cleanup_starting = 1;
++    gf_msg("mgmt", GF_LOG_INFO, 0, LG_MSG_GRAPH_DETACH_STARTED,
++           "detaching child %s", volfile_obj->vol_id);
++
++    list_del_init(&volfile_obj->volfile_list);
++    glusterfs_mux_xlator_unlink(parent_graph->top, xl);
++    parent_graph->last_xl = glusterfs_get_last_xlator(parent_graph);
++    parent_graph->xl_count -= graph->xl_count;
++    parent_graph->leaf_count -= graph->leaf_count;
++    default_notify(xl, GF_EVENT_PARENT_DOWN, xl);
++    parent_graph->id++;
++    ret = 0;
++out:
++    if (!ret) {
++        list_del_init(&volfile_obj->volfile_list);
++        if (graph) {
++            ret = gf_thread_create_detached(
++                &clean_graph, glusterfs_graph_cleanup, graph, "graph_clean");
++            if (ret) {
++                gf_msg("glusterfs", GF_LOG_ERROR, EINVAL,
++                       LG_MSG_GRAPH_CLEANUP_FAILED,
++                       "%s failed to create clean "
++                       "up thread",
++                       volfile_obj->vol_id);
++                ret = 0;
++            }
++        }
++        GF_FREE(volfile_obj);
++    }
++    return ret;
++}
++
++int
++glusterfs_process_svc_attach_volfp(glusterfs_ctx_t *ctx, FILE *fp,
++                                   char *volfile_id, char *checksum)
++{
++    glusterfs_graph_t *graph = NULL;
++    glusterfs_graph_t *parent_graph = NULL;
++    glusterfs_graph_t *clean_graph = NULL;
++    int ret = -1;
++    xlator_t *xl = NULL;
++    xlator_t *last_xl = NULL;
++    gf_volfile_t *volfile_obj = NULL;
++    pthread_t thread_id = {
++        0,
++    };
++
++    if (!ctx)
++        goto out;
++    parent_graph = ctx->active;
++    graph = glusterfs_graph_construct(fp);
++    if (!graph) {
++        gf_msg("glusterfsd", GF_LOG_ERROR, EINVAL, LG_MSG_GRAPH_ATTACH_FAILED,
++               "failed to construct the graph");
++        goto out;
++    }
++    graph->last_xl = glusterfs_get_last_xlator(graph);
++
++    for (xl = graph->first; xl; xl = xl->next) {
++        if (strcmp(xl->type, "mount/fuse") == 0) {
++            gf_msg("glusterfsd", GF_LOG_ERROR, EINVAL,
++                   LG_MSG_GRAPH_ATTACH_FAILED,
++                   "fuse xlator cannot be specified in volume file");
++            goto out;
++        }
++    }
++
++    graph->leaf_count = glusterfs_count_leaves(glusterfs_root(graph));
++    xl = graph->first;
++    /* TODO memory leaks everywhere need to free graph in case of error */
++    if (glusterfs_graph_prepare(graph, ctx, xl->name)) {
++        gf_msg("glusterfsd", GF_LOG_WARNING, EINVAL, LG_MSG_GRAPH_ATTACH_FAILED,
++               "failed to prepare graph for xlator %s", xl->name);
++        ret = -1;
++        goto out;
++    } else if (glusterfs_graph_init(graph)) {
++        gf_msg("glusterfsd", GF_LOG_WARNING, EINVAL, LG_MSG_GRAPH_ATTACH_FAILED,
++               "failed to initialize graph for xlator %s", xl->name);
++        ret = -1;
++        goto out;
++    } else if (glusterfs_graph_parent_up(graph)) {
++        gf_msg("glusterfsd", GF_LOG_WARNING, EINVAL, LG_MSG_GRAPH_ATTACH_FAILED,
++               "failed to link the graphs for xlator %s ", xl->name);
++        ret = -1;
++        goto out;
++    }
++
++    if (!parent_graph) {
++        parent_graph = glusterfs_muxsvc_setup_parent_graph(ctx, "glustershd",
++                                                           "debug/io-stats");
++        if (!parent_graph)
++            goto out;
++        ((xlator_t *)parent_graph->top)->next = xl;
++        clean_graph = parent_graph;
++    } else {
++        last_xl = parent_graph->last_xl;
++        if (last_xl)
++            last_xl->next = xl;
++        xl->prev = last_xl;
++    }
++    parent_graph->last_xl = graph->last_xl;
++
++    ret = glusterfs_xlator_link(parent_graph->top, xl);
++    if (ret) {
++        gf_msg("graph", GF_LOG_ERROR, 0, LG_MSG_EVENT_NOTIFY_FAILED,
++               "parent up notification failed");
++        goto out;
++    }
++    parent_graph->xl_count += graph->xl_count;
++    parent_graph->leaf_count += graph->leaf_count;
++    parent_graph->id++;
++
++    if (!volfile_obj) {
++        volfile_obj = GF_CALLOC(1, sizeof(gf_volfile_t), gf_common_volfile_t);
++        if (!volfile_obj) {
++            ret = -1;
++            goto out;
++        }
++    }
++
++    graph->used = 1;
++    parent_graph->id++;
++    list_add(&graph->list, &ctx->graphs);
++    INIT_LIST_HEAD(&volfile_obj->volfile_list);
++    volfile_obj->graph = graph;
++    snprintf(volfile_obj->vol_id, sizeof(volfile_obj->vol_id), "%s",
++             volfile_id);
++    memcpy(volfile_obj->volfile_checksum, checksum,
++           sizeof(volfile_obj->volfile_checksum));
++    list_add_tail(&volfile_obj->volfile_list, &ctx->volfile_list);
++
++    gf_log_dump_graph(fp, graph);
++    graph = NULL;
++
++    ret = 0;
++out:
++    if (ret) {
++        if (graph) {
++            gluster_graph_take_reference(graph->first);
++            ret = gf_thread_create_detached(&thread_id, glusterfs_graph_cleanup,
++                                            graph, "graph_clean");
++            if (ret) {
++                gf_msg("glusterfs", GF_LOG_ERROR, EINVAL,
++                       LG_MSG_GRAPH_CLEANUP_FAILED,
++                       "%s failed to create clean "
++                       "up thread",
++                       volfile_id);
++                ret = 0;
++            }
++        }
++        if (clean_graph)
++            glusterfs_muxsvc_cleanup_parent(ctx, clean_graph);
++    }
++    return ret;
++}
++
++int
++glusterfs_mux_volfile_reconfigure(FILE *newvolfile_fp, glusterfs_ctx_t *ctx,
++                                  gf_volfile_t *volfile_obj, char *checksum)
++{
++    glusterfs_graph_t *oldvolfile_graph = NULL;
++    glusterfs_graph_t *newvolfile_graph = NULL;
++
++    int ret = -1;
++
++    if (!ctx) {
++        gf_msg("glusterfsd-mgmt", GF_LOG_ERROR, 0, LG_MSG_CTX_NULL,
++               "ctx is NULL");
++        goto out;
++    }
++
++    /* Change the message id */
++    if (!volfile_obj) {
++        gf_msg("glusterfsd-mgmt", GF_LOG_ERROR, 0, LG_MSG_CTX_NULL,
++               "failed to get volfile object");
++        goto out;
++    }
++
++    oldvolfile_graph = volfile_obj->graph;
++    if (!oldvolfile_graph) {
++        goto out;
++    }
++
++    newvolfile_graph = glusterfs_graph_construct(newvolfile_fp);
++
++    if (!newvolfile_graph) {
++        goto out;
++    }
++    newvolfile_graph->last_xl = glusterfs_get_last_xlator(newvolfile_graph);
++
++    glusterfs_graph_prepare(newvolfile_graph, ctx, newvolfile_graph->first);
++
++    if (!is_graph_topology_equal(oldvolfile_graph, newvolfile_graph)) {
++        ret = glusterfs_process_svc_detach(ctx, volfile_obj);
++        if (ret) {
++            gf_msg("glusterfsd-mgmt", GF_LOG_ERROR, EINVAL,
++                   LG_MSG_GRAPH_CLEANUP_FAILED,
++                   "Could not detach "
++                   "old graph. Aborting the reconfiguration operation");
++            goto out;
++        }
++        ret = glusterfs_process_svc_attach_volfp(ctx, newvolfile_fp,
++                                                 volfile_obj->vol_id, checksum);
++        goto out;
++    }
++
++    gf_msg_debug("glusterfsd-mgmt", 0,
++                 "Only options have changed in the"
++                 " new graph");
++
++    ret = glusterfs_graph_reconfigure(oldvolfile_graph, newvolfile_graph);
++    if (ret) {
++        gf_msg_debug("glusterfsd-mgmt", 0,
++                     "Could not reconfigure "
++                     "new options in old graph");
++        goto out;
++    }
++    memcpy(volfile_obj->volfile_checksum, checksum,
++           sizeof(volfile_obj->volfile_checksum));
++
++    ret = 0;
++out:
++
++    if (newvolfile_graph)
++        glusterfs_graph_destroy(newvolfile_graph);
++
++    return ret;
++}
+diff --git a/libglusterfs/src/graph.y b/libglusterfs/src/graph.y
+index 5b92985..c60ff38 100644
+--- a/libglusterfs/src/graph.y
++++ b/libglusterfs/src/graph.y
+@@ -542,6 +542,9 @@ glusterfs_graph_new ()
+ 
+         INIT_LIST_HEAD (&graph->list);
+ 
++        pthread_mutex_init(&graph->mutex, NULL);
++        pthread_cond_init(&graph->child_down_cond, NULL);
++
+         gettimeofday (&graph->dob, NULL);
+ 
+         return graph;
+diff --git a/libglusterfs/src/libglusterfs.sym b/libglusterfs/src/libglusterfs.sym
+index e33d5cf..fa2025e 100644
+--- a/libglusterfs/src/libglusterfs.sym
++++ b/libglusterfs/src/libglusterfs.sym
+@@ -1154,3 +1154,8 @@ gf_changelog_register_generic
+ gf_gfid_generate_from_xxh64
+ find_xlator_option_in_cmd_args_t
+ gf_d_type_from_ia_type
++glusterfs_graph_fini
++glusterfs_process_svc_attach_volfp
++glusterfs_mux_volfile_reconfigure
++glusterfs_process_svc_detach
++mgmt_is_multiplexed_daemon
+diff --git a/libglusterfs/src/statedump.c b/libglusterfs/src/statedump.c
+index d18b50f..0cf80c0 100644
+--- a/libglusterfs/src/statedump.c
++++ b/libglusterfs/src/statedump.c
+@@ -810,7 +810,8 @@ gf_proc_dump_info(int signum, glusterfs_ctx_t *ctx)
+     if (!ctx)
+         goto out;
+ 
+-    if (ctx && ctx->active) {
++    if (!mgmt_is_multiplexed_daemon(ctx->cmd_args.process_name) &&
++        (ctx && ctx->active)) {
+         top = ctx->active->first;
+         for (trav_p = &top->children; *trav_p; trav_p = &(*trav_p)->next) {
+             brick_count++;
+diff --git a/libglusterfs/src/xlator.c b/libglusterfs/src/xlator.c
+index dc1e887..5d6f8d2 100644
+--- a/libglusterfs/src/xlator.c
++++ b/libglusterfs/src/xlator.c
+@@ -1463,3 +1463,19 @@ gluster_graph_take_reference(xlator_t *tree)
+     }
+     return;
+ }
++
++gf_boolean_t
++mgmt_is_multiplexed_daemon(char *name)
++{
++    const char *mux_daemons[] = {"glustershd", NULL};
++    int i;
++
++    if (!name)
++        return _gf_false;
++
++    for (i = 0; mux_daemons[i]; i++) {
++        if (!strcmp(name, mux_daemons[i]))
++            return _gf_true;
++    }
++    return _gf_false;
++}
+diff --git a/rpc/rpc-lib/src/protocol-common.h b/rpc/rpc-lib/src/protocol-common.h
+index 779878f..7275d75 100644
+--- a/rpc/rpc-lib/src/protocol-common.h
++++ b/rpc/rpc-lib/src/protocol-common.h
+@@ -245,6 +245,8 @@ enum glusterd_brick_procnum {
+     GLUSTERD_NODE_BITROT,
+     GLUSTERD_BRICK_ATTACH,
+     GLUSTERD_DUMP_METRICS,
++    GLUSTERD_SVC_ATTACH,
++    GLUSTERD_SVC_DETACH,
+     GLUSTERD_BRICK_MAXVALUE,
+ };
+ 
+diff --git a/tests/basic/glusterd/heald.t b/tests/basic/glusterd/heald.t
+index ca112ad..7dae3c3 100644
+--- a/tests/basic/glusterd/heald.t
++++ b/tests/basic/glusterd/heald.t
+@@ -7,11 +7,16 @@
+ # Covers enable/disable at the moment. Will be enhanced later to include
+ # the other commands as well.
+ 
++function is_pid_running {
++    local pid=$1
++    num=`ps auxww | grep glustershd | grep $pid | grep -v grep | wc -l`
++    echo $num
++}
++
+ cleanup;
+ TEST glusterd
+ TEST pidof glusterd
+ 
+-volfile=$(gluster system:: getwd)"/glustershd/glustershd-server.vol"
+ #Commands should fail when volume doesn't exist
+ TEST ! $CLI volume heal non-existent-volume enable
+ TEST ! $CLI volume heal non-existent-volume disable
+@@ -20,51 +25,55 @@ TEST ! $CLI volume heal non-existent-volume disable
+ # volumes
+ TEST $CLI volume create dist $H0:$B0/dist
+ TEST $CLI volume start dist
+-TEST "[ -z $(get_shd_process_pid)]"
++TEST "[ -z $(get_shd_process_pid dist)]"
+ TEST ! $CLI volume heal dist enable
+ TEST ! $CLI volume heal dist disable
+ 
+ # Commands should work on replicate/disperse volume.
+ TEST $CLI volume create r2 replica 2 $H0:$B0/r2_0 $H0:$B0/r2_1
+-TEST "[ -z $(get_shd_process_pid)]"
++TEST "[ -z $(get_shd_process_pid r2)]"
+ TEST $CLI volume start r2
+-EXPECT_WITHIN $PROCESS_UP_TIMEOUT "[0-9][0-9]*" get_shd_process_pid
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "[0-9][0-9]*" get_shd_process_pid r2
+ TEST $CLI volume heal r2 enable
+ EXPECT "enable" volume_option r2 "cluster.self-heal-daemon"
+-EXPECT "enable" volgen_volume_option $volfile r2-replicate-0 cluster replicate self-heal-daemon
+-EXPECT_WITHIN $PROCESS_UP_TIMEOUT "[0-9][0-9]*" get_shd_process_pid
++volfiler2=$(gluster system:: getwd)"/vols/r2/r2-shd.vol"
++EXPECT "enable" volgen_volume_option $volfiler2 r2-replicate-0 cluster replicate self-heal-daemon
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "[0-9][0-9]*" get_shd_process_pid r2
++pid=$( get_shd_process_pid r2 )
+ TEST $CLI volume heal r2 disable
+ EXPECT "disable" volume_option r2 "cluster.self-heal-daemon"
+-EXPECT "disable" volgen_volume_option $volfile r2-replicate-0 cluster replicate self-heal-daemon
+-EXPECT_WITHIN $PROCESS_UP_TIMEOUT "[0-9][0-9]*" get_shd_process_pid
++EXPECT "disable" volgen_volume_option $volfiler2 r2-replicate-0 cluster replicate self-heal-daemon
++EXPECT "1" is_pid_running $pid
+ 
+ # Commands should work on disperse volume.
+ TEST $CLI volume create ec2 disperse 3 redundancy 1 $H0:$B0/ec2_0 $H0:$B0/ec2_1 $H0:$B0/ec2_2
+ TEST $CLI volume start ec2
+-EXPECT_WITHIN $PROCESS_UP_TIMEOUT "[0-9][0-9]*" get_shd_process_pid
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "[0-9][0-9]*" get_shd_process_pid ec2
+ TEST $CLI volume heal ec2 enable
+ EXPECT "enable" volume_option ec2 "cluster.disperse-self-heal-daemon"
+-EXPECT "enable" volgen_volume_option $volfile ec2-disperse-0 cluster disperse self-heal-daemon
+-EXPECT_WITHIN $PROCESS_UP_TIMEOUT "[0-9][0-9]*" get_shd_process_pid
++volfileec2=$(gluster system:: getwd)"/vols/ec2/ec2-shd.vol"
++EXPECT "enable" volgen_volume_option $volfileec2 ec2-disperse-0 cluster disperse self-heal-daemon
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "[0-9][0-9]*" get_shd_process_pid ec2
++pid=$(get_shd_process_pid ec2)
+ TEST $CLI volume heal ec2 disable
+ EXPECT "disable" volume_option ec2 "cluster.disperse-self-heal-daemon"
+-EXPECT "disable" volgen_volume_option $volfile ec2-disperse-0 cluster disperse self-heal-daemon
+-EXPECT_WITHIN $PROCESS_UP_TIMEOUT "[0-9][0-9]*" get_shd_process_pid
++EXPECT "disable" volgen_volume_option $volfileec2 ec2-disperse-0 cluster disperse self-heal-daemon
++EXPECT "1" is_pid_running $pid
+ 
+ #Check that shd graph is rewritten correctly on volume stop/start
+-EXPECT "Y" volgen_volume_exists $volfile ec2-disperse-0 cluster disperse
+-EXPECT "Y" volgen_volume_exists $volfile r2-replicate-0 cluster replicate
++EXPECT "Y" volgen_volume_exists $volfileec2 ec2-disperse-0 cluster disperse
++
++EXPECT "Y" volgen_volume_exists $volfiler2 r2-replicate-0 cluster replicate
+ TEST $CLI volume stop r2
+-EXPECT "Y" volgen_volume_exists $volfile ec2-disperse-0 cluster disperse
+-EXPECT "N" volgen_volume_exists $volfile r2-replicate-0 cluster replicate
++EXPECT "Y" volgen_volume_exists $volfileec2 ec2-disperse-0 cluster disperse
+ TEST $CLI volume stop ec2
+ # When both the volumes are stopped glustershd volfile is not modified just the
+ # process is stopped
+-TEST "[ -z $(get_shd_process_pid) ]"
++TEST "[ -z $(get_shd_process_pid dist) ]"
++TEST "[ -z $(get_shd_process_pid ec2) ]"
+ 
+ TEST $CLI volume start r2
+-EXPECT "N" volgen_volume_exists $volfile ec2-disperse-0 cluster disperse
+-EXPECT "Y" volgen_volume_exists $volfile r2-replicate-0 cluster replicate
++EXPECT "Y" volgen_volume_exists $volfiler2 r2-replicate-0 cluster replicate
+ 
+ TEST $CLI volume set r2 self-heal-daemon on
+ TEST $CLI volume set r2 cluster.self-heal-daemon off
+diff --git a/tests/bugs/glusterd/reset-brick-and-daemons-follow-quorum.t b/tests/bugs/glusterd/reset-brick-and-daemons-follow-quorum.t
+index cdb1a33..e6e65c4 100644
+--- a/tests/bugs/glusterd/reset-brick-and-daemons-follow-quorum.t
++++ b/tests/bugs/glusterd/reset-brick-and-daemons-follow-quorum.t
+@@ -55,9 +55,9 @@ TEST kill_glusterd 1
+ #Bring back 1st glusterd
+ TEST $glusterd_1
+ 
+-# We need to wait till PROCESS_UP_TIMEOUT and then check shd service does not
+-# come up on node 2
+-sleep $PROCESS_UP_TIMEOUT
+-EXPECT "N" shd_up_status_2
++# We need to wait till PROCESS_UP_TIMEOUT and then check shd service started
++#on node 2, because once glusterd regains quorum, it will restart all volume
++#level daemons
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "Y" shd_up_status_2
+ 
+ cleanup;
+diff --git a/tests/volume.rc b/tests/volume.rc
+index 87ca958..289b197 100644
+--- a/tests/volume.rc
++++ b/tests/volume.rc
+@@ -237,11 +237,13 @@ function ec_child_up_count_shd {
+ }
+ 
+ function get_shd_process_pid {
+-        ps auxww | grep glusterfs | grep -E "glustershd/glustershd.pid" | awk '{print $2}' | head -1
++        local vol=$1
++        ps auxww | grep "process-name\ glustershd" | awk '{print $2}' | head -1
+ }
+ 
+ function generate_shd_statedump {
+-        generate_statedump $(get_shd_process_pid)
++        local vol=$1
++        generate_statedump $(get_shd_process_pid $vol)
+ }
+ 
+ function generate_nfs_statedump {
+diff --git a/xlators/mgmt/glusterd/src/Makefile.am b/xlators/mgmt/glusterd/src/Makefile.am
+index 5fe5156..11ae189 100644
+--- a/xlators/mgmt/glusterd/src/Makefile.am
++++ b/xlators/mgmt/glusterd/src/Makefile.am
+@@ -18,11 +18,12 @@ glusterd_la_SOURCES = glusterd.c glusterd-handler.c glusterd-sm.c \
+ 	glusterd-locks.c glusterd-snapshot.c glusterd-mgmt-handler.c \
+ 	glusterd-mgmt.c glusterd-peer-utils.c glusterd-statedump.c \
+ 	glusterd-snapshot-utils.c glusterd-conn-mgmt.c \
+-	glusterd-proc-mgmt.c glusterd-svc-mgmt.c glusterd-shd-svc.c \
++	glusterd-proc-mgmt.c glusterd-svc-mgmt.c \
+ 	glusterd-nfs-svc.c glusterd-quotad-svc.c glusterd-svc-helper.c \
+ 	glusterd-conn-helper.c glusterd-snapd-svc.c glusterd-snapd-svc-helper.c \
+ 	glusterd-bitd-svc.c glusterd-scrub-svc.c glusterd-server-quorum.c \
+ 	glusterd-reset-brick.c glusterd-tierd-svc.c glusterd-tierd-svc-helper.c \
++        glusterd-shd-svc.c glusterd-shd-svc-helper.c \
+         glusterd-gfproxyd-svc.c glusterd-gfproxyd-svc-helper.c
+ 
+ 
+@@ -38,11 +39,12 @@ noinst_HEADERS = glusterd.h glusterd-utils.h glusterd-op-sm.h \
+ 	glusterd-mgmt.h glusterd-messages.h glusterd-peer-utils.h \
+ 	glusterd-statedump.h glusterd-snapshot-utils.h glusterd-geo-rep.h \
+ 	glusterd-conn-mgmt.h glusterd-conn-helper.h glusterd-proc-mgmt.h \
+-	glusterd-svc-mgmt.h glusterd-shd-svc.h glusterd-nfs-svc.h \
++	glusterd-svc-mgmt.h glusterd-nfs-svc.h \
+ 	glusterd-quotad-svc.h glusterd-svc-helper.h glusterd-snapd-svc.h \
+ 	glusterd-snapd-svc-helper.h glusterd-rcu.h glusterd-bitd-svc.h \
+ 	glusterd-scrub-svc.h glusterd-server-quorum.h glusterd-errno.h \
+ 	glusterd-tierd-svc.h glusterd-tierd-svc-helper.h \
++        glusterd-shd-svc.h glusterd-shd-svc-helper.h \
+         glusterd-gfproxyd-svc.h glusterd-gfproxyd-svc-helper.h \
+ 	$(CONTRIBDIR)/userspace-rcu/rculist-extra.h
+ 
+diff --git a/xlators/mgmt/glusterd/src/glusterd-brick-ops.c b/xlators/mgmt/glusterd/src/glusterd-brick-ops.c
+index ad9a572..042a805 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-brick-ops.c
++++ b/xlators/mgmt/glusterd/src/glusterd-brick-ops.c
+@@ -2863,7 +2863,7 @@ glusterd_op_remove_brick(dict_t *dict, char **op_errstr)
+     }
+ 
+     if (start_remove && volinfo->status == GLUSTERD_STATUS_STARTED) {
+-        ret = glusterd_svcs_reconfigure();
++        ret = glusterd_svcs_reconfigure(volinfo);
+         if (ret) {
+             gf_msg(this->name, GF_LOG_WARNING, 0, GD_MSG_NFS_RECONF_FAIL,
+                    "Unable to reconfigure NFS-Server");
+diff --git a/xlators/mgmt/glusterd/src/glusterd-conn-mgmt.c b/xlators/mgmt/glusterd/src/glusterd-conn-mgmt.c
+index e80e152..052438c 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-conn-mgmt.c
++++ b/xlators/mgmt/glusterd/src/glusterd-conn-mgmt.c
+@@ -132,3 +132,45 @@ glusterd_conn_build_socket_filepath(char *rundir, uuid_t uuid, char *socketpath,
+     glusterd_set_socket_filepath(sockfilepath, socketpath, len);
+     return 0;
+ }
++
++int
++__glusterd_muxsvc_conn_common_notify(struct rpc_clnt *rpc, void *mydata,
++                                     rpc_clnt_event_t event, void *data)
++{
++    glusterd_conf_t *conf = THIS->private;
++    glusterd_svc_proc_t *mux_proc = mydata;
++    int ret = -1;
++
++    /* Silently ignoring this error, exactly like the current
++     * implementation */
++    if (!mux_proc)
++        return 0;
++
++    if (event == RPC_CLNT_DESTROY) {
++        /*RPC_CLNT_DESTROY will only called after mux_proc detached from the
++         * list. So it is safe to call without lock. Processing
++         * RPC_CLNT_DESTROY under a lock will lead to deadlock.
++         */
++        if (mux_proc->data) {
++            glusterd_volinfo_unref(mux_proc->data);
++            mux_proc->data = NULL;
++        }
++        GF_FREE(mux_proc);
++        ret = 0;
++    } else {
++        pthread_mutex_lock(&conf->attach_lock);
++        {
++            ret = mux_proc->notify(mux_proc, event);
++        }
++        pthread_mutex_unlock(&conf->attach_lock);
++    }
++    return ret;
++}
++
++int
++glusterd_muxsvc_conn_common_notify(struct rpc_clnt *rpc, void *mydata,
++                                   rpc_clnt_event_t event, void *data)
++{
++    return glusterd_big_locked_notify(rpc, mydata, event, data,
++                                      __glusterd_muxsvc_conn_common_notify);
++}
+diff --git a/xlators/mgmt/glusterd/src/glusterd-conn-mgmt.h b/xlators/mgmt/glusterd/src/glusterd-conn-mgmt.h
+index 602c0ba..d1c4607 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-conn-mgmt.h
++++ b/xlators/mgmt/glusterd/src/glusterd-conn-mgmt.h
+@@ -43,9 +43,11 @@ glusterd_conn_disconnect(glusterd_conn_t *conn);
+ int
+ glusterd_conn_common_notify(struct rpc_clnt *rpc, void *mydata,
+                             rpc_clnt_event_t event, void *data);
++int
++glusterd_muxsvc_conn_common_notify(struct rpc_clnt *rpc, void *mydata,
++                                   rpc_clnt_event_t event, void *data);
+ 
+ int32_t
+ glusterd_conn_build_socket_filepath(char *rundir, uuid_t uuid, char *socketpath,
+                                     int len);
+-
+ #endif
+diff --git a/xlators/mgmt/glusterd/src/glusterd-gfproxyd-svc.c b/xlators/mgmt/glusterd/src/glusterd-gfproxyd-svc.c
+index f9c8617..b01fd4d 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-gfproxyd-svc.c
++++ b/xlators/mgmt/glusterd/src/glusterd-gfproxyd-svc.c
+@@ -370,6 +370,7 @@ int
+ glusterd_gfproxydsvc_restart()
+ {
+     glusterd_volinfo_t *volinfo = NULL;
++    glusterd_volinfo_t *tmp = NULL;
+     int ret = -1;
+     xlator_t *this = THIS;
+     glusterd_conf_t *conf = NULL;
+@@ -380,7 +381,7 @@ glusterd_gfproxydsvc_restart()
+     conf = this->private;
+     GF_VALIDATE_OR_GOTO(this->name, conf, out);
+ 
+-    cds_list_for_each_entry(volinfo, &conf->volumes, vol_list)
++    cds_list_for_each_entry_safe(volinfo, tmp, &conf->volumes, vol_list)
+     {
+         /* Start per volume gfproxyd svc */
+         if (volinfo->status == GLUSTERD_STATUS_STARTED) {
+diff --git a/xlators/mgmt/glusterd/src/glusterd-handler.c b/xlators/mgmt/glusterd/src/glusterd-handler.c
+index 528993c..1cb9013 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-handler.c
++++ b/xlators/mgmt/glusterd/src/glusterd-handler.c
+@@ -5928,6 +5928,11 @@ glusterd_get_state(rpcsvc_request_t *req, dict_t *dict)
+ 
+         GF_FREE(rebal_data);
+ 
++        fprintf(fp, "Volume%d.shd_svc.online_status: %s\n", count,
++                volinfo->shd.svc.online ? "Online" : "Offline");
++        fprintf(fp, "Volume%d.shd_svc.inited: %s\n", count,
++                volinfo->shd.svc.inited ? "True" : "False");
++
+         if (volinfo->type == GF_CLUSTER_TYPE_TIER) {
+             ret = glusterd_volume_get_hot_tier_type_str(volinfo,
+                                                         &hot_tier_type_str);
+@@ -5997,12 +6002,6 @@ glusterd_get_state(rpcsvc_request_t *req, dict_t *dict)
+ 
+     fprintf(fp, "\n[Services]\n");
+ 
+-    if (priv->shd_svc.inited) {
+-        fprintf(fp, "svc%d.name: %s\n", ++count, priv->shd_svc.name);
+-        fprintf(fp, "svc%d.online_status: %s\n\n", count,
+-                priv->shd_svc.online ? "Online" : "Offline");
+-    }
+-
+     if (priv->nfs_svc.inited) {
+         fprintf(fp, "svc%d.name: %s\n", ++count, priv->nfs_svc.name);
+         fprintf(fp, "svc%d.online_status: %s\n\n", count,
+diff --git a/xlators/mgmt/glusterd/src/glusterd-handshake.c b/xlators/mgmt/glusterd/src/glusterd-handshake.c
+index 5599a63..1ba58c3 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-handshake.c
++++ b/xlators/mgmt/glusterd/src/glusterd-handshake.c
+@@ -30,6 +30,7 @@
+ #include "rpcsvc.h"
+ #include "rpc-common-xdr.h"
+ #include "glusterd-gfproxyd-svc-helper.h"
++#include "glusterd-shd-svc-helper.h"
+ 
+ extern struct rpc_clnt_program gd_peer_prog;
+ extern struct rpc_clnt_program gd_mgmt_prog;
+@@ -328,6 +329,26 @@ build_volfile_path(char *volume_id, char *path, size_t path_len,
+         goto out;
+     }
+ 
++    volid_ptr = strstr(volume_id, "shd/");
++    if (volid_ptr) {
++        volid_ptr = strchr(volid_ptr, '/');
++        if (!volid_ptr) {
++            ret = -1;
++            goto out;
++        }
++        volid_ptr++;
++
++        ret = glusterd_volinfo_find(volid_ptr, &volinfo);
++        if (ret == -1) {
++            gf_log(this->name, GF_LOG_ERROR, "Couldn't find volinfo");
++            goto out;
++        }
++
++        glusterd_svc_build_shd_volfile_path(volinfo, path, path_len);
++        ret = 0;
++        goto out;
++    }
++
+     volid_ptr = strstr(volume_id, "/snaps/");
+     if (volid_ptr) {
+         ret = get_snap_volname_and_volinfo(volid_ptr, &volname, &volinfo);
+diff --git a/xlators/mgmt/glusterd/src/glusterd-mem-types.h b/xlators/mgmt/glusterd/src/glusterd-mem-types.h
+index 7a784db..17052ce 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-mem-types.h
++++ b/xlators/mgmt/glusterd/src/glusterd-mem-types.h
+@@ -51,6 +51,7 @@ typedef enum gf_gld_mem_types_ {
+     gf_gld_mt_missed_snapinfo_t,
+     gf_gld_mt_snap_create_args_t,
+     gf_gld_mt_glusterd_brick_proc_t,
++    gf_gld_mt_glusterd_svc_proc_t,
+     gf_gld_mt_end,
+ } gf_gld_mem_types_t;
+ #endif
+diff --git a/xlators/mgmt/glusterd/src/glusterd-messages.h b/xlators/mgmt/glusterd/src/glusterd-messages.h
+index c7b3ca8..424e15f 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-messages.h
++++ b/xlators/mgmt/glusterd/src/glusterd-messages.h
+@@ -298,6 +298,8 @@ GLFS_MSGID(
+     GD_MSG_LOCALTIME_LOGGING_ENABLE, GD_MSG_LOCALTIME_LOGGING_DISABLE,
+     GD_MSG_PORTS_EXHAUSTED, GD_MSG_CHANGELOG_GET_FAIL,
+     GD_MSG_MANAGER_FUNCTION_FAILED, GD_MSG_NFS_GANESHA_DISABLED,
+-    GD_MSG_GANESHA_NOT_RUNNING, GD_MSG_DAEMON_LOG_LEVEL_VOL_OPT_VALIDATE_FAIL);
++    GD_MSG_GANESHA_NOT_RUNNING, GD_MSG_DAEMON_LOG_LEVEL_VOL_OPT_VALIDATE_FAIL,
++    GD_MSG_SHD_START_FAIL, GD_MSG_SHD_OBJ_GET_FAIL, GD_MSG_SVC_ATTACH_FAIL,
++    GD_MSG_ATTACH_INFO, GD_MSG_DETACH_INFO, GD_MSG_SVC_DETACH_FAIL);
+ 
+ #endif /* !_GLUSTERD_MESSAGES_H_ */
+diff --git a/xlators/mgmt/glusterd/src/glusterd-op-sm.c b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+index df8a6ab..95f9707 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-op-sm.c
++++ b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+@@ -44,6 +44,7 @@
+ #include "glusterd-snapshot-utils.h"
+ #include "glusterd-svc-mgmt.h"
+ #include "glusterd-svc-helper.h"
++#include "glusterd-shd-svc-helper.h"
+ #include "glusterd-shd-svc.h"
+ #include "glusterd-nfs-svc.h"
+ #include "glusterd-quotad-svc.h"
+@@ -2223,6 +2224,11 @@ glusterd_options_reset(glusterd_volinfo_t *volinfo, char *key,
+     if (ret)
+         goto out;
+ 
++    svc = &(volinfo->shd.svc);
++    ret = svc->reconfigure(volinfo);
++    if (ret)
++        goto out;
++
+     ret = glusterd_create_volfiles_and_notify_services(volinfo);
+     if (ret) {
+         gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_VOLFILE_CREATE_FAIL,
+@@ -2237,7 +2243,7 @@ glusterd_options_reset(glusterd_volinfo_t *volinfo, char *key,
+         goto out;
+ 
+     if (GLUSTERD_STATUS_STARTED == volinfo->status) {
+-        ret = glusterd_svcs_reconfigure();
++        ret = glusterd_svcs_reconfigure(volinfo);
+         if (ret)
+             goto out;
+     }
+@@ -2693,6 +2699,11 @@ glusterd_op_set_all_volume_options(xlator_t *this, dict_t *dict,
+                 if (ret)
+                     goto out;
+ 
++                svc = &(volinfo->shd.svc);
++                ret = svc->reconfigure(volinfo);
++                if (ret)
++                    goto out;
++
+                 ret = glusterd_create_volfiles_and_notify_services(volinfo);
+                 if (ret) {
+                     gf_msg(this->name, GF_LOG_ERROR, 0,
+@@ -2706,7 +2717,7 @@ glusterd_op_set_all_volume_options(xlator_t *this, dict_t *dict,
+                 }
+             }
+             if (svcs_reconfigure) {
+-                ret = glusterd_svcs_reconfigure();
++                ret = glusterd_svcs_reconfigure(NULL);
+                 if (ret) {
+                     gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_SVC_RESTART_FAIL,
+                            "Unable to restart "
+@@ -3091,6 +3102,11 @@ glusterd_op_set_volume(dict_t *dict, char **errstr)
+         if (ret)
+             goto out;
+ 
++        svc = &(volinfo->shd.svc);
++        ret = svc->reconfigure(volinfo);
++        if (ret)
++            goto out;
++
+         ret = glusterd_create_volfiles_and_notify_services(volinfo);
+         if (ret) {
+             gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_VOLFILE_CREATE_FAIL,
+@@ -3106,7 +3122,7 @@ glusterd_op_set_volume(dict_t *dict, char **errstr)
+             goto out;
+ 
+         if (GLUSTERD_STATUS_STARTED == volinfo->status) {
+-            ret = glusterd_svcs_reconfigure();
++            ret = glusterd_svcs_reconfigure(volinfo);
+             if (ret) {
+                 gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_SVC_RESTART_FAIL,
+                        "Unable to restart services");
+@@ -3139,6 +3155,11 @@ glusterd_op_set_volume(dict_t *dict, char **errstr)
+             if (ret)
+                 goto out;
+ 
++            svc = &(volinfo->shd.svc);
++            ret = svc->reconfigure(volinfo);
++            if (ret)
++                goto out;
++
+             ret = glusterd_create_volfiles_and_notify_services(volinfo);
+             if (ret) {
+                 gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_VOLFILE_CREATE_FAIL,
+@@ -3154,7 +3175,7 @@ glusterd_op_set_volume(dict_t *dict, char **errstr)
+                 goto out;
+ 
+             if (GLUSTERD_STATUS_STARTED == volinfo->status) {
+-                ret = glusterd_svcs_reconfigure();
++                ret = glusterd_svcs_reconfigure(volinfo);
+                 if (ret) {
+                     gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_SVC_RESTART_FAIL,
+                            "Unable to restart services");
+@@ -3361,7 +3382,7 @@ glusterd_op_stats_volume(dict_t *dict, char **op_errstr, dict_t *rsp_dict)
+         goto out;
+ 
+     if (GLUSTERD_STATUS_STARTED == volinfo->status) {
+-        ret = glusterd_svcs_reconfigure();
++        ret = glusterd_svcs_reconfigure(volinfo);
+         if (ret)
+             goto out;
+     }
+@@ -3644,14 +3665,6 @@ glusterd_op_status_volume(dict_t *dict, char **op_errstr, dict_t *rsp_dict)
+         other_count++;
+         node_count++;
+ 
+-    } else if ((cmd & GF_CLI_STATUS_SHD) != 0) {
+-        ret = glusterd_add_node_to_dict(priv->shd_svc.name, rsp_dict, 0,
+-                                        vol_opts);
+-        if (ret)
+-            goto out;
+-        other_count++;
+-        node_count++;
+-
+     } else if ((cmd & GF_CLI_STATUS_QUOTAD) != 0) {
+         ret = glusterd_add_node_to_dict(priv->quotad_svc.name, rsp_dict, 0,
+                                         vol_opts);
+@@ -3685,6 +3698,12 @@ glusterd_op_status_volume(dict_t *dict, char **op_errstr, dict_t *rsp_dict)
+             goto out;
+         other_count++;
+         node_count++;
++    } else if ((cmd & GF_CLI_STATUS_SHD) != 0) {
++        ret = glusterd_add_shd_to_dict(volinfo, rsp_dict, other_index);
++        if (ret)
++            goto out;
++        other_count++;
++        node_count++;
+     } else if ((cmd & GF_CLI_STATUS_BRICK) != 0) {
+         ret = dict_get_strn(dict, "brick", SLEN("brick"), &brick);
+         if (ret)
+@@ -3747,6 +3766,19 @@ glusterd_op_status_volume(dict_t *dict, char **op_errstr, dict_t *rsp_dict)
+                 node_count++;
+             }
+ 
++            if (glusterd_is_shd_compatible_volume(volinfo)) {
++                shd_enabled = gd_is_self_heal_enabled(volinfo, vol_opts);
++                if (shd_enabled) {
++                    ret = glusterd_add_shd_to_dict(volinfo, rsp_dict,
++                                                   other_index);
++                    if (ret)
++                        goto out;
++                    other_count++;
++                    other_index++;
++                    node_count++;
++                }
++            }
++
+             nfs_disabled = dict_get_str_boolean(vol_opts, NFS_DISABLE_MAP_KEY,
+                                                 _gf_false);
+             if (!nfs_disabled) {
+@@ -3759,18 +3791,6 @@ glusterd_op_status_volume(dict_t *dict, char **op_errstr, dict_t *rsp_dict)
+                 node_count++;
+             }
+ 
+-            if (glusterd_is_shd_compatible_volume(volinfo))
+-                shd_enabled = gd_is_self_heal_enabled(volinfo, vol_opts);
+-            if (shd_enabled) {
+-                ret = glusterd_add_node_to_dict(priv->shd_svc.name, rsp_dict,
+-                                                other_index, vol_opts);
+-                if (ret)
+-                    goto out;
+-                other_count++;
+-                node_count++;
+-                other_index++;
+-            }
+-
+             if (glusterd_is_volume_quota_enabled(volinfo)) {
+                 ret = glusterd_add_node_to_dict(priv->quotad_svc.name, rsp_dict,
+                                                 other_index, vol_opts);
+@@ -6875,16 +6895,18 @@ glusterd_shd_select_brick_xlator(dict_t *dict, gf_xl_afr_op_t heal_op,
+     int ret = -1;
+     glusterd_conf_t *priv = NULL;
+     xlator_t *this = NULL;
++    glusterd_svc_t *svc = NULL;
+ 
+     this = THIS;
+     GF_ASSERT(this);
+     priv = this->private;
+     GF_ASSERT(priv);
++    svc = &(volinfo->shd.svc);
+ 
+     switch (heal_op) {
+         case GF_SHD_OP_INDEX_SUMMARY:
+         case GF_SHD_OP_STATISTICS_HEAL_COUNT:
+-            if (!priv->shd_svc.online) {
++            if (!svc->online) {
+                 if (!rsp_dict) {
+                     gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_OPCTX_NULL,
+                            "Received "
+@@ -6905,7 +6927,7 @@ glusterd_shd_select_brick_xlator(dict_t *dict, gf_xl_afr_op_t heal_op,
+             break;
+ 
+         case GF_SHD_OP_STATISTICS_HEAL_COUNT_PER_REPLICA:
+-            if (!priv->shd_svc.online) {
++            if (!svc->online) {
+                 if (!rsp_dict) {
+                     gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_OPCTX_NULL,
+                            "Received "
+@@ -7040,7 +7062,7 @@ glusterd_bricks_select_heal_volume(dict_t *dict, char **op_errstr,
+         ret = -1;
+         goto out;
+     } else {
+-        pending_node->node = &(priv->shd_svc);
++        pending_node->node = &(volinfo->shd.svc);
+         pending_node->type = GD_NODE_SHD;
+         cds_list_add_tail(&pending_node->list, selected);
+         pending_node = NULL;
+@@ -7174,6 +7196,7 @@ glusterd_bricks_select_status_volume(dict_t *dict, char **op_errstr,
+     glusterd_pending_node_t *pending_node = NULL;
+     xlator_t *this = NULL;
+     glusterd_conf_t *priv = NULL;
++    glusterd_svc_t *svc = NULL;
+ 
+     GF_ASSERT(dict);
+ 
+@@ -7269,7 +7292,8 @@ glusterd_bricks_select_status_volume(dict_t *dict, char **op_errstr,
+ 
+         ret = 0;
+     } else if ((cmd & GF_CLI_STATUS_SHD) != 0) {
+-        if (!priv->shd_svc.online) {
++        svc = &(volinfo->shd.svc);
++        if (!svc->online) {
+             ret = -1;
+             gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_SELF_HEALD_DISABLED,
+                    "Self-heal daemon is not running");
+@@ -7281,7 +7305,7 @@ glusterd_bricks_select_status_volume(dict_t *dict, char **op_errstr,
+             ret = -1;
+             goto out;
+         }
+-        pending_node->node = &(priv->shd_svc);
++        pending_node->node = svc;
+         pending_node->type = GD_NODE_SHD;
+         pending_node->index = 0;
+         cds_list_add_tail(&pending_node->list, selected);
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.c b/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.c
+new file mode 100644
+index 0000000..9196758
+--- /dev/null
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.c
+@@ -0,0 +1,140 @@
++/*
++   Copyright (c) 2016 Red Hat, Inc. <http://www.redhat.com>
++   This file is part of GlusterFS.
++
++   This file is licensed to you under your choice of the GNU Lesser
++   General Public License, version 3 or any later version (LGPLv3 or
++   later), or the GNU General Public License, version 2 (GPLv2), in all
++   cases as published by the Free Software Foundation.
++*/
++
++#include "glusterd.h"
++#include "glusterd-utils.h"
++#include "glusterd-shd-svc-helper.h"
++#include "glusterd-messages.h"
++#include "glusterd-volgen.h"
++
++void
++glusterd_svc_build_shd_socket_filepath(glusterd_volinfo_t *volinfo, char *path,
++                                       int path_len)
++{
++    char sockfilepath[PATH_MAX] = {
++        0,
++    };
++    char rundir[PATH_MAX] = {
++        0,
++    };
++    int32_t len = 0;
++    glusterd_conf_t *priv = THIS->private;
++
++    if (!priv)
++        return;
++
++    GLUSTERD_GET_SHD_RUNDIR(rundir, volinfo, priv);
++    len = snprintf(sockfilepath, sizeof(sockfilepath), "%s/run-%s", rundir,
++                   uuid_utoa(MY_UUID));
++    if ((len < 0) || (len >= sizeof(sockfilepath))) {
++        sockfilepath[0] = 0;
++    }
++
++    glusterd_set_socket_filepath(sockfilepath, path, path_len);
++}
++
++void
++glusterd_svc_build_shd_pidfile(glusterd_volinfo_t *volinfo, char *path,
++                               int path_len)
++{
++    char rundir[PATH_MAX] = {
++        0,
++    };
++    glusterd_conf_t *priv = THIS->private;
++
++    if (!priv)
++        return;
++
++    GLUSTERD_GET_SHD_RUNDIR(rundir, volinfo, priv);
++
++    snprintf(path, path_len, "%s/%s-shd.pid", rundir, volinfo->volname);
++}
++
++void
++glusterd_svc_build_shd_volfile_path(glusterd_volinfo_t *volinfo, char *path,
++                                    int path_len)
++{
++    char workdir[PATH_MAX] = {
++        0,
++    };
++    glusterd_conf_t *priv = THIS->private;
++
++    if (!priv)
++        return;
++
++    GLUSTERD_GET_VOLUME_DIR(workdir, volinfo, priv);
++
++    snprintf(path, path_len, "%s/%s-shd.vol", workdir, volinfo->volname);
++}
++
++void
++glusterd_svc_build_shd_logdir(char *logdir, char *volname, size_t len)
++{
++    snprintf(logdir, len, "%s/shd/%s", DEFAULT_LOG_FILE_DIRECTORY, volname);
++}
++
++void
++glusterd_svc_build_shd_logfile(char *logfile, char *logdir, size_t len)
++{
++    snprintf(logfile, len, "%s/shd.log", logdir);
++}
++
++void
++glusterd_shd_svcproc_cleanup(glusterd_shdsvc_t *shd)
++{
++    glusterd_svc_proc_t *svc_proc = NULL;
++    glusterd_svc_t *svc = NULL;
++    glusterd_conf_t *conf = NULL;
++    gf_boolean_t need_unref = _gf_false;
++    rpc_clnt_t *rpc = NULL;
++
++    conf = THIS->private;
++    if (!conf)
++        return;
++
++    GF_VALIDATE_OR_GOTO(THIS->name, conf, out);
++    GF_VALIDATE_OR_GOTO(THIS->name, shd, out);
++
++    svc = &shd->svc;
++    shd->attached = _gf_false;
++
++    if (svc->conn.rpc) {
++        rpc_clnt_unref(svc->conn.rpc);
++        svc->conn.rpc = NULL;
++    }
++
++    pthread_mutex_lock(&conf->attach_lock);
++    {
++        svc_proc = svc->svc_proc;
++        svc->svc_proc = NULL;
++        svc->inited = _gf_false;
++        cds_list_del_init(&svc->mux_svc);
++        glusterd_unlink_file(svc->proc.pidfile);
++
++        if (svc_proc && cds_list_empty(&svc_proc->svcs)) {
++            cds_list_del_init(&svc_proc->svc_proc_list);
++            /* We cannot free svc_proc list from here. Because
++             * if there are pending events on the rpc, it will
++             * try to access the corresponding svc_proc, so unrefing
++             * rpc request and then cleaning up the memory is carried
++             * from the notify function upon RPC_CLNT_DESTROY destroy.
++             */
++            need_unref = _gf_true;
++            rpc = svc_proc->rpc;
++            svc_proc->rpc = NULL;
++        }
++    }
++    pthread_mutex_unlock(&conf->attach_lock);
++    /*rpc unref has to be performed outside the lock*/
++    if (need_unref && rpc)
++        rpc_clnt_unref(rpc);
++out:
++    return;
++}
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.h b/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.h
+new file mode 100644
+index 0000000..c70702c
+--- /dev/null
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.h
+@@ -0,0 +1,45 @@
++/*
++   Copyright (c) 2016 Red Hat, Inc. <http://www.redhat.com>
++   This file is part of GlusterFS.
++
++   This file is licensed to you under your choice of the GNU Lesser
++   General Public License, version 3 or any later version (LGPLv3 or
++   later), or the GNU General Public License, version 2 (GPLv2), in all
++   cases as published by the Free Software Foundation.
++*/
++
++#ifndef _GLUSTERD_SHD_SVC_HELPER_H_
++#define _GLUSTERD_SHD_SVC_HELPER_H_
++
++#include "glusterd.h"
++#include "glusterd-svc-mgmt.h"
++
++void
++glusterd_svc_build_shd_socket_filepath(glusterd_volinfo_t *volinfo, char *path,
++                                       int path_len);
++
++void
++glusterd_svc_build_shd_pidfile(glusterd_volinfo_t *volinfo, char *path,
++                               int path_len);
++
++void
++glusterd_svc_build_shd_volfile_path(glusterd_volinfo_t *volinfo, char *path,
++                                    int path_len);
++
++void
++glusterd_svc_build_shd_logdir(char *logdir, char *volname, size_t len);
++
++void
++glusterd_svc_build_shd_logfile(char *logfile, char *logdir, size_t len);
++
++void
++glusterd_shd_svcproc_cleanup(glusterd_shdsvc_t *shd);
++
++int
++glusterd_recover_shd_attach_failure(glusterd_volinfo_t *volinfo,
++                                    glusterd_svc_t *svc, int flags);
++
++int
++glusterd_shdsvc_create_volfile(glusterd_volinfo_t *volinfo);
++
++#endif
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+index 69e27cb..937ea30 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+@@ -13,9 +13,10 @@
+ #include "glusterd.h"
+ #include "glusterd-utils.h"
+ #include "glusterd-volgen.h"
+-#include "glusterd-svc-mgmt.h"
+ #include "glusterd-shd-svc.h"
++#include "glusterd-shd-svc-helper.h"
+ #include "glusterd-svc-helper.h"
++#include "glusterd-store.h"
+ 
+ #define GD_SHD_PROCESS_NAME "--process-name"
+ char *shd_svc_name = "glustershd";
+@@ -23,27 +24,145 @@ char *shd_svc_name = "glustershd";
+ void
+ glusterd_shdsvc_build(glusterd_svc_t *svc)
+ {
++    int ret = -1;
++    ret = snprintf(svc->name, sizeof(svc->name), "%s", shd_svc_name);
++    if (ret < 0)
++        return;
++
++    CDS_INIT_LIST_HEAD(&svc->mux_svc);
+     svc->manager = glusterd_shdsvc_manager;
+     svc->start = glusterd_shdsvc_start;
+-    svc->stop = glusterd_svc_stop;
++    svc->stop = glusterd_shdsvc_stop;
++    svc->reconfigure = glusterd_shdsvc_reconfigure;
+ }
+ 
+ int
+-glusterd_shdsvc_init(glusterd_svc_t *svc)
++glusterd_shdsvc_init(void *data, glusterd_conn_t *mux_conn,
++                     glusterd_svc_proc_t *mux_svc)
+ {
+-    return glusterd_svc_init(svc, shd_svc_name);
++    int ret = -1;
++    char rundir[PATH_MAX] = {
++        0,
++    };
++    char sockpath[PATH_MAX] = {
++        0,
++    };
++    char pidfile[PATH_MAX] = {
++        0,
++    };
++    char volfile[PATH_MAX] = {
++        0,
++    };
++    char logdir[PATH_MAX] = {
++        0,
++    };
++    char logfile[PATH_MAX] = {
++        0,
++    };
++    char volfileid[256] = {0};
++    glusterd_svc_t *svc = NULL;
++    glusterd_volinfo_t *volinfo = NULL;
++    glusterd_conf_t *priv = NULL;
++    glusterd_muxsvc_conn_notify_t notify = NULL;
++    xlator_t *this = NULL;
++    char *volfileserver = NULL;
++    int32_t len = 0;
++
++    this = THIS;
++    GF_VALIDATE_OR_GOTO(THIS->name, this, out);
++
++    priv = this->private;
++    GF_VALIDATE_OR_GOTO(this->name, priv, out);
++
++    volinfo = data;
++    GF_VALIDATE_OR_GOTO(this->name, data, out);
++    GF_VALIDATE_OR_GOTO(this->name, mux_svc, out);
++
++    svc = &(volinfo->shd.svc);
++
++    ret = snprintf(svc->name, sizeof(svc->name), "%s", shd_svc_name);
++    if (ret < 0)
++        goto out;
++
++    notify = glusterd_muxsvc_common_rpc_notify;
++    glusterd_store_perform_node_state_store(volinfo);
++
++    GLUSTERD_GET_SHD_RUNDIR(rundir, volinfo, priv);
++    glusterd_svc_create_rundir(rundir);
++
++    glusterd_svc_build_shd_logdir(logdir, volinfo->volname, sizeof(logdir));
++    glusterd_svc_build_shd_logfile(logfile, logdir, sizeof(logfile));
++
++    /* Initialize the connection mgmt */
++    if (mux_conn && mux_svc->rpc) {
++        /* multiplexed svc */
++        svc->conn.frame_timeout = mux_conn->frame_timeout;
++        /* This will be unrefed from glusterd_shd_svcproc_cleanup*/
++        svc->conn.rpc = rpc_clnt_ref(mux_svc->rpc);
++        ret = snprintf(svc->conn.sockpath, sizeof(svc->conn.sockpath), "%s",
++                       mux_conn->sockpath);
++    } else {
++        ret = mkdir_p(logdir, 0755, _gf_true);
++        if ((ret == -1) && (EEXIST != errno)) {
++            gf_msg(this->name, GF_LOG_ERROR, errno, GD_MSG_CREATE_DIR_FAILED,
++                   "Unable to create logdir %s", logdir);
++            goto out;
++        }
++
++        glusterd_svc_build_shd_socket_filepath(volinfo, sockpath,
++                                               sizeof(sockpath));
++        ret = glusterd_muxsvc_conn_init(&(svc->conn), mux_svc, sockpath, 600,
++                                        notify);
++        if (ret)
++            goto out;
++        /* This will be unrefed when the last svcs is detached from the list */
++        if (!mux_svc->rpc)
++            mux_svc->rpc = rpc_clnt_ref(svc->conn.rpc);
++    }
++
++    /* Initialize the process mgmt */
++    glusterd_svc_build_shd_pidfile(volinfo, pidfile, sizeof(pidfile));
++    glusterd_svc_build_shd_volfile_path(volinfo, volfile, PATH_MAX);
++    len = snprintf(volfileid, sizeof(volfileid), "shd/%s", volinfo->volname);
++    if ((len < 0) || (len >= sizeof(volfileid))) {
++        ret = -1;
++        goto out;
++    }
++
++    if (dict_get_strn(this->options, "transport.socket.bind-address",
++                      SLEN("transport.socket.bind-address"),
++                      &volfileserver) != 0) {
++        volfileserver = "localhost";
++    }
++    ret = glusterd_proc_init(&(svc->proc), shd_svc_name, pidfile, logdir,
++                             logfile, volfile, volfileid, volfileserver);
++    if (ret)
++        goto out;
++
++out:
++    gf_msg_debug(this ? this->name : "glusterd", 0, "Returning %d", ret);
++    return ret;
+ }
+ 
+-static int
+-glusterd_shdsvc_create_volfile()
++int
++glusterd_shdsvc_create_volfile(glusterd_volinfo_t *volinfo)
+ {
+     char filepath[PATH_MAX] = {
+         0,
+     };
++
+     int ret = -1;
+-    glusterd_conf_t *conf = THIS->private;
+     dict_t *mod_dict = NULL;
+ 
++    glusterd_svc_build_shd_volfile_path(volinfo, filepath, PATH_MAX);
++    if (!glusterd_is_shd_compatible_volume(volinfo)) {
++        /* If volfile exist, delete it. This case happens when we
++         * change from replica/ec to distribute.
++         */
++        (void)glusterd_unlink_file(filepath);
++        ret = 0;
++        goto out;
++    }
+     mod_dict = dict_new();
+     if (!mod_dict)
+         goto out;
+@@ -64,9 +183,7 @@ glusterd_shdsvc_create_volfile()
+     if (ret)
+         goto out;
+ 
+-    glusterd_svc_build_volfile_path(shd_svc_name, conf->workdir, filepath,
+-                                    sizeof(filepath));
+-    ret = glusterd_create_global_volfile(build_shd_graph, filepath, mod_dict);
++    ret = glusterd_shdsvc_generate_volfile(volinfo, filepath, mod_dict);
+     if (ret) {
+         gf_msg(THIS->name, GF_LOG_ERROR, 0, GD_MSG_VOLFILE_CREATE_FAIL,
+                "Failed to create volfile");
+@@ -81,26 +198,89 @@ out:
+     return ret;
+ }
+ 
++gf_boolean_t
++glusterd_svcs_shd_compatible_volumes_stopped(glusterd_svc_t *svc)
++{
++    glusterd_svc_proc_t *svc_proc = NULL;
++    glusterd_shdsvc_t *shd = NULL;
++    glusterd_svc_t *temp_svc = NULL;
++    glusterd_volinfo_t *volinfo = NULL;
++    gf_boolean_t comp = _gf_false;
++    glusterd_conf_t *conf = THIS->private;
++
++    GF_VALIDATE_OR_GOTO("glusterd", conf, out);
++    GF_VALIDATE_OR_GOTO("glusterd", svc, out);
++    pthread_mutex_lock(&conf->attach_lock);
++    {
++        svc_proc = svc->svc_proc;
++        if (!svc_proc)
++            goto unlock;
++        cds_list_for_each_entry(temp_svc, &svc_proc->svcs, mux_svc)
++        {
++            /* Get volinfo->shd from svc object */
++            shd = cds_list_entry(svc, glusterd_shdsvc_t, svc);
++            if (!shd) {
++                gf_msg("glusterd", GF_LOG_ERROR, 0, GD_MSG_SHD_OBJ_GET_FAIL,
++                       "Failed to get shd object "
++                       "from shd service");
++                goto unlock;
++            }
++
++            /* Get volinfo from shd */
++            volinfo = cds_list_entry(shd, glusterd_volinfo_t, shd);
++            if (!volinfo) {
++                gf_msg("glusterd", GF_LOG_ERROR, 0, GD_MSG_VOLINFO_GET_FAIL,
++                       "Failed to get volinfo from "
++                       "from shd");
++                goto unlock;
++            }
++            if (!glusterd_is_shd_compatible_volume(volinfo))
++                continue;
++            if (volinfo->status == GLUSTERD_STATUS_STARTED)
++                goto unlock;
++        }
++        comp = _gf_true;
++    }
++unlock:
++    pthread_mutex_unlock(&conf->attach_lock);
++out:
++    return comp;
++}
++
+ int
+ glusterd_shdsvc_manager(glusterd_svc_t *svc, void *data, int flags)
+ {
+-    int ret = 0;
++    int ret = -1;
+     glusterd_volinfo_t *volinfo = NULL;
+ 
+-    if (!svc->inited) {
+-        ret = glusterd_shdsvc_init(svc);
+-        if (ret) {
+-            gf_msg(THIS->name, GF_LOG_ERROR, 0, GD_MSG_FAILED_INIT_SHDSVC,
+-                   "Failed to init shd "
+-                   "service");
+-            goto out;
+-        } else {
+-            svc->inited = _gf_true;
+-            gf_msg_debug(THIS->name, 0, "shd service initialized");
++    volinfo = data;
++    GF_VALIDATE_OR_GOTO("glusterd", svc, out);
++    GF_VALIDATE_OR_GOTO("glusterd", volinfo, out);
++
++    if (volinfo)
++        glusterd_volinfo_ref(volinfo);
++
++    ret = glusterd_shdsvc_create_volfile(volinfo);
++    if (ret)
++        goto out;
++
++    if (!glusterd_is_shd_compatible_volume(volinfo)) {
++        ret = 0;
++        if (svc->inited) {
++            /* This means glusterd was running for this volume and now
++             * it was converted to a non-shd volume. So just stop the shd
++             */
++            ret = svc->stop(svc, SIGTERM);
+         }
++        goto out;
+     }
+ 
+-    volinfo = data;
++    ret = glusterd_shd_svc_mux_init(volinfo, svc);
++    if (ret) {
++        gf_msg(THIS->name, GF_LOG_ERROR, 0, GD_MSG_FAILED_INIT_SHDSVC,
++               "Failed to init shd service");
++        goto out;
++    }
+ 
+     /* If all the volumes are stopped or all shd compatible volumes
+      * are stopped then stop the service if:
+@@ -110,31 +290,26 @@ glusterd_shdsvc_manager(glusterd_svc_t *svc, void *data, int flags)
+      * - volinfo is NULL or
+      * - volinfo is present and volume is shd compatible
+      */
+-    if (glusterd_are_all_volumes_stopped() ||
+-        glusterd_all_shd_compatible_volumes_stopped()) {
+-        if (!(volinfo && !glusterd_is_shd_compatible_volume(volinfo))) {
+-            ret = svc->stop(svc, SIGTERM);
+-        }
+-    } else {
+-        if (!(volinfo && !glusterd_is_shd_compatible_volume(volinfo))) {
+-            ret = glusterd_shdsvc_create_volfile();
+-            if (ret)
+-                goto out;
+-
+-            ret = svc->stop(svc, SIGTERM);
+-            if (ret)
+-                goto out;
++    if (glusterd_svcs_shd_compatible_volumes_stopped(svc)) {
++        /* TODO
++         * Take a lock and detach all svc's to stop the process
++         * also reset the init flag
++         */
++        ret = svc->stop(svc, SIGTERM);
++    } else if (volinfo) {
++        ret = svc->stop(svc, SIGTERM);
++        if (ret)
++            goto out;
+ 
++        if (volinfo->status == GLUSTERD_STATUS_STARTED) {
+             ret = svc->start(svc, flags);
+             if (ret)
+                 goto out;
+-
+-            ret = glusterd_conn_connect(&(svc->conn));
+-            if (ret)
+-                goto out;
+         }
+     }
+ out:
++    if (volinfo)
++        glusterd_volinfo_unref(volinfo);
+     if (ret)
+         gf_event(EVENT_SVC_MANAGER_FAILED, "svc_name=%s", svc->name);
+     gf_msg_debug(THIS->name, 0, "Returning %d", ret);
+@@ -143,7 +318,7 @@ out:
+ }
+ 
+ int
+-glusterd_shdsvc_start(glusterd_svc_t *svc, int flags)
++glusterd_new_shd_svc_start(glusterd_svc_t *svc, int flags)
+ {
+     int ret = -1;
+     char glusterd_uuid_option[PATH_MAX] = {0};
+@@ -178,31 +353,136 @@ glusterd_shdsvc_start(glusterd_svc_t *svc, int flags)
+         goto out;
+ 
+     ret = glusterd_svc_start(svc, flags, cmdline);
++    if (ret)
++        goto out;
+ 
++    ret = glusterd_conn_connect(&(svc->conn));
+ out:
+     if (cmdline)
+         dict_unref(cmdline);
++    return ret;
++}
+ 
++int
++glusterd_recover_shd_attach_failure(glusterd_volinfo_t *volinfo,
++                                    glusterd_svc_t *svc, int flags)
++{
++    int ret = -1;
++    glusterd_svc_proc_t *mux_proc = NULL;
++    glusterd_conf_t *conf = NULL;
++
++    conf = THIS->private;
++
++    if (!conf || !volinfo || !svc)
++        return -1;
++    glusterd_shd_svcproc_cleanup(&volinfo->shd);
++    mux_proc = glusterd_svcprocess_new();
++    if (!mux_proc) {
++        return -1;
++    }
++    ret = glusterd_shdsvc_init(volinfo, NULL, mux_proc);
++    if (ret)
++        return -1;
++    pthread_mutex_lock(&conf->attach_lock);
++    {
++        cds_list_add_tail(&mux_proc->svc_proc_list, &conf->shd_procs);
++        svc->svc_proc = mux_proc;
++        cds_list_del_init(&svc->mux_svc);
++        cds_list_add_tail(&svc->mux_svc, &mux_proc->svcs);
++    }
++    pthread_mutex_unlock(&conf->attach_lock);
++
++    ret = glusterd_new_shd_svc_start(svc, flags);
++    if (!ret) {
++        volinfo->shd.attached = _gf_true;
++    }
++    return ret;
++}
++
++int
++glusterd_shdsvc_start(glusterd_svc_t *svc, int flags)
++{
++    int ret = -1;
++    glusterd_shdsvc_t *shd = NULL;
++    glusterd_volinfo_t *volinfo = NULL;
++    glusterd_conf_t *conf = NULL;
++
++    GF_VALIDATE_OR_GOTO("glusterd", svc, out);
++    conf = THIS->private;
++    GF_VALIDATE_OR_GOTO("glusterd", conf, out);
++
++    /* Get volinfo->shd from svc object */
++    shd = cds_list_entry(svc, glusterd_shdsvc_t, svc);
++    if (!shd) {
++        gf_msg("glusterd", GF_LOG_ERROR, 0, GD_MSG_SHD_OBJ_GET_FAIL,
++               "Failed to get shd object "
++               "from shd service");
++        return -1;
++    }
++
++    /* Get volinfo from shd */
++    volinfo = cds_list_entry(shd, glusterd_volinfo_t, shd);
++    if (!volinfo) {
++        gf_msg("glusterd", GF_LOG_ERROR, 0, GD_MSG_VOLINFO_GET_FAIL,
++               "Failed to get volinfo from "
++               "from shd");
++        return -1;
++    }
++
++    if (volinfo->status != GLUSTERD_STATUS_STARTED)
++        return -1;
++
++    glusterd_volinfo_ref(volinfo);
++    if (!svc->inited) {
++        ret = glusterd_shd_svc_mux_init(volinfo, svc);
++        if (ret)
++            goto out;
++    }
++
++    if (shd->attached) {
++        ret = glusterd_attach_svc(svc, volinfo, flags);
++        if (ret) {
++            gf_msg("glusterd", GF_LOG_ERROR, 0, GD_MSG_VOLINFO_GET_FAIL,
++                   "Failed to attach shd svc(volume=%s) to pid=%d. Starting"
++                   "a new process",
++                   volinfo->volname, glusterd_proc_get_pid(&svc->proc));
++            ret = glusterd_recover_shd_attach_failure(volinfo, svc, flags);
++        }
++        goto out;
++    }
++    ret = glusterd_new_shd_svc_start(svc, flags);
++    if (!ret) {
++        shd->attached = _gf_true;
++    }
++out:
++    if (volinfo)
++        glusterd_volinfo_unref(volinfo);
+     gf_msg_debug(THIS->name, 0, "Returning %d", ret);
+ 
+     return ret;
+ }
+ 
+ int
+-glusterd_shdsvc_reconfigure()
++glusterd_shdsvc_reconfigure(glusterd_volinfo_t *volinfo)
+ {
+     int ret = -1;
+     xlator_t *this = NULL;
+-    glusterd_conf_t *priv = NULL;
+     gf_boolean_t identical = _gf_false;
++    dict_t *mod_dict = NULL;
++    glusterd_svc_t *svc = NULL;
+ 
+     this = THIS;
+     GF_VALIDATE_OR_GOTO("glusterd", this, out);
+ 
+-    priv = this->private;
+-    GF_VALIDATE_OR_GOTO(this->name, priv, out);
++    if (!volinfo) {
++        /* reconfigure will be called separately*/
++        ret = 0;
++        goto out;
++    }
+ 
+-    if (glusterd_all_shd_compatible_volumes_stopped())
++    glusterd_volinfo_ref(volinfo);
++    svc = &(volinfo->shd.svc);
++    if (glusterd_svcs_shd_compatible_volumes_stopped(svc))
+         goto manager;
+ 
+     /*
+@@ -210,8 +490,42 @@ glusterd_shdsvc_reconfigure()
+      * and cksum i.e. "character-by-character". If YES, then
+      * NOTHING has been changed, just return.
+      */
+-    ret = glusterd_svc_check_volfile_identical(priv->shd_svc.name,
+-                                               build_shd_graph, &identical);
++
++    if (!glusterd_is_shd_compatible_volume(volinfo)) {
++        if (svc->inited)
++            goto manager;
++
++        /* Nothing to do if not shd compatible */
++        ret = 0;
++        goto out;
++    }
++    mod_dict = dict_new();
++    if (!mod_dict)
++        goto out;
++
++    ret = dict_set_uint32(mod_dict, "cluster.background-self-heal-count", 0);
++    if (ret)
++        goto out;
++
++    ret = dict_set_str(mod_dict, "cluster.data-self-heal", "on");
++    if (ret)
++        goto out;
++
++    ret = dict_set_str(mod_dict, "cluster.metadata-self-heal", "on");
++    if (ret)
++        goto out;
++
++    ret = dict_set_int32(mod_dict, "graph-check", 1);
++    if (ret)
++        goto out;
++
++    ret = dict_set_str(mod_dict, "cluster.entry-self-heal", "on");
++    if (ret)
++        goto out;
++
++    ret = glusterd_volume_svc_check_volfile_identical(
++        "glustershd", mod_dict, volinfo, glusterd_shdsvc_generate_volfile,
++        &identical);
+     if (ret)
+         goto out;
+ 
+@@ -226,8 +540,9 @@ glusterd_shdsvc_reconfigure()
+      * changed, then inform the xlator to reconfigure the options.
+      */
+     identical = _gf_false; /* RESET the FLAG */
+-    ret = glusterd_svc_check_topology_identical(priv->shd_svc.name,
+-                                                build_shd_graph, &identical);
++    ret = glusterd_volume_svc_check_topology_identical(
++        "glustershd", mod_dict, volinfo, glusterd_shdsvc_generate_volfile,
++        &identical);
+     if (ret)
+         goto out;
+ 
+@@ -235,7 +550,7 @@ glusterd_shdsvc_reconfigure()
+      * options to shd volfile, so that shd will be reconfigured.
+      */
+     if (identical) {
+-        ret = glusterd_shdsvc_create_volfile();
++        ret = glusterd_shdsvc_create_volfile(volinfo);
+         if (ret == 0) { /* Only if above PASSES */
+             ret = glusterd_fetchspec_notify(THIS);
+         }
+@@ -243,12 +558,129 @@ glusterd_shdsvc_reconfigure()
+     }
+ manager:
+     /*
+-     * shd volfile's topology has been changed. shd server needs
+-     * to be RESTARTED to ACT on the changed volfile.
++     * shd volfile's topology has been changed. volfile needs
++     * to be RECONFIGURED to ACT on the changed volfile.
+      */
+-    ret = priv->shd_svc.manager(&(priv->shd_svc), NULL, PROC_START_NO_WAIT);
++    ret = svc->manager(svc, volinfo, PROC_START_NO_WAIT);
+ 
+ out:
++    if (volinfo)
++        glusterd_volinfo_unref(volinfo);
++    if (mod_dict)
++        dict_unref(mod_dict);
+     gf_msg_debug(this ? this->name : "glusterd", 0, "Returning %d", ret);
+     return ret;
+ }
++
++int
++glusterd_shdsvc_restart()
++{
++    glusterd_volinfo_t *volinfo = NULL;
++    glusterd_volinfo_t *tmp = NULL;
++    int ret = -1;
++    xlator_t *this = THIS;
++    glusterd_conf_t *conf = NULL;
++    glusterd_svc_t *svc = NULL;
++
++    GF_VALIDATE_OR_GOTO("glusterd", this, out);
++
++    conf = this->private;
++    GF_VALIDATE_OR_GOTO(this->name, conf, out);
++
++    pthread_mutex_lock(&conf->volume_lock);
++    cds_list_for_each_entry_safe(volinfo, tmp, &conf->volumes, vol_list)
++    {
++        glusterd_volinfo_ref(volinfo);
++        pthread_mutex_unlock(&conf->volume_lock);
++        /* Start per volume shd svc */
++        if (volinfo->status == GLUSTERD_STATUS_STARTED) {
++            svc = &(volinfo->shd.svc);
++            ret = svc->manager(svc, volinfo, PROC_START_NO_WAIT);
++            if (ret) {
++                gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_SHD_START_FAIL,
++                       "Couldn't start shd for "
++                       "vol: %s on restart",
++                       volinfo->volname);
++                gf_event(EVENT_SVC_MANAGER_FAILED, "volume=%s;svc_name=%s",
++                         volinfo->volname, svc->name);
++                glusterd_volinfo_unref(volinfo);
++                goto out;
++            }
++        }
++        glusterd_volinfo_unref(volinfo);
++        pthread_mutex_lock(&conf->volume_lock);
++    }
++    pthread_mutex_unlock(&conf->volume_lock);
++out:
++    return ret;
++}
++
++int
++glusterd_shdsvc_stop(glusterd_svc_t *svc, int sig)
++{
++    int ret = -1;
++    glusterd_svc_proc_t *svc_proc = NULL;
++    glusterd_shdsvc_t *shd = NULL;
++    glusterd_volinfo_t *volinfo = NULL;
++    gf_boolean_t empty = _gf_false;
++    glusterd_conf_t *conf = NULL;
++    int pid = -1;
++
++    conf = THIS->private;
++    GF_VALIDATE_OR_GOTO("glusterd", svc, out);
++    svc_proc = svc->svc_proc;
++    GF_VALIDATE_OR_GOTO("glusterd", svc_proc, out);
++    GF_VALIDATE_OR_GOTO("glusterd", conf, out);
++
++    /* Get volinfo->shd from svc object */
++    shd = cds_list_entry(svc, glusterd_shdsvc_t, svc);
++    if (!shd) {
++        gf_msg("glusterd", GF_LOG_ERROR, 0, GD_MSG_SHD_OBJ_GET_FAIL,
++               "Failed to get shd object "
++               "from shd service");
++        return -1;
++    }
++
++    /* Get volinfo from shd */
++    volinfo = cds_list_entry(shd, glusterd_volinfo_t, shd);
++    if (!volinfo) {
++        gf_msg("glusterd", GF_LOG_ERROR, 0, GD_MSG_VOLINFO_GET_FAIL,
++               "Failed to get volinfo from "
++               "from shd");
++        return -1;
++    }
++
++    glusterd_volinfo_ref(volinfo);
++    pthread_mutex_lock(&conf->attach_lock);
++    {
++        gf_is_service_running(svc->proc.pidfile, &pid);
++        cds_list_del_init(&svc->mux_svc);
++        empty = cds_list_empty(&svc_proc->svcs);
++    }
++    pthread_mutex_unlock(&conf->attach_lock);
++    if (empty) {
++        /* Unref will happen when destroying the connection */
++        glusterd_volinfo_ref(volinfo);
++        svc_proc->data = volinfo;
++        ret = glusterd_svc_stop(svc, sig);
++    }
++    if (!empty && pid != -1) {
++        ret = glusterd_detach_svc(svc, volinfo, sig);
++        if (ret)
++            gf_msg(THIS->name, GF_LOG_ERROR, 0, GD_MSG_SVC_STOP_FAIL,
++                   "shd service is failed to detach volume %s from pid %d",
++                   volinfo->volname, glusterd_proc_get_pid(&svc->proc));
++        else
++            gf_msg(THIS->name, GF_LOG_INFO, 0, GD_MSG_SVC_STOP_SUCCESS,
++                   "Shd service is detached for volume %s from pid %d",
++                   volinfo->volname, glusterd_proc_get_pid(&svc->proc));
++    }
++    svc->online = _gf_false;
++    (void)glusterd_unlink_file((char *)svc->proc.pidfile);
++    glusterd_shd_svcproc_cleanup(shd);
++    ret = 0;
++    glusterd_volinfo_unref(volinfo);
++out:
++    gf_msg_debug(THIS->name, 0, "Returning %d", ret);
++    return ret;
++}
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc.h b/xlators/mgmt/glusterd/src/glusterd-shd-svc.h
+index 775a9d4..55b409f 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-shd-svc.h
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc.h
+@@ -12,12 +12,20 @@
+ #define _GLUSTERD_SHD_SVC_H_
+ 
+ #include "glusterd-svc-mgmt.h"
++#include "glusterd.h"
++
++typedef struct glusterd_shdsvc_ glusterd_shdsvc_t;
++struct glusterd_shdsvc_ {
++    glusterd_svc_t svc;
++    gf_boolean_t attached;
++};
+ 
+ void
+ glusterd_shdsvc_build(glusterd_svc_t *svc);
+ 
+ int
+-glusterd_shdsvc_init(glusterd_svc_t *svc);
++glusterd_shdsvc_init(void *data, glusterd_conn_t *mux_conn,
++                     glusterd_svc_proc_t *svc_proc);
+ 
+ int
+ glusterd_shdsvc_manager(glusterd_svc_t *svc, void *data, int flags);
+@@ -27,4 +35,11 @@ glusterd_shdsvc_start(glusterd_svc_t *svc, int flags);
+ 
+ int
+ glusterd_shdsvc_reconfigure();
++
++int
++glusterd_shdsvc_restart();
++
++int
++glusterd_shdsvc_stop(glusterd_svc_t *svc, int sig);
++
+ #endif
+diff --git a/xlators/mgmt/glusterd/src/glusterd-sm.c b/xlators/mgmt/glusterd/src/glusterd-sm.c
+index 54a7bd1..943b1c6 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-sm.c
++++ b/xlators/mgmt/glusterd/src/glusterd-sm.c
+@@ -748,6 +748,16 @@ glusterd_peer_detach_cleanup(glusterd_conf_t *priv)
+                 }
+             }
+ 
++            if (glusterd_is_shd_compatible_volume(volinfo)) {
++                svc = &(volinfo->shd.svc);
++                ret = svc->stop(svc, SIGTERM);
++                if (ret) {
++                    gf_msg(THIS->name, GF_LOG_ERROR, 0, GD_MSG_SVC_STOP_FAIL,
++                           "Failed "
++                           "to stop shd daemon service");
++                }
++            }
++
+             if (glusterd_is_gfproxyd_enabled(volinfo)) {
+                 svc = &(volinfo->gfproxyd.svc);
+                 ret = svc->stop(svc, SIGTERM);
+@@ -775,7 +785,7 @@ glusterd_peer_detach_cleanup(glusterd_conf_t *priv)
+     }
+ 
+     /*Reconfigure all daemon services upon peer detach*/
+-    ret = glusterd_svcs_reconfigure();
++    ret = glusterd_svcs_reconfigure(NULL);
+     if (ret) {
+         gf_msg(THIS->name, GF_LOG_ERROR, 0, GD_MSG_SVC_STOP_FAIL,
+                "Failed to reconfigure all daemon services.");
+diff --git a/xlators/mgmt/glusterd/src/glusterd-snapd-svc.c b/xlators/mgmt/glusterd/src/glusterd-snapd-svc.c
+index 56bab07..1da4076 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-snapd-svc.c
++++ b/xlators/mgmt/glusterd/src/glusterd-snapd-svc.c
+@@ -366,6 +366,7 @@ int
+ glusterd_snapdsvc_restart()
+ {
+     glusterd_volinfo_t *volinfo = NULL;
++    glusterd_volinfo_t *tmp = NULL;
+     int ret = 0;
+     xlator_t *this = THIS;
+     glusterd_conf_t *conf = NULL;
+@@ -376,7 +377,7 @@ glusterd_snapdsvc_restart()
+     conf = this->private;
+     GF_ASSERT(conf);
+ 
+-    cds_list_for_each_entry(volinfo, &conf->volumes, vol_list)
++    cds_list_for_each_entry_safe(volinfo, tmp, &conf->volumes, vol_list)
+     {
+         /* Start per volume snapd svc */
+         if (volinfo->status == GLUSTERD_STATUS_STARTED) {
+diff --git a/xlators/mgmt/glusterd/src/glusterd-statedump.c b/xlators/mgmt/glusterd/src/glusterd-statedump.c
+index f5ecde7..69d4cf4 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-statedump.c
++++ b/xlators/mgmt/glusterd/src/glusterd-statedump.c
+@@ -202,9 +202,6 @@ glusterd_dump_priv(xlator_t *this)
+         gf_proc_dump_build_key(key, "glusterd", "ping-timeout");
+         gf_proc_dump_write(key, "%d", priv->ping_timeout);
+ 
+-        gf_proc_dump_build_key(key, "glusterd", "shd.online");
+-        gf_proc_dump_write(key, "%d", priv->shd_svc.online);
+-
+         gf_proc_dump_build_key(key, "glusterd", "nfs.online");
+         gf_proc_dump_write(key, "%d", priv->nfs_svc.online);
+ 
+diff --git a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+index ca19a75..e42703c 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
++++ b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+@@ -7,6 +7,7 @@
+    later), or the GNU General Public License, version 2 (GPLv2), in all
+    cases as published by the Free Software Foundation.
+ */
++#include <signal.h>
+ 
+ #include <glusterfs/globals.h>
+ #include <glusterfs/run.h>
+@@ -20,12 +21,14 @@
+ #include "glusterd-bitd-svc.h"
+ #include "glusterd-tierd-svc.h"
+ #include "glusterd-tierd-svc-helper.h"
++#include "glusterd-shd-svc-helper.h"
+ #include "glusterd-scrub-svc.h"
+ #include "glusterd-svc-helper.h"
+ #include <glusterfs/syscall.h>
++#include "glusterd-snapshot-utils.h"
+ 
+ int
+-glusterd_svcs_reconfigure()
++glusterd_svcs_reconfigure(glusterd_volinfo_t *volinfo)
+ {
+     int ret = 0;
+     xlator_t *this = THIS;
+@@ -43,9 +46,11 @@ glusterd_svcs_reconfigure()
+         goto out;
+ 
+     svc_name = "self-heald";
+-    ret = glusterd_shdsvc_reconfigure();
+-    if (ret)
+-        goto out;
++    if (volinfo) {
++        ret = glusterd_shdsvc_reconfigure(volinfo);
++        if (ret)
++            goto out;
++    }
+ 
+     if (conf->op_version == GD_OP_VERSION_MIN)
+         goto out;
+@@ -69,7 +74,7 @@ out:
+ }
+ 
+ int
+-glusterd_svcs_stop()
++glusterd_svcs_stop(glusterd_volinfo_t *volinfo)
+ {
+     int ret = 0;
+     xlator_t *this = NULL;
+@@ -85,14 +90,16 @@ glusterd_svcs_stop()
+     if (ret)
+         goto out;
+ 
+-    ret = glusterd_svc_stop(&(priv->shd_svc), SIGTERM);
+-    if (ret)
+-        goto out;
+-
+     ret = glusterd_svc_stop(&(priv->quotad_svc), SIGTERM);
+     if (ret)
+         goto out;
+ 
++    if (volinfo) {
++        ret = glusterd_svc_stop(&(volinfo->shd.svc), PROC_START_NO_WAIT);
++        if (ret)
++            goto out;
++    }
++
+     ret = glusterd_svc_stop(&(priv->bitd_svc), SIGTERM);
+     if (ret)
+         goto out;
+@@ -121,12 +128,6 @@ glusterd_svcs_manager(glusterd_volinfo_t *volinfo)
+     if (ret)
+         goto out;
+ 
+-    ret = conf->shd_svc.manager(&(conf->shd_svc), volinfo, PROC_START_NO_WAIT);
+-    if (ret == -EINVAL)
+-        ret = 0;
+-    if (ret)
+-        goto out;
+-
+     if (conf->op_version == GD_OP_VERSION_MIN)
+         goto out;
+ 
+@@ -143,6 +144,15 @@ glusterd_svcs_manager(glusterd_volinfo_t *volinfo)
+     if (ret)
+         goto out;
+ 
++    if (volinfo) {
++        ret = volinfo->shd.svc.manager(&(volinfo->shd.svc), volinfo,
++                                       PROC_START_NO_WAIT);
++        if (ret == -EINVAL)
++            ret = 0;
++        if (ret)
++            goto out;
++    }
++
+     ret = conf->scrub_svc.manager(&(conf->scrub_svc), NULL, PROC_START_NO_WAIT);
+     if (ret == -EINVAL)
+         ret = 0;
+@@ -269,3 +279,678 @@ out:
+         GF_FREE(tmpvol);
+     return ret;
+ }
++
++int
++glusterd_volume_svc_check_volfile_identical(
++    char *svc_name, dict_t *mode_dict, glusterd_volinfo_t *volinfo,
++    glusterd_vol_graph_builder_t builder, gf_boolean_t *identical)
++{
++    char orgvol[PATH_MAX] = {
++        0,
++    };
++    char *tmpvol = NULL;
++    xlator_t *this = NULL;
++    int ret = -1;
++    int need_unlink = 0;
++    int tmp_fd = -1;
++
++    this = THIS;
++
++    GF_VALIDATE_OR_GOTO(this->name, this, out);
++    GF_VALIDATE_OR_GOTO(this->name, identical, out);
++
++    /* This builds volfile for volume level dameons */
++    glusterd_volume_svc_build_volfile_path(svc_name, volinfo, orgvol,
++                                           sizeof(orgvol));
++
++    ret = gf_asprintf(&tmpvol, "/tmp/g%s-XXXXXX", svc_name);
++    if (ret < 0) {
++        goto out;
++    }
++
++    /* coverity[secure_temp] mkstemp uses 0600 as the mode and is safe */
++    tmp_fd = mkstemp(tmpvol);
++    if (tmp_fd < 0) {
++        gf_msg(this->name, GF_LOG_WARNING, errno, GD_MSG_FILE_OP_FAILED,
++               "Unable to create temp file"
++               " %s:(%s)",
++               tmpvol, strerror(errno));
++        ret = -1;
++        goto out;
++    }
++
++    need_unlink = 1;
++
++    ret = builder(volinfo, tmpvol, mode_dict);
++    if (ret)
++        goto out;
++
++    ret = glusterd_check_files_identical(orgvol, tmpvol, identical);
++out:
++    if (need_unlink)
++        sys_unlink(tmpvol);
++
++    if (tmpvol != NULL)
++        GF_FREE(tmpvol);
++
++    if (tmp_fd >= 0)
++        sys_close(tmp_fd);
++
++    return ret;
++}
++
++int
++glusterd_volume_svc_check_topology_identical(
++    char *svc_name, dict_t *mode_dict, glusterd_volinfo_t *volinfo,
++    glusterd_vol_graph_builder_t builder, gf_boolean_t *identical)
++{
++    char orgvol[PATH_MAX] = {
++        0,
++    };
++    char *tmpvol = NULL;
++    glusterd_conf_t *conf = NULL;
++    xlator_t *this = THIS;
++    int ret = -1;
++    int tmpclean = 0;
++    int tmpfd = -1;
++
++    if ((!identical) || (!this) || (!this->private))
++        goto out;
++
++    conf = this->private;
++    GF_VALIDATE_OR_GOTO(this->name, conf, out);
++
++    /* This builds volfile for volume level dameons */
++    glusterd_volume_svc_build_volfile_path(svc_name, volinfo, orgvol,
++                                           sizeof(orgvol));
++    /* Create the temporary volfile */
++    ret = gf_asprintf(&tmpvol, "/tmp/g%s-XXXXXX", svc_name);
++    if (ret < 0) {
++        goto out;
++    }
++
++    /* coverity[secure_temp] mkstemp uses 0600 as the mode and is safe */
++    tmpfd = mkstemp(tmpvol);
++    if (tmpfd < 0) {
++        gf_msg(this->name, GF_LOG_WARNING, errno, GD_MSG_FILE_OP_FAILED,
++               "Unable to create temp file"
++               " %s:(%s)",
++               tmpvol, strerror(errno));
++        ret = -1;
++        goto out;
++    }
++
++    tmpclean = 1; /* SET the flag to unlink() tmpfile */
++
++    ret = builder(volinfo, tmpvol, mode_dict);
++    if (ret)
++        goto out;
++
++    /* Compare the topology of volfiles */
++    ret = glusterd_check_topology_identical(orgvol, tmpvol, identical);
++out:
++    if (tmpfd >= 0)
++        sys_close(tmpfd);
++    if (tmpclean)
++        sys_unlink(tmpvol);
++    if (tmpvol != NULL)
++        GF_FREE(tmpvol);
++    return ret;
++}
++
++void *
++__gf_find_compatible_svc(gd_node_type daemon)
++{
++    glusterd_svc_proc_t *svc_proc = NULL;
++    glusterd_svc_proc_t *return_proc = NULL;
++    glusterd_svc_t *parent_svc = NULL;
++    struct cds_list_head *svc_procs = NULL;
++    glusterd_conf_t *conf = NULL;
++    int pid = -1;
++
++    conf = THIS->private;
++    GF_VALIDATE_OR_GOTO("glusterd", conf, out);
++
++    if (daemon == GD_NODE_SHD) {
++        svc_procs = &conf->shd_procs;
++        if (!svc_procs)
++            goto out;
++    }
++
++    cds_list_for_each_entry(svc_proc, svc_procs, svc_proc_list)
++    {
++        parent_svc = cds_list_entry(svc_proc->svcs.next, glusterd_svc_t,
++                                    mux_svc);
++        if (!return_proc)
++            return_proc = svc_proc;
++
++        /* If there is an  already running shd daemons, select it. Otehrwise
++         * select the first one.
++         */
++        if (parent_svc && gf_is_service_running(parent_svc->proc.pidfile, &pid))
++            return (void *)svc_proc;
++        /*
++         * Logic to select one process goes here. Currently there is only one
++         * shd_proc. So selecting the first one;
++         */
++    }
++out:
++    return return_proc;
++}
++
++glusterd_svc_proc_t *
++glusterd_svcprocess_new()
++{
++    glusterd_svc_proc_t *new_svcprocess = NULL;
++
++    new_svcprocess = GF_CALLOC(1, sizeof(*new_svcprocess),
++                               gf_gld_mt_glusterd_svc_proc_t);
++
++    if (!new_svcprocess)
++        return NULL;
++
++    CDS_INIT_LIST_HEAD(&new_svcprocess->svc_proc_list);
++    CDS_INIT_LIST_HEAD(&new_svcprocess->svcs);
++    new_svcprocess->notify = glusterd_muxsvc_common_rpc_notify;
++    return new_svcprocess;
++}
++
++int
++glusterd_shd_svc_mux_init(glusterd_volinfo_t *volinfo, glusterd_svc_t *svc)
++{
++    int ret = -1;
++    glusterd_svc_proc_t *mux_proc = NULL;
++    glusterd_conn_t *mux_conn = NULL;
++    glusterd_conf_t *conf = NULL;
++    glusterd_svc_t *parent_svc = NULL;
++    int pid = -1;
++
++    GF_VALIDATE_OR_GOTO("glusterd", svc, out);
++    GF_VALIDATE_OR_GOTO("glusterd", volinfo, out);
++    conf = THIS->private;
++    GF_VALIDATE_OR_GOTO("glusterd", conf, out);
++    GF_VALIDATE_OR_GOTO("glusterd", svc, out);
++
++    pthread_mutex_lock(&conf->attach_lock);
++    {
++        if (!svc->inited) {
++            if (gf_is_service_running(svc->proc.pidfile, &pid)) {
++                /* Just connect is required, but we don't know what happens
++                 * during the disconnect. So better to reattach.
++                 */
++                mux_proc = __gf_find_compatible_svc_from_pid(GD_NODE_SHD, pid);
++            }
++
++            if (!mux_proc) {
++                if (pid != -1 && sys_access(svc->proc.pidfile, R_OK) == 0) {
++                    /* stale pid file, unlink it. */
++                    kill(pid, SIGTERM);
++                    sys_unlink(svc->proc.pidfile);
++                }
++                mux_proc = __gf_find_compatible_svc(GD_NODE_SHD);
++            }
++            if (mux_proc) {
++                /* Take first entry from the process */
++                parent_svc = cds_list_entry(mux_proc->svcs.next, glusterd_svc_t,
++                                            mux_svc);
++                sys_link(parent_svc->proc.pidfile, svc->proc.pidfile);
++                mux_conn = &parent_svc->conn;
++                if (volinfo)
++                    volinfo->shd.attached = _gf_true;
++            } else {
++                mux_proc = glusterd_svcprocess_new();
++                if (!mux_proc) {
++                    ret = -1;
++                    goto unlock;
++                }
++                cds_list_add_tail(&mux_proc->svc_proc_list, &conf->shd_procs);
++            }
++            svc->svc_proc = mux_proc;
++            cds_list_del_init(&svc->mux_svc);
++            cds_list_add_tail(&svc->mux_svc, &mux_proc->svcs);
++            ret = glusterd_shdsvc_init(volinfo, mux_conn, mux_proc);
++            if (ret) {
++                pthread_mutex_unlock(&conf->attach_lock);
++                gf_msg(THIS->name, GF_LOG_ERROR, 0, GD_MSG_FAILED_INIT_SHDSVC,
++                       "Failed to init shd "
++                       "service");
++                goto out;
++            }
++            gf_msg_debug(THIS->name, 0, "shd service initialized");
++            svc->inited = _gf_true;
++        }
++        ret = 0;
++    }
++unlock:
++    pthread_mutex_unlock(&conf->attach_lock);
++out:
++    return ret;
++}
++
++void *
++__gf_find_compatible_svc_from_pid(gd_node_type daemon, pid_t pid)
++{
++    glusterd_svc_proc_t *svc_proc = NULL;
++    struct cds_list_head *svc_procs = NULL;
++    glusterd_svc_t *svc = NULL;
++    pid_t mux_pid = -1;
++    glusterd_conf_t *conf = NULL;
++
++    conf = THIS->private;
++    if (!conf)
++        return NULL;
++
++    if (daemon == GD_NODE_SHD) {
++        svc_procs = &conf->shd_procs;
++        if (!svc_proc)
++            return NULL;
++    } /* Can be moved to switch when mux is implemented for other daemon; */
++
++    cds_list_for_each_entry(svc_proc, svc_procs, svc_proc_list)
++    {
++        cds_list_for_each_entry(svc, &svc_proc->svcs, mux_svc)
++        {
++            if (gf_is_service_running(svc->proc.pidfile, &mux_pid)) {
++                if (mux_pid == pid) {
++                    /*TODO
++                     * inefficient loop, but at the moment, there is only
++                     * one shd.
++                     */
++                    return svc_proc;
++                }
++            }
++        }
++    }
++    return NULL;
++}
++
++static int32_t
++my_callback(struct rpc_req *req, struct iovec *iov, int count, void *v_frame)
++{
++    call_frame_t *frame = v_frame;
++    xlator_t *this = NULL;
++    glusterd_conf_t *conf = NULL;
++
++    GF_VALIDATE_OR_GOTO("glusterd", frame, out);
++    this = frame->this;
++    GF_VALIDATE_OR_GOTO("glusterd", this, out);
++    conf = this->private;
++    GF_VALIDATE_OR_GOTO(this->name, conf, out);
++
++    GF_ATOMIC_DEC(conf->blockers);
++
++    STACK_DESTROY(frame->root);
++out:
++    return 0;
++}
++
++static int32_t
++glusterd_svc_attach_cbk(struct rpc_req *req, struct iovec *iov, int count,
++                        void *v_frame)
++{
++    call_frame_t *frame = v_frame;
++    glusterd_volinfo_t *volinfo = NULL;
++    glusterd_shdsvc_t *shd = NULL;
++    glusterd_svc_t *svc = frame->cookie;
++    glusterd_svc_t *parent_svc = NULL;
++    glusterd_svc_proc_t *mux_proc = NULL;
++    glusterd_conf_t *conf = NULL;
++    int *flag = (int *)frame->local;
++    xlator_t *this = THIS;
++    int pid = -1;
++    int ret = -1;
++    gf_getspec_rsp rsp = {
++        0,
++    };
++
++    GF_VALIDATE_OR_GOTO("glusterd", this, out);
++    conf = this->private;
++    GF_VALIDATE_OR_GOTO("glusterd", conf, out);
++    GF_VALIDATE_OR_GOTO("glusterd", frame, out);
++    GF_VALIDATE_OR_GOTO("glusterd", svc, out);
++
++    frame->local = NULL;
++    frame->cookie = NULL;
++
++    if (!strcmp(svc->name, "glustershd")) {
++        /* Get volinfo->shd from svc object */
++        shd = cds_list_entry(svc, glusterd_shdsvc_t, svc);
++        if (!shd) {
++            gf_msg("glusterd", GF_LOG_ERROR, 0, GD_MSG_SHD_OBJ_GET_FAIL,
++                   "Failed to get shd object "
++                   "from shd service");
++            goto out;
++        }
++
++        /* Get volinfo from shd */
++        volinfo = cds_list_entry(shd, glusterd_volinfo_t, shd);
++        if (!volinfo) {
++            gf_msg("glusterd", GF_LOG_ERROR, 0, GD_MSG_VOLINFO_GET_FAIL,
++                   "Failed to get volinfo from "
++                   "from shd");
++            goto out;
++        }
++    }
++
++    if (!iov) {
++        gf_msg(frame->this->name, GF_LOG_ERROR, 0, GD_MSG_REQ_DECODE_FAIL,
++               "iov is NULL");
++        ret = -1;
++        goto out;
++    }
++
++    ret = xdr_to_generic(*iov, &rsp, (xdrproc_t)xdr_gf_getspec_rsp);
++    if (ret < 0) {
++        gf_msg(frame->this->name, GF_LOG_ERROR, 0, GD_MSG_REQ_DECODE_FAIL,
++               "XDR decoding error");
++        ret = -1;
++        goto out;
++    }
++
++    if (rsp.op_ret == 0) {
++        pthread_mutex_lock(&conf->attach_lock);
++        {
++            if (!strcmp(svc->name, "glustershd")) {
++                mux_proc = svc->svc_proc;
++                if (mux_proc &&
++                    !gf_is_service_running(svc->proc.pidfile, &pid)) {
++                    /*
++                     * When svc's are restarting, there is a chance that the
++                     * attached svc might not have updated it's pid. Because
++                     * it was at connection stage. So in that case, we need
++                     * to retry the pid file copy.
++                     */
++                    parent_svc = cds_list_entry(mux_proc->svcs.next,
++                                                glusterd_svc_t, mux_svc);
++                    if (parent_svc)
++                        sys_link(parent_svc->proc.pidfile, svc->proc.pidfile);
++                }
++            }
++            svc->online = _gf_true;
++        }
++        pthread_mutex_unlock(&conf->attach_lock);
++        gf_msg(this->name, GF_LOG_INFO, 0, GD_MSG_SVC_ATTACH_FAIL,
++               "svc %s of volume %s attached successfully to pid %d", svc->name,
++               volinfo->volname, glusterd_proc_get_pid(&svc->proc));
++    } else {
++        gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_SVC_ATTACH_FAIL,
++               "svc %s of volume %s failed to "
++               "attach to pid %d. Starting a new process",
++               svc->name, volinfo->volname, glusterd_proc_get_pid(&svc->proc));
++        if (!strcmp(svc->name, "glustershd")) {
++            glusterd_recover_shd_attach_failure(volinfo, svc, *flag);
++        }
++    }
++out:
++    if (flag) {
++        GF_FREE(flag);
++    }
++    GF_ATOMIC_DEC(conf->blockers);
++    STACK_DESTROY(frame->root);
++    return 0;
++}
++
++extern size_t
++build_volfile_path(char *volume_id, char *path, size_t path_len,
++                   char *trusted_str);
++
++int
++__glusterd_send_svc_configure_req(glusterd_svc_t *svc, int flags,
++                                  struct rpc_clnt *rpc, char *volfile_id,
++                                  int op)
++{
++    int ret = -1;
++    struct iobuf *iobuf = NULL;
++    struct iobref *iobref = NULL;
++    struct iovec iov = {
++        0,
++    };
++    char path[PATH_MAX] = {
++        '\0',
++    };
++    struct stat stbuf = {
++        0,
++    };
++    int32_t spec_fd = -1;
++    size_t file_len = -1;
++    char *volfile_content = NULL;
++    ssize_t req_size = 0;
++    call_frame_t *frame = NULL;
++    gd1_mgmt_brick_op_req brick_req;
++    void *req = &brick_req;
++    void *errlbl = &&err;
++    struct rpc_clnt_connection *conn;
++    xlator_t *this = THIS;
++    glusterd_conf_t *conf = THIS->private;
++    extern struct rpc_clnt_program gd_brick_prog;
++    fop_cbk_fn_t cbkfn = my_callback;
++
++    if (!rpc) {
++        gf_msg("glusterd", GF_LOG_ERROR, 0, GD_MSG_PARAM_NULL,
++               "called with null rpc");
++        return -1;
++    }
++
++    conn = &rpc->conn;
++    if (!conn->connected || conn->disconnected) {
++        gf_msg(this->name, GF_LOG_INFO, 0, GD_MSG_CONNECT_RETURNED,
++               "not connected yet");
++        return -1;
++    }
++
++    brick_req.op = op;
++    brick_req.name = volfile_id;
++    brick_req.input.input_val = NULL;
++    brick_req.input.input_len = 0;
++
++    frame = create_frame(this, this->ctx->pool);
++    if (!frame) {
++        goto *errlbl;
++    }
++
++    if (op == GLUSTERD_SVC_ATTACH) {
++        (void)build_volfile_path(volfile_id, path, sizeof(path), NULL);
++
++        ret = sys_stat(path, &stbuf);
++        if (ret < 0) {
++            gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_SVC_ATTACH_FAIL,
++                   "Unable to stat %s (%s)", path, strerror(errno));
++            ret = -EINVAL;
++            goto *errlbl;
++        }
++
++        file_len = stbuf.st_size;
++        volfile_content = GF_MALLOC(file_len + 1, gf_common_mt_char);
++        if (!volfile_content) {
++            ret = -ENOMEM;
++            goto *errlbl;
++        }
++        spec_fd = open(path, O_RDONLY);
++        if (spec_fd < 0) {
++            gf_msg(THIS->name, GF_LOG_WARNING, 0, GD_MSG_SVC_ATTACH_FAIL,
++                   "failed to read volfile %s", path);
++            ret = -EIO;
++            goto *errlbl;
++        }
++        ret = sys_read(spec_fd, volfile_content, file_len);
++        if (ret == file_len) {
++            brick_req.input.input_val = volfile_content;
++            brick_req.input.input_len = file_len;
++        } else {
++            gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_SVC_ATTACH_FAIL,
++                   "read failed on path %s. File size=%" GF_PRI_SIZET
++                   "read size=%d",
++                   path, file_len, ret);
++            ret = -EIO;
++            goto *errlbl;
++        }
++
++        frame->cookie = svc;
++        frame->local = GF_CALLOC(1, sizeof(int), gf_gld_mt_int);
++        *((int *)frame->local) = flags;
++        cbkfn = glusterd_svc_attach_cbk;
++    }
++
++    req_size = xdr_sizeof((xdrproc_t)xdr_gd1_mgmt_brick_op_req, req);
++    iobuf = iobuf_get2(rpc->ctx->iobuf_pool, req_size);
++    if (!iobuf) {
++        goto *errlbl;
++    }
++    errlbl = &&maybe_free_iobuf;
++
++    iov.iov_base = iobuf->ptr;
++    iov.iov_len = iobuf_pagesize(iobuf);
++
++    iobref = iobref_new();
++    if (!iobref) {
++        goto *errlbl;
++    }
++    errlbl = &&free_iobref;
++
++    iobref_add(iobref, iobuf);
++    /*
++     * Drop our reference to the iobuf.  The iobref should already have
++     * one after iobref_add, so when we unref that we'll free the iobuf as
++     * well.  This allows us to pass just the iobref as frame->local.
++     */
++    iobuf_unref(iobuf);
++    /* Set the pointer to null so we don't free it on a later error. */
++    iobuf = NULL;
++
++    /* Create the xdr payload */
++    ret = xdr_serialize_generic(iov, req, (xdrproc_t)xdr_gd1_mgmt_brick_op_req);
++    if (ret == -1) {
++        goto *errlbl;
++    }
++    iov.iov_len = ret;
++
++    /* Send the msg */
++    GF_ATOMIC_INC(conf->blockers);
++    ret = rpc_clnt_submit(rpc, &gd_brick_prog, op, cbkfn, &iov, 1, NULL, 0,
++                          iobref, frame, NULL, 0, NULL, 0, NULL);
++    GF_FREE(volfile_content);
++    if (spec_fd >= 0)
++        sys_close(spec_fd);
++    return ret;
++
++free_iobref:
++    iobref_unref(iobref);
++maybe_free_iobuf:
++    if (iobuf) {
++        iobuf_unref(iobuf);
++    }
++err:
++    GF_FREE(volfile_content);
++    if (spec_fd >= 0)
++        sys_close(spec_fd);
++    if (frame)
++        STACK_DESTROY(frame->root);
++    return -1;
++}
++
++int
++glusterd_attach_svc(glusterd_svc_t *svc, glusterd_volinfo_t *volinfo, int flags)
++{
++    glusterd_conf_t *conf = THIS->private;
++    int ret = -1;
++    int tries;
++    rpc_clnt_t *rpc = NULL;
++
++    GF_VALIDATE_OR_GOTO("glusterd", conf, out);
++    GF_VALIDATE_OR_GOTO("glusterd", svc, out);
++    GF_VALIDATE_OR_GOTO("glusterd", volinfo, out);
++
++    gf_msg("glusterd", GF_LOG_INFO, 0, GD_MSG_ATTACH_INFO,
++           "adding svc %s (volume=%s) to existing "
++           "process with pid %d",
++           svc->name, volinfo->volname, glusterd_proc_get_pid(&svc->proc));
++
++    rpc = rpc_clnt_ref(svc->conn.rpc);
++    for (tries = 15; tries > 0; --tries) {
++        if (rpc) {
++            pthread_mutex_lock(&conf->attach_lock);
++            {
++                ret = __glusterd_send_svc_configure_req(
++                    svc, flags, rpc, svc->proc.volfileid, GLUSTERD_SVC_ATTACH);
++            }
++            pthread_mutex_unlock(&conf->attach_lock);
++            if (!ret) {
++                volinfo->shd.attached = _gf_true;
++                goto out;
++            }
++        }
++        /*
++         * It might not actually be safe to manipulate the lock
++         * like this, but if we don't then the connection can
++         * never actually complete and retries are useless.
++         * Unfortunately, all of the alternatives (e.g. doing
++         * all of this in a separate thread) are much more
++         * complicated and risky.
++         * TBD: see if there's a better way
++         */
++        synclock_unlock(&conf->big_lock);
++        sleep(1);
++        synclock_lock(&conf->big_lock);
++    }
++    ret = -1;
++    gf_msg("glusterd", GF_LOG_WARNING, 0, GD_MSG_SVC_ATTACH_FAIL,
++           "attach failed for %s(volume=%s)", svc->name, volinfo->volname);
++out:
++    if (rpc)
++        rpc_clnt_unref(rpc);
++    return ret;
++}
++
++int
++glusterd_detach_svc(glusterd_svc_t *svc, glusterd_volinfo_t *volinfo, int sig)
++{
++    glusterd_conf_t *conf = THIS->private;
++    int ret = -1;
++    int tries;
++    rpc_clnt_t *rpc = NULL;
++
++    GF_VALIDATE_OR_GOTO(THIS->name, conf, out);
++    GF_VALIDATE_OR_GOTO(THIS->name, svc, out);
++    GF_VALIDATE_OR_GOTO(THIS->name, volinfo, out);
++
++    gf_msg(THIS->name, GF_LOG_INFO, 0, GD_MSG_DETACH_INFO,
++           "removing svc %s (volume=%s) from existing "
++           "process with pid %d",
++           svc->name, volinfo->volname, glusterd_proc_get_pid(&svc->proc));
++
++    rpc = rpc_clnt_ref(svc->conn.rpc);
++    for (tries = 15; tries > 0; --tries) {
++        if (rpc) {
++            /*For detach there is no flags, and we are not using sig.*/
++            pthread_mutex_lock(&conf->attach_lock);
++            {
++                ret = __glusterd_send_svc_configure_req(svc, 0, svc->conn.rpc,
++                                                        svc->proc.volfileid,
++                                                        GLUSTERD_SVC_DETACH);
++            }
++            pthread_mutex_unlock(&conf->attach_lock);
++            if (!ret) {
++                goto out;
++            }
++        }
++        /*
++         * It might not actually be safe to manipulate the lock
++         * like this, but if we don't then the connection can
++         * never actually complete and retries are useless.
++         * Unfortunately, all of the alternatives (e.g. doing
++         * all of this in a separate thread) are much more
++         * complicated and risky.
++         * TBD: see if there's a better way
++         */
++        synclock_unlock(&conf->big_lock);
++        sleep(1);
++        synclock_lock(&conf->big_lock);
++    }
++    ret = -1;
++    gf_msg("glusterd", GF_LOG_WARNING, 0, GD_MSG_SVC_DETACH_FAIL,
++           "detach failed for %s(volume=%s)", svc->name, volinfo->volname);
++out:
++    if (rpc)
++        rpc_clnt_unref(rpc);
++    return ret;
++}
+diff --git a/xlators/mgmt/glusterd/src/glusterd-svc-helper.h b/xlators/mgmt/glusterd/src/glusterd-svc-helper.h
+index cc98e78..5def246 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-svc-helper.h
++++ b/xlators/mgmt/glusterd/src/glusterd-svc-helper.h
+@@ -16,10 +16,10 @@
+ #include "glusterd-volgen.h"
+ 
+ int
+-glusterd_svcs_reconfigure();
++glusterd_svcs_reconfigure(glusterd_volinfo_t *volinfo);
+ 
+ int
+-glusterd_svcs_stop();
++glusterd_svcs_stop(glusterd_volinfo_t *vol);
+ 
+ int
+ glusterd_svcs_manager(glusterd_volinfo_t *volinfo);
+@@ -41,5 +41,41 @@ int
+ glusterd_svc_check_tier_topology_identical(char *svc_name,
+                                            glusterd_volinfo_t *volinfo,
+                                            gf_boolean_t *identical);
++int
++glusterd_volume_svc_check_volfile_identical(char *svc_name, dict_t *mode_dict,
++                                            glusterd_volinfo_t *volinfo,
++                                            glusterd_vol_graph_builder_t,
++                                            gf_boolean_t *identical);
++int
++glusterd_volume_svc_check_topology_identical(char *svc_name, dict_t *mode_dict,
++                                             glusterd_volinfo_t *volinfo,
++                                             glusterd_vol_graph_builder_t,
++                                             gf_boolean_t *identical);
++void
++glusterd_volume_svc_build_volfile_path(char *server, glusterd_volinfo_t *vol,
++                                       char *volfile, size_t len);
++void *
++__gf_find_compatible_svc(gd_node_type daemon);
++
++glusterd_svc_proc_t *
++glusterd_svcprocess_new();
++
++int
++glusterd_shd_svc_mux_init(glusterd_volinfo_t *volinfo, glusterd_svc_t *svc);
++
++void *
++__gf_find_compatible_svc_from_pid(gd_node_type daemon, pid_t pid);
++
++int
++glusterd_attach_svc(glusterd_svc_t *svc, glusterd_volinfo_t *volinfo,
++                    int flags);
++
++int
++glusterd_detach_svc(glusterd_svc_t *svc, glusterd_volinfo_t *volinfo, int sig);
++
++int
++__glusterd_send_svc_configure_req(glusterd_svc_t *svc, int flag,
++                                  struct rpc_clnt *rpc, char *volfile_id,
++                                  int op);
+ 
+ #endif
+diff --git a/xlators/mgmt/glusterd/src/glusterd-svc-mgmt.c b/xlators/mgmt/glusterd/src/glusterd-svc-mgmt.c
+index 4cd4cea..f32dafc 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-svc-mgmt.c
++++ b/xlators/mgmt/glusterd/src/glusterd-svc-mgmt.c
+@@ -18,6 +18,7 @@
+ #include "glusterd-conn-mgmt.h"
+ #include "glusterd-messages.h"
+ #include <glusterfs/syscall.h>
++#include "glusterd-shd-svc-helper.h"
+ 
+ int
+ glusterd_svc_create_rundir(char *rundir)
+@@ -167,68 +168,75 @@ glusterd_svc_start(glusterd_svc_t *svc, int flags, dict_t *cmdline)
+     GF_ASSERT(this);
+ 
+     priv = this->private;
+-    GF_ASSERT(priv);
++    GF_VALIDATE_OR_GOTO("glusterd", priv, out);
++    GF_VALIDATE_OR_GOTO("glusterd", svc, out);
++
++    pthread_mutex_lock(&priv->attach_lock);
++    {
++        if (glusterd_proc_is_running(&(svc->proc))) {
++            ret = 0;
++            goto unlock;
++        }
+ 
+-    if (glusterd_proc_is_running(&(svc->proc))) {
+-        ret = 0;
+-        goto out;
+-    }
++        ret = sys_access(svc->proc.volfile, F_OK);
++        if (ret) {
++            gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_VOLFILE_NOT_FOUND,
++                   "Volfile %s is not present", svc->proc.volfile);
++            goto unlock;
++        }
+ 
+-    ret = sys_access(svc->proc.volfile, F_OK);
+-    if (ret) {
+-        gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_VOLFILE_NOT_FOUND,
+-               "Volfile %s is not present", svc->proc.volfile);
+-        goto out;
+-    }
++        runinit(&runner);
+ 
+-    runinit(&runner);
++        if (this->ctx->cmd_args.valgrind) {
++            len = snprintf(valgrind_logfile, PATH_MAX, "%s/valgrind-%s.log",
++                           svc->proc.logfile, svc->name);
++            if ((len < 0) || (len >= PATH_MAX)) {
++                ret = -1;
++                goto unlock;
++            }
+ 
+-    if (this->ctx->cmd_args.valgrind) {
+-        len = snprintf(valgrind_logfile, PATH_MAX, "%s/valgrind-%s.log",
+-                       svc->proc.logfile, svc->name);
+-        if ((len < 0) || (len >= PATH_MAX)) {
+-            ret = -1;
+-            goto out;
++            runner_add_args(&runner, "valgrind", "--leak-check=full",
++                            "--trace-children=yes", "--track-origins=yes",
++                            NULL);
++            runner_argprintf(&runner, "--log-file=%s", valgrind_logfile);
+         }
+ 
+-        runner_add_args(&runner, "valgrind", "--leak-check=full",
+-                        "--trace-children=yes", "--track-origins=yes", NULL);
+-        runner_argprintf(&runner, "--log-file=%s", valgrind_logfile);
+-    }
+-
+-    runner_add_args(&runner, SBIN_DIR "/glusterfs", "-s",
+-                    svc->proc.volfileserver, "--volfile-id",
+-                    svc->proc.volfileid, "-p", svc->proc.pidfile, "-l",
+-                    svc->proc.logfile, "-S", svc->conn.sockpath, NULL);
++        runner_add_args(&runner, SBIN_DIR "/glusterfs", "-s",
++                        svc->proc.volfileserver, "--volfile-id",
++                        svc->proc.volfileid, "-p", svc->proc.pidfile, "-l",
++                        svc->proc.logfile, "-S", svc->conn.sockpath, NULL);
+ 
+-    if (dict_get_strn(priv->opts, GLUSTERD_LOCALTIME_LOGGING_KEY,
+-                      SLEN(GLUSTERD_LOCALTIME_LOGGING_KEY),
+-                      &localtime_logging) == 0) {
+-        if (strcmp(localtime_logging, "enable") == 0)
+-            runner_add_arg(&runner, "--localtime-logging");
+-    }
+-    if (dict_get_strn(priv->opts, GLUSTERD_DAEMON_LOG_LEVEL_KEY,
+-                      SLEN(GLUSTERD_DAEMON_LOG_LEVEL_KEY), &log_level) == 0) {
+-        snprintf(daemon_log_level, 30, "--log-level=%s", log_level);
+-        runner_add_arg(&runner, daemon_log_level);
+-    }
++        if (dict_get_strn(priv->opts, GLUSTERD_LOCALTIME_LOGGING_KEY,
++                          SLEN(GLUSTERD_LOCALTIME_LOGGING_KEY),
++                          &localtime_logging) == 0) {
++            if (strcmp(localtime_logging, "enable") == 0)
++                runner_add_arg(&runner, "--localtime-logging");
++        }
++        if (dict_get_strn(priv->opts, GLUSTERD_DAEMON_LOG_LEVEL_KEY,
++                          SLEN(GLUSTERD_DAEMON_LOG_LEVEL_KEY),
++                          &log_level) == 0) {
++            snprintf(daemon_log_level, 30, "--log-level=%s", log_level);
++            runner_add_arg(&runner, daemon_log_level);
++        }
+ 
+-    if (cmdline)
+-        dict_foreach(cmdline, svc_add_args, (void *)&runner);
++        if (cmdline)
++            dict_foreach(cmdline, svc_add_args, (void *)&runner);
+ 
+-    gf_msg(this->name, GF_LOG_INFO, 0, GD_MSG_SVC_START_SUCCESS,
+-           "Starting %s service", svc->name);
++        gf_msg(this->name, GF_LOG_INFO, 0, GD_MSG_SVC_START_SUCCESS,
++               "Starting %s service", svc->name);
+ 
+-    if (flags == PROC_START_NO_WAIT) {
+-        ret = runner_run_nowait(&runner);
+-    } else {
+-        synclock_unlock(&priv->big_lock);
+-        {
+-            ret = runner_run(&runner);
++        if (flags == PROC_START_NO_WAIT) {
++            ret = runner_run_nowait(&runner);
++        } else {
++            synclock_unlock(&priv->big_lock);
++            {
++                ret = runner_run(&runner);
++            }
++            synclock_lock(&priv->big_lock);
+         }
+-        synclock_lock(&priv->big_lock);
+     }
+-
++unlock:
++    pthread_mutex_unlock(&priv->attach_lock);
+ out:
+     gf_msg_debug(this->name, 0, "Returning %d", ret);
+ 
+@@ -281,7 +289,8 @@ glusterd_svc_build_volfile_path(char *server, char *workdir, char *volfile,
+ 
+     glusterd_svc_build_svcdir(server, workdir, dir, sizeof(dir));
+ 
+-    if (!strcmp(server, "quotad")) /*quotad has different volfile name*/
++    if (!strcmp(server, "quotad"))
++        /*quotad has different volfile name*/
+         snprintf(volfile, len, "%s/%s.vol", dir, server);
+     else
+         snprintf(volfile, len, "%s/%s-server.vol", dir, server);
+@@ -366,3 +375,138 @@ glusterd_svc_common_rpc_notify(glusterd_conn_t *conn, rpc_clnt_event_t event)
+ 
+     return ret;
+ }
++
++void
++glusterd_volume_svc_build_volfile_path(char *server, glusterd_volinfo_t *vol,
++                                       char *volfile, size_t len)
++{
++    GF_ASSERT(len == PATH_MAX);
++
++    if (!strcmp(server, "glustershd")) {
++        glusterd_svc_build_shd_volfile_path(vol, volfile, len);
++    }
++}
++
++int
++glusterd_muxsvc_common_rpc_notify(glusterd_svc_proc_t *mux_proc,
++                                  rpc_clnt_event_t event)
++{
++    int ret = 0;
++    glusterd_svc_t *svc = NULL;
++    glusterd_svc_t *tmp = NULL;
++    xlator_t *this = NULL;
++    gf_boolean_t need_logging = _gf_false;
++
++    this = THIS;
++    GF_ASSERT(this);
++
++    if (!mux_proc) {
++        gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_SVC_GET_FAIL,
++               "Failed to get the svc proc data");
++        return -1;
++    }
++
++    /* Currently this function was used for shd svc, if this function is
++     * using for another svc, change ths glustershd reference. We can get
++     * the svc name from any of the attached svc's
++     */
++    switch (event) {
++        case RPC_CLNT_CONNECT:
++            gf_msg_debug(this->name, 0,
++                         "glustershd has connected with glusterd.");
++            gf_event(EVENT_SVC_CONNECTED, "svc_name=glustershd");
++            cds_list_for_each_entry_safe(svc, tmp, &mux_proc->svcs, mux_svc)
++            {
++                if (svc->online)
++                    continue;
++                svc->online = _gf_true;
++            }
++            break;
++
++        case RPC_CLNT_DISCONNECT:
++            cds_list_for_each_entry_safe(svc, tmp, &mux_proc->svcs, mux_svc)
++            {
++                if (svc->online) {
++                    if (!need_logging)
++                        need_logging = _gf_true;
++                    svc->online = _gf_false;
++                }
++            }
++            if (need_logging) {
++                gf_msg(this->name, GF_LOG_INFO, 0, GD_MSG_NODE_DISCONNECTED,
++                       "glustershd has disconnected from glusterd.");
++                gf_event(EVENT_SVC_DISCONNECTED, "svc_name=glustershd");
++            }
++            break;
++
++        default:
++            gf_msg_trace(this->name, 0, "got some other RPC event %d", event);
++            break;
++    }
++
++    return ret;
++}
++
++int
++glusterd_muxsvc_conn_init(glusterd_conn_t *conn, glusterd_svc_proc_t *mux_proc,
++                          char *sockpath, int frame_timeout,
++                          glusterd_muxsvc_conn_notify_t notify)
++{
++    int ret = -1;
++    dict_t *options = NULL;
++    struct rpc_clnt *rpc = NULL;
++    xlator_t *this = THIS;
++    glusterd_svc_t *svc = NULL;
++
++    options = dict_new();
++    if (!this || !options)
++        goto out;
++
++    svc = cds_list_entry(conn, glusterd_svc_t, conn);
++    if (!svc) {
++        gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_SVC_GET_FAIL,
++               "Failed to get the service");
++        goto out;
++    }
++
++    ret = rpc_transport_unix_options_build(options, sockpath, frame_timeout);
++    if (ret)
++        goto out;
++
++    ret = dict_set_int32n(options, "transport.socket.ignore-enoent",
++                          SLEN("transport.socket.ignore-enoent"), 1);
++    if (ret)
++        goto out;
++
++    /* @options is free'd by rpc_transport when destroyed */
++    rpc = rpc_clnt_new(options, this, (char *)svc->name, 16);
++    if (!rpc) {
++        ret = -1;
++        goto out;
++    }
++
++    ret = rpc_clnt_register_notify(rpc, glusterd_muxsvc_conn_common_notify,
++                                   mux_proc);
++    if (ret)
++        goto out;
++
++    ret = snprintf(conn->sockpath, sizeof(conn->sockpath), "%s", sockpath);
++    if (ret < 0)
++        goto out;
++    else
++        ret = 0;
++
++    conn->frame_timeout = frame_timeout;
++    conn->rpc = rpc;
++    mux_proc->notify = notify;
++out:
++    if (options)
++        dict_unref(options);
++    if (ret) {
++        if (rpc) {
++            rpc_clnt_unref(rpc);
++            rpc = NULL;
++        }
++    }
++    return ret;
++}
+diff --git a/xlators/mgmt/glusterd/src/glusterd-svc-mgmt.h b/xlators/mgmt/glusterd/src/glusterd-svc-mgmt.h
+index c850bfd..fbc5225 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-svc-mgmt.h
++++ b/xlators/mgmt/glusterd/src/glusterd-svc-mgmt.h
+@@ -13,9 +13,12 @@
+ 
+ #include "glusterd-proc-mgmt.h"
+ #include "glusterd-conn-mgmt.h"
++#include "glusterd-rcu.h"
+ 
+ struct glusterd_svc_;
++
+ typedef struct glusterd_svc_ glusterd_svc_t;
++typedef struct glusterd_svc_proc_ glusterd_svc_proc_t;
+ 
+ typedef void (*glusterd_svc_build_t)(glusterd_svc_t *svc);
+ 
+@@ -25,6 +28,17 @@ typedef int (*glusterd_svc_start_t)(glusterd_svc_t *svc, int flags);
+ typedef int (*glusterd_svc_stop_t)(glusterd_svc_t *svc, int sig);
+ typedef int (*glusterd_svc_reconfigure_t)(void *data);
+ 
++typedef int (*glusterd_muxsvc_conn_notify_t)(glusterd_svc_proc_t *mux_proc,
++                                             rpc_clnt_event_t event);
++
++struct glusterd_svc_proc_ {
++    struct cds_list_head svc_proc_list;
++    struct cds_list_head svcs;
++    glusterd_muxsvc_conn_notify_t notify;
++    rpc_clnt_t *rpc;
++    void *data;
++};
++
+ struct glusterd_svc_ {
+     char name[NAME_MAX];
+     glusterd_conn_t conn;
+@@ -35,6 +49,8 @@ struct glusterd_svc_ {
+     gf_boolean_t online;
+     gf_boolean_t inited;
+     glusterd_svc_reconfigure_t reconfigure;
++    glusterd_svc_proc_t *svc_proc;
++    struct cds_list_head mux_svc;
+ };
+ 
+ int
+@@ -69,4 +85,15 @@ glusterd_svc_reconfigure(int (*create_volfile)());
+ int
+ glusterd_svc_common_rpc_notify(glusterd_conn_t *conn, rpc_clnt_event_t event);
+ 
++int
++glusterd_muxsvc_common_rpc_notify(glusterd_svc_proc_t *conn,
++                                  rpc_clnt_event_t event);
++
++int
++glusterd_proc_get_pid(glusterd_proc_t *proc);
++
++int
++glusterd_muxsvc_conn_init(glusterd_conn_t *conn, glusterd_svc_proc_t *mux_proc,
++                          char *sockpath, int frame_timeout,
++                          glusterd_muxsvc_conn_notify_t notify);
+ #endif
+diff --git a/xlators/mgmt/glusterd/src/glusterd-tier.c b/xlators/mgmt/glusterd/src/glusterd-tier.c
+index 4dc0d44..23a9592 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-tier.c
++++ b/xlators/mgmt/glusterd/src/glusterd-tier.c
+@@ -27,6 +27,7 @@
+ #include "glusterd-messages.h"
+ #include "glusterd-mgmt.h"
+ #include "glusterd-syncop.h"
++#include "glusterd-shd-svc-helper.h"
+ 
+ #include <sys/wait.h>
+ #include <dlfcn.h>
+@@ -615,7 +616,7 @@ glusterd_op_remove_tier_brick(dict_t *dict, char **op_errstr, dict_t *rsp_dict)
+ 
+     if (cmd == GF_DEFRAG_CMD_DETACH_START &&
+         volinfo->status == GLUSTERD_STATUS_STARTED) {
+-        ret = glusterd_svcs_reconfigure();
++        ret = glusterd_svcs_reconfigure(volinfo);
+         if (ret) {
+             gf_msg(this->name, GF_LOG_WARNING, 0, GD_MSG_NFS_RECONF_FAIL,
+                    "Unable to reconfigure NFS-Server");
+diff --git a/xlators/mgmt/glusterd/src/glusterd-tierd-svc.c b/xlators/mgmt/glusterd/src/glusterd-tierd-svc.c
+index 04ceec5..ab463f1 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-tierd-svc.c
++++ b/xlators/mgmt/glusterd/src/glusterd-tierd-svc.c
+@@ -83,7 +83,6 @@ glusterd_tierdsvc_init(void *data)
+         goto out;
+ 
+     notify = glusterd_svc_common_rpc_notify;
+-    glusterd_store_perform_node_state_store(volinfo);
+ 
+     volinfo->type = GF_CLUSTER_TYPE_TIER;
+ 
+@@ -395,6 +394,7 @@ int
+ glusterd_tierdsvc_restart()
+ {
+     glusterd_volinfo_t *volinfo = NULL;
++    glusterd_volinfo_t *tmp = NULL;
+     int ret = 0;
+     xlator_t *this = THIS;
+     glusterd_conf_t *conf = NULL;
+@@ -405,7 +405,7 @@ glusterd_tierdsvc_restart()
+     conf = this->private;
+     GF_VALIDATE_OR_GOTO(this->name, conf, out);
+ 
+-    cds_list_for_each_entry(volinfo, &conf->volumes, vol_list)
++    cds_list_for_each_entry_safe(volinfo, tmp, &conf->volumes, vol_list)
+     {
+         /* Start per volume tierd svc */
+         if (volinfo->status == GLUSTERD_STATUS_STARTED &&
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index 52b83ec..ef664c2 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -61,6 +61,7 @@
+ #include "glusterd-server-quorum.h"
+ #include <glusterfs/quota-common-utils.h>
+ #include <glusterfs/common-utils.h>
++#include "glusterd-shd-svc-helper.h"
+ 
+ #include "xdr-generic.h"
+ #include <sys/resource.h>
+@@ -583,13 +584,17 @@ glusterd_volinfo_t *
+ glusterd_volinfo_unref(glusterd_volinfo_t *volinfo)
+ {
+     int refcnt = -1;
++    glusterd_conf_t *conf = THIS->private;
+ 
+-    pthread_mutex_lock(&volinfo->reflock);
++    pthread_mutex_lock(&conf->volume_lock);
+     {
+-        refcnt = --volinfo->refcnt;
++        pthread_mutex_lock(&volinfo->reflock);
++        {
++            refcnt = --volinfo->refcnt;
++        }
++        pthread_mutex_unlock(&volinfo->reflock);
+     }
+-    pthread_mutex_unlock(&volinfo->reflock);
+-
++    pthread_mutex_unlock(&conf->volume_lock);
+     if (!refcnt) {
+         glusterd_volinfo_delete(volinfo);
+         return NULL;
+@@ -661,6 +666,7 @@ glusterd_volinfo_new(glusterd_volinfo_t **volinfo)
+     glusterd_snapdsvc_build(&new_volinfo->snapd.svc);
+     glusterd_tierdsvc_build(&new_volinfo->tierd.svc);
+     glusterd_gfproxydsvc_build(&new_volinfo->gfproxyd.svc);
++    glusterd_shdsvc_build(&new_volinfo->shd.svc);
+ 
+     pthread_mutex_init(&new_volinfo->reflock, NULL);
+     *volinfo = glusterd_volinfo_ref(new_volinfo);
+@@ -1026,11 +1032,11 @@ glusterd_volinfo_delete(glusterd_volinfo_t *volinfo)
+     gf_store_handle_destroy(volinfo->snapd.handle);
+ 
+     glusterd_auth_cleanup(volinfo);
++    glusterd_shd_svcproc_cleanup(&volinfo->shd);
+ 
+     pthread_mutex_destroy(&volinfo->reflock);
+     GF_FREE(volinfo);
+     ret = 0;
+-
+ out:
+     gf_msg_debug(THIS->name, 0, "Returning %d", ret);
+     return ret;
+@@ -3619,6 +3625,7 @@ glusterd_spawn_daemons(void *opaque)
+     ret = glusterd_snapdsvc_restart();
+     ret = glusterd_tierdsvc_restart();
+     ret = glusterd_gfproxydsvc_restart();
++    ret = glusterd_shdsvc_restart();
+     return ret;
+ }
+ 
+@@ -4569,6 +4576,9 @@ glusterd_delete_stale_volume(glusterd_volinfo_t *stale_volinfo,
+         svc = &(stale_volinfo->snapd.svc);
+         (void)svc->manager(svc, stale_volinfo, PROC_START_NO_WAIT);
+     }
++    svc = &(stale_volinfo->shd.svc);
++    (void)svc->manager(svc, stale_volinfo, PROC_START_NO_WAIT);
++
+     (void)glusterd_volinfo_remove(stale_volinfo);
+ 
+     return 0;
+@@ -4683,6 +4693,15 @@ glusterd_import_friend_volume(dict_t *peer_data, int count)
+         glusterd_volinfo_unref(old_volinfo);
+     }
+ 
++    ret = glusterd_store_volinfo(new_volinfo, GLUSTERD_VOLINFO_VER_AC_NONE);
++    if (ret) {
++        gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_VOLINFO_STORE_FAIL,
++               "Failed to store "
++               "volinfo for volume %s",
++               new_volinfo->volname);
++        goto out;
++    }
++
+     if (glusterd_is_volume_started(new_volinfo)) {
+         (void)glusterd_start_bricks(new_volinfo);
+         if (glusterd_is_snapd_enabled(new_volinfo)) {
+@@ -4691,15 +4710,10 @@ glusterd_import_friend_volume(dict_t *peer_data, int count)
+                 gf_event(EVENT_SVC_MANAGER_FAILED, "svc_name=%s", svc->name);
+             }
+         }
+-    }
+-
+-    ret = glusterd_store_volinfo(new_volinfo, GLUSTERD_VOLINFO_VER_AC_NONE);
+-    if (ret) {
+-        gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_VOLINFO_STORE_FAIL,
+-               "Failed to store "
+-               "volinfo for volume %s",
+-               new_volinfo->volname);
+-        goto out;
++        svc = &(new_volinfo->shd.svc);
++        if (svc->manager(svc, new_volinfo, PROC_START_NO_WAIT)) {
++            gf_event(EVENT_SVC_MANAGER_FAILED, "svc_name=%s", svc->name);
++        }
+     }
+ 
+     ret = glusterd_create_volfiles_and_notify_services(new_volinfo);
+@@ -5174,9 +5188,7 @@ glusterd_add_node_to_dict(char *server, dict_t *dict, int count,
+     glusterd_svc_build_pidfile_path(server, priv->rundir, pidfile,
+                                     sizeof(pidfile));
+ 
+-    if (strcmp(server, priv->shd_svc.name) == 0)
+-        svc = &(priv->shd_svc);
+-    else if (strcmp(server, priv->nfs_svc.name) == 0)
++    if (strcmp(server, priv->nfs_svc.name) == 0)
+         svc = &(priv->nfs_svc);
+     else if (strcmp(server, priv->quotad_svc.name) == 0)
+         svc = &(priv->quotad_svc);
+@@ -5207,9 +5219,6 @@ glusterd_add_node_to_dict(char *server, dict_t *dict, int count,
+     if (!strcmp(server, priv->nfs_svc.name))
+         ret = dict_set_nstrn(dict, key, keylen, "NFS Server",
+                              SLEN("NFS Server"));
+-    else if (!strcmp(server, priv->shd_svc.name))
+-        ret = dict_set_nstrn(dict, key, keylen, "Self-heal Daemon",
+-                             SLEN("Self-heal Daemon"));
+     else if (!strcmp(server, priv->quotad_svc.name))
+         ret = dict_set_nstrn(dict, key, keylen, "Quota Daemon",
+                              SLEN("Quota Daemon"));
+@@ -8773,6 +8782,21 @@ glusterd_friend_remove_cleanup_vols(uuid_t uuid)
+                            "to stop snapd daemon service");
+                 }
+             }
++
++            if (glusterd_is_shd_compatible_volume(volinfo)) {
++                /*
++                 * Sending stop request for all volumes. So it is fine
++                 * to send stop for mux shd
++                 */
++                svc = &(volinfo->shd.svc);
++                ret = svc->stop(svc, SIGTERM);
++                if (ret) {
++                    gf_msg(THIS->name, GF_LOG_ERROR, 0, GD_MSG_SVC_STOP_FAIL,
++                           "Failed "
++                           "to stop shd daemon service");
++                }
++            }
++
+             if (volinfo->type == GF_CLUSTER_TYPE_TIER) {
+                 svc = &(volinfo->tierd.svc);
+                 ret = svc->stop(svc, SIGTERM);
+@@ -8798,7 +8822,7 @@ glusterd_friend_remove_cleanup_vols(uuid_t uuid)
+     }
+ 
+     /* Reconfigure all daemon services upon peer detach */
+-    ret = glusterd_svcs_reconfigure();
++    ret = glusterd_svcs_reconfigure(NULL);
+     if (ret) {
+         gf_msg(THIS->name, GF_LOG_ERROR, 0, GD_MSG_SVC_STOP_FAIL,
+                "Failed to reconfigure all daemon services.");
+@@ -14350,3 +14374,74 @@ glusterd_is_profile_on(glusterd_volinfo_t *volinfo)
+         return _gf_true;
+     return _gf_false;
+ }
++
++int32_t
++glusterd_add_shd_to_dict(glusterd_volinfo_t *volinfo, dict_t *dict,
++                         int32_t count)
++{
++    int ret = -1;
++    int32_t pid = -1;
++    int32_t brick_online = -1;
++    char key[64] = {0};
++    int keylen;
++    char *pidfile = NULL;
++    xlator_t *this = NULL;
++    char *uuid_str = NULL;
++
++    this = THIS;
++    GF_VALIDATE_OR_GOTO(THIS->name, this, out);
++
++    GF_VALIDATE_OR_GOTO(this->name, volinfo, out);
++    GF_VALIDATE_OR_GOTO(this->name, dict, out);
++
++    keylen = snprintf(key, sizeof(key), "brick%d.hostname", count);
++    ret = dict_set_nstrn(dict, key, keylen, "Self-heal Daemon",
++                         SLEN("Self-heal Daemon"));
++    if (ret)
++        goto out;
++
++    keylen = snprintf(key, sizeof(key), "brick%d.path", count);
++    uuid_str = gf_strdup(uuid_utoa(MY_UUID));
++    if (!uuid_str) {
++        ret = -1;
++        goto out;
++    }
++    ret = dict_set_dynstrn(dict, key, keylen, uuid_str);
++    if (ret)
++        goto out;
++    uuid_str = NULL;
++
++    /* shd doesn't have a port. but the cli needs a port key with
++     * a zero value to parse.
++     * */
++
++    keylen = snprintf(key, sizeof(key), "brick%d.port", count);
++    ret = dict_set_int32n(dict, key, keylen, 0);
++    if (ret)
++        goto out;
++
++    pidfile = volinfo->shd.svc.proc.pidfile;
++
++    brick_online = gf_is_service_running(pidfile, &pid);
++
++    /* If shd is not running, then don't print the pid */
++    if (!brick_online)
++        pid = -1;
++    keylen = snprintf(key, sizeof(key), "brick%d.pid", count);
++    ret = dict_set_int32n(dict, key, keylen, pid);
++    if (ret)
++        goto out;
++
++    keylen = snprintf(key, sizeof(key), "brick%d.status", count);
++    ret = dict_set_int32n(dict, key, keylen, brick_online);
++
++out:
++    if (uuid_str)
++        GF_FREE(uuid_str);
++    if (ret)
++        gf_msg(this ? this->name : "glusterd", GF_LOG_ERROR, 0,
++               GD_MSG_DICT_SET_FAILED,
++               "Returning %d. adding values to dict failed", ret);
++
++    return ret;
++}
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.h b/xlators/mgmt/glusterd/src/glusterd-utils.h
+index 9bf19a6..3647c34 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.h
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.h
+@@ -876,4 +876,8 @@ glusterd_is_profile_on(glusterd_volinfo_t *volinfo);
+ 
+ char *
+ search_brick_path_from_proc(pid_t brick_pid, char *brickpath);
++
++int32_t
++glusterd_add_shd_to_dict(glusterd_volinfo_t *volinfo, dict_t *dict,
++                         int32_t count);
+ #endif
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volgen.c b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+index 1f53beb..324ec2f 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volgen.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+@@ -36,6 +36,7 @@
+ #include "glusterd-svc-mgmt.h"
+ #include "glusterd-svc-helper.h"
+ #include "glusterd-snapd-svc-helper.h"
++#include "glusterd-shd-svc-helper.h"
+ #include "glusterd-gfproxyd-svc-helper.h"
+ 
+ struct gd_validate_reconf_opts {
+@@ -4845,7 +4846,7 @@ volgen_get_shd_key(int type)
+ static int
+ volgen_set_shd_key_enable(dict_t *set_dict, const int type)
+ {
+-    int ret = -1;
++    int ret = 0;
+ 
+     switch (type) {
+         case GF_CLUSTER_TYPE_REPLICATE:
+@@ -5136,24 +5137,15 @@ out:
+ static int
+ build_shd_volume_graph(xlator_t *this, volgen_graph_t *graph,
+                        glusterd_volinfo_t *volinfo, dict_t *mod_dict,
+-                       dict_t *set_dict, gf_boolean_t graph_check,
+-                       gf_boolean_t *valid_config)
++                       dict_t *set_dict, gf_boolean_t graph_check)
+ {
+     volgen_graph_t cgraph = {0};
+     int ret = 0;
+     int clusters = -1;
+ 
+-    if (!graph_check && (volinfo->status != GLUSTERD_STATUS_STARTED))
+-        goto out;
+-
+     if (!glusterd_is_shd_compatible_volume(volinfo))
+         goto out;
+ 
+-    /* Shd graph is valid only when there is at least one
+-     * replica/disperse volume is present
+-     */
+-    *valid_config = _gf_true;
+-
+     ret = prepare_shd_volume_options(volinfo, mod_dict, set_dict);
+     if (ret)
+         goto out;
+@@ -5183,19 +5175,16 @@ out:
+ }
+ 
+ int
+-build_shd_graph(volgen_graph_t *graph, dict_t *mod_dict)
++build_shd_graph(glusterd_volinfo_t *volinfo, volgen_graph_t *graph,
++                dict_t *mod_dict)
+ {
+-    glusterd_volinfo_t *voliter = NULL;
+     xlator_t *this = NULL;
+-    glusterd_conf_t *priv = NULL;
+     dict_t *set_dict = NULL;
+     int ret = 0;
+-    gf_boolean_t valid_config = _gf_false;
+     xlator_t *iostxl = NULL;
+     gf_boolean_t graph_check = _gf_false;
+ 
+     this = THIS;
+-    priv = this->private;
+ 
+     set_dict = dict_new();
+     if (!set_dict) {
+@@ -5205,26 +5194,18 @@ build_shd_graph(volgen_graph_t *graph, dict_t *mod_dict)
+ 
+     if (mod_dict)
+         graph_check = dict_get_str_boolean(mod_dict, "graph-check", 0);
+-    iostxl = volgen_graph_add_as(graph, "debug/io-stats", "glustershd");
++    iostxl = volgen_graph_add_as(graph, "debug/io-stats", volinfo->volname);
+     if (!iostxl) {
+         ret = -1;
+         goto out;
+     }
+ 
+-    cds_list_for_each_entry(voliter, &priv->volumes, vol_list)
+-    {
+-        ret = build_shd_volume_graph(this, graph, voliter, mod_dict, set_dict,
+-                                     graph_check, &valid_config);
+-        ret = dict_reset(set_dict);
+-        if (ret)
+-            goto out;
+-    }
++    ret = build_shd_volume_graph(this, graph, volinfo, mod_dict, set_dict,
++                                 graph_check);
+ 
+ out:
+     if (set_dict)
+         dict_unref(set_dict);
+-    if (!valid_config)
+-        ret = -EINVAL;
+     return ret;
+ }
+ 
+@@ -6541,6 +6522,10 @@ glusterd_create_volfiles(glusterd_volinfo_t *volinfo)
+     if (ret)
+         gf_log(this->name, GF_LOG_ERROR, "Could not generate gfproxy volfiles");
+ 
++    ret = glusterd_shdsvc_create_volfile(volinfo);
++    if (ret)
++        gf_log(this->name, GF_LOG_ERROR, "Could not generate shd volfiles");
++
+     dict_del_sizen(volinfo->dict, "skip-CLIOT");
+ 
+ out:
+@@ -6621,7 +6606,7 @@ validate_shdopts(glusterd_volinfo_t *volinfo, dict_t *val_dict,
+     ret = dict_set_int32_sizen(val_dict, "graph-check", 1);
+     if (ret)
+         goto out;
+-    ret = build_shd_graph(&graph, val_dict);
++    ret = build_shd_graph(volinfo, &graph, val_dict);
+     if (!ret)
+         ret = graph_reconf_validateopt(&graph.graph, op_errstr);
+ 
+@@ -6998,3 +6983,22 @@ gd_is_boolean_option(char *key)
+ 
+     return _gf_false;
+ }
++
++int
++glusterd_shdsvc_generate_volfile(glusterd_volinfo_t *volinfo, char *filename,
++                                 dict_t *mode_dict)
++{
++    int ret = -1;
++    volgen_graph_t graph = {
++        0,
++    };
++
++    graph.type = GF_SHD;
++    ret = build_shd_graph(volinfo, &graph, mode_dict);
++    if (!ret)
++        ret = volgen_write_volfile(&graph, filename);
++
++    volgen_graph_free(&graph);
++
++    return ret;
++}
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volgen.h b/xlators/mgmt/glusterd/src/glusterd-volgen.h
+index f9fc068..897d8fa 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volgen.h
++++ b/xlators/mgmt/glusterd/src/glusterd-volgen.h
+@@ -66,6 +66,7 @@ typedef enum {
+     GF_REBALANCED = 1,
+     GF_QUOTAD,
+     GF_SNAPD,
++    GF_SHD,
+ } glusterd_graph_type_t;
+ 
+ struct volgen_graph {
+@@ -77,6 +78,8 @@ typedef struct volgen_graph volgen_graph_t;
+ 
+ typedef int (*glusterd_graph_builder_t)(volgen_graph_t *graph,
+                                         dict_t *mod_dict);
++typedef int (*glusterd_vol_graph_builder_t)(glusterd_volinfo_t *,
++                                            char *filename, dict_t *mod_dict);
+ 
+ #define COMPLETE_OPTION(key, completion, ret)                                  \
+     do {                                                                       \
+@@ -201,7 +204,8 @@ void
+ glusterd_get_shd_filepath(char *filename);
+ 
+ int
+-build_shd_graph(volgen_graph_t *graph, dict_t *mod_dict);
++build_shd_graph(glusterd_volinfo_t *volinfo, volgen_graph_t *graph,
++                dict_t *mod_dict);
+ 
+ int
+ build_nfs_graph(volgen_graph_t *graph, dict_t *mod_dict);
+@@ -313,4 +317,9 @@ glusterd_generate_gfproxyd_volfile(glusterd_volinfo_t *volinfo);
+ 
+ int
+ glusterd_build_gfproxyd_volfile(glusterd_volinfo_t *volinfo, char *filename);
++
++int
++glusterd_shdsvc_generate_volfile(glusterd_volinfo_t *volinfo, char *filename,
++                                 dict_t *mode_dict);
++
+ #endif
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-ops.c b/xlators/mgmt/glusterd/src/glusterd-volume-ops.c
+index 1ea8ba6..4c3ad50 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-ops.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-ops.c
+@@ -1940,7 +1940,7 @@ static int
+ glusterd_handle_heal_cmd(xlator_t *this, glusterd_volinfo_t *volinfo,
+                          dict_t *dict, char **op_errstr)
+ {
+-    glusterd_conf_t *priv = NULL;
++    glusterd_svc_t *svc = NULL;
+     gf_xl_afr_op_t heal_op = GF_SHD_OP_INVALID;
+     int ret = 0;
+     char msg[2408] = {
+@@ -1950,7 +1950,6 @@ glusterd_handle_heal_cmd(xlator_t *this, glusterd_volinfo_t *volinfo,
+         "Self-heal daemon is not running. "
+         "Check self-heal daemon log file.";
+ 
+-    priv = this->private;
+     ret = dict_get_int32n(dict, "heal-op", SLEN("heal-op"),
+                           (int32_t *)&heal_op);
+     if (ret) {
+@@ -1959,6 +1958,7 @@ glusterd_handle_heal_cmd(xlator_t *this, glusterd_volinfo_t *volinfo,
+         goto out;
+     }
+ 
++    svc = &(volinfo->shd.svc);
+     switch (heal_op) {
+         case GF_SHD_OP_INVALID:
+         case GF_SHD_OP_HEAL_ENABLE: /* This op should be handled in volume-set*/
+@@ -1988,7 +1988,7 @@ glusterd_handle_heal_cmd(xlator_t *this, glusterd_volinfo_t *volinfo,
+                 goto out;
+             }
+ 
+-            if (!priv->shd_svc.online) {
++            if (!svc->online) {
+                 ret = -1;
+                 *op_errstr = gf_strdup(offline_msg);
+                 goto out;
+@@ -2009,7 +2009,7 @@ glusterd_handle_heal_cmd(xlator_t *this, glusterd_volinfo_t *volinfo,
+                 goto out;
+             }
+ 
+-            if (!priv->shd_svc.online) {
++            if (!svc->online) {
+                 ret = -1;
+                 *op_errstr = gf_strdup(offline_msg);
+                 goto out;
+diff --git a/xlators/mgmt/glusterd/src/glusterd.c b/xlators/mgmt/glusterd/src/glusterd.c
+index ff5af42..89afb9c 100644
+--- a/xlators/mgmt/glusterd/src/glusterd.c
++++ b/xlators/mgmt/glusterd/src/glusterd.c
+@@ -1533,14 +1533,6 @@ init(xlator_t *this)
+         exit(1);
+     }
+ 
+-    ret = glusterd_init_var_run_dirs(this, rundir, GLUSTERD_GLUSTERSHD_RUN_DIR);
+-    if (ret) {
+-        gf_msg(this->name, GF_LOG_CRITICAL, 0, GD_MSG_CREATE_DIR_FAILED,
+-               "Unable to create "
+-               "glustershd running directory");
+-        exit(1);
+-    }
+-
+     ret = glusterd_init_var_run_dirs(this, rundir, GLUSTERD_NFS_RUN_DIR);
+     if (ret) {
+         gf_msg(this->name, GF_LOG_CRITICAL, 0, GD_MSG_CREATE_DIR_FAILED,
+@@ -1815,6 +1807,9 @@ init(xlator_t *this)
+     CDS_INIT_LIST_HEAD(&conf->snapshots);
+     CDS_INIT_LIST_HEAD(&conf->missed_snaps_list);
+     CDS_INIT_LIST_HEAD(&conf->brick_procs);
++    CDS_INIT_LIST_HEAD(&conf->shd_procs);
++    pthread_mutex_init(&conf->attach_lock, NULL);
++    pthread_mutex_init(&conf->volume_lock, NULL);
+ 
+     pthread_mutex_init(&conf->mutex, NULL);
+     conf->rpc = rpc;
+@@ -1895,7 +1890,6 @@ init(xlator_t *this)
+     glusterd_mgmt_v3_lock_timer_init();
+     glusterd_txn_opinfo_dict_init();
+ 
+-    glusterd_shdsvc_build(&conf->shd_svc);
+     glusterd_nfssvc_build(&conf->nfs_svc);
+     glusterd_quotadsvc_build(&conf->quotad_svc);
+     glusterd_bitdsvc_build(&conf->bitd_svc);
+diff --git a/xlators/mgmt/glusterd/src/glusterd.h b/xlators/mgmt/glusterd/src/glusterd.h
+index e858ce4..0ac6e63 100644
+--- a/xlators/mgmt/glusterd/src/glusterd.h
++++ b/xlators/mgmt/glusterd/src/glusterd.h
+@@ -28,6 +28,7 @@
+ #include "glusterd-sm.h"
+ #include "glusterd-snapd-svc.h"
+ #include "glusterd-tierd-svc.h"
++#include "glusterd-shd-svc.h"
+ #include "glusterd-bitd-svc.h"
+ #include "glusterd1-xdr.h"
+ #include "protocol-common.h"
+@@ -170,7 +171,6 @@ typedef struct {
+     char workdir[VALID_GLUSTERD_PATHMAX];
+     char rundir[VALID_GLUSTERD_PATHMAX];
+     rpcsvc_t *rpc;
+-    glusterd_svc_t shd_svc;
+     glusterd_svc_t nfs_svc;
+     glusterd_svc_t bitd_svc;
+     glusterd_svc_t scrub_svc;
+@@ -179,6 +179,7 @@ typedef struct {
+     struct cds_list_head volumes;
+     struct cds_list_head snapshots;   /*List of snap volumes */
+     struct cds_list_head brick_procs; /* List of brick processes */
++    struct cds_list_head shd_procs;   /* List of shd processes */
+     pthread_mutex_t xprt_lock;
+     struct list_head xprt_list;
+     pthread_mutex_t import_volumes;
+@@ -219,6 +220,11 @@ typedef struct {
+     gf_atomic_t blockers;
+     uint32_t mgmt_v3_lock_timeout;
+     gf_boolean_t restart_bricks;
++    pthread_mutex_t attach_lock; /* Lock can be per process or a common one */
++    pthread_mutex_t volume_lock; /* We release the big_lock from lot of places
++                                    which might lead the modification of volinfo
++                                    list.
++                                 */
+ } glusterd_conf_t;
+ 
+ typedef enum gf_brick_status {
+@@ -498,6 +504,7 @@ struct glusterd_volinfo_ {
+ 
+     glusterd_snapdsvc_t snapd;
+     glusterd_tierdsvc_t tierd;
++    glusterd_shdsvc_t shd;
+     glusterd_gfproxydsvc_t gfproxyd;
+     int32_t quota_xattr_version;
+     gf_boolean_t stage_deleted;         /* volume has passed staging
+@@ -624,7 +631,6 @@ typedef enum {
+ #define GLUSTERD_DEFAULT_SNAPS_BRICK_DIR "/gluster/snaps"
+ #define GLUSTERD_BITD_RUN_DIR "/bitd"
+ #define GLUSTERD_SCRUB_RUN_DIR "/scrub"
+-#define GLUSTERD_GLUSTERSHD_RUN_DIR "/glustershd"
+ #define GLUSTERD_NFS_RUN_DIR "/nfs"
+ #define GLUSTERD_QUOTAD_RUN_DIR "/quotad"
+ #define GLUSTER_SHARED_STORAGE_BRICK_DIR GLUSTERD_DEFAULT_WORKDIR "/ss_brick"
+@@ -680,6 +686,26 @@ typedef ssize_t (*gd_serialize_t)(struct iovec outmsg, void *args);
+         }                                                                      \
+     } while (0)
+ 
++#define GLUSTERD_GET_SHD_RUNDIR(path, volinfo, priv)                           \
++    do {                                                                       \
++        int32_t _shd_dir_len;                                                  \
++        _shd_dir_len = snprintf(path, PATH_MAX, "%s/shd/%s", priv->rundir,     \
++                                volinfo->volname);                             \
++        if ((_shd_dir_len < 0) || (_shd_dir_len >= PATH_MAX)) {                \
++            path[0] = 0;                                                       \
++        }                                                                      \
++    } while (0)
++
++#define GLUSTERD_GET_SHD_PID_FILE(path, volinfo, priv)                         \
++    do {                                                                       \
++        int32_t _shd_pid_len;                                                  \
++        _shd_pid_len = snprintf(path, PATH_MAX, "%s/shd/%s-shd.pid",           \
++                                priv->rundir, volinfo->volname);               \
++        if ((_shd_pid_len < 0) || (_shd_pid_len >= PATH_MAX)) {                \
++            path[0] = 0;                                                       \
++        }                                                                      \
++    } while (0)
++
+ #define GLUSTERD_GET_VOLUME_PID_DIR(path, volinfo, priv)                       \
+     do {                                                                       \
+         int32_t _vol_pid_len;                                                  \
+diff --git a/xlators/protocol/client/src/client.c b/xlators/protocol/client/src/client.c
+index 2d75714..19f5175 100644
+--- a/xlators/protocol/client/src/client.c
++++ b/xlators/protocol/client/src/client.c
+@@ -46,7 +46,6 @@ client_fini_complete(xlator_t *this)
+     GF_VALIDATE_OR_GOTO(this->name, this->private, out);
+ 
+     clnt_conf_t *conf = this->private;
+-
+     if (!conf->destroy)
+         return 0;
+ 
+@@ -69,6 +68,11 @@ client_notify_dispatch_uniq(xlator_t *this, int32_t event, void *data, ...)
+         return 0;
+ 
+     return client_notify_dispatch(this, event, data);
++
++    /* Please avoid any code that access xlator object here
++     * Because for a child down event, once we do the signal
++     * we will start cleanup.
++     */
+ }
+ 
+ int
+@@ -105,6 +109,11 @@ client_notify_dispatch(xlator_t *this, int32_t event, void *data, ...)
+     }
+     pthread_mutex_unlock(&ctx->notify_lock);
+ 
++    /* Please avoid any code that access xlator object here
++     * Because for a child down event, once we do the signal
++     * we will start cleanup.
++     */
++
+     return ret;
+ }
+ 
+@@ -2272,6 +2281,7 @@ client_rpc_notify(struct rpc_clnt *rpc, void *mydata, rpc_clnt_event_t event,
+ {
+     xlator_t *this = NULL;
+     clnt_conf_t *conf = NULL;
++    gf_boolean_t is_parent_down = _gf_false;
+     int ret = 0;
+ 
+     this = mydata;
+@@ -2333,6 +2343,19 @@ client_rpc_notify(struct rpc_clnt *rpc, void *mydata, rpc_clnt_event_t event,
+                     if (conf->portmap_err_logged)
+                         conf->disconnect_err_logged = 1;
+                 }
++                /*
++                 * Once we complete the child down notification,
++                 * There is a chance that the graph might get freed,
++                 * So it is not safe to access any xlator contens
++                 * So here we are checking whether the parent is down
++                 * or not.
++                 */
++                pthread_mutex_lock(&conf->lock);
++                {
++                    is_parent_down = conf->parent_down;
++                }
++                pthread_mutex_unlock(&conf->lock);
++
+                 /* If the CHILD_DOWN event goes to parent xlator
+                    multiple times, the logic of parent xlator notify
+                    may get screwed up.. (eg. CHILD_MODIFIED event in
+@@ -2340,6 +2363,12 @@ client_rpc_notify(struct rpc_clnt *rpc, void *mydata, rpc_clnt_event_t event,
+                    to parent are genuine */
+                 ret = client_notify_dispatch_uniq(this, GF_EVENT_CHILD_DOWN,
+                                                   NULL);
++                if (is_parent_down) {
++                    /* If parent is down, then there should not be any
++                     * operation after a child down.
++                     */
++                    goto out;
++                }
+                 if (ret)
+                     gf_msg(this->name, GF_LOG_INFO, 0,
+                            PC_MSG_CHILD_DOWN_NOTIFY_FAILED,
+-- 
+1.8.3.1
+

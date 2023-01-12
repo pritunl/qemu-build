@@ -1,0 +1,46 @@
+From 31cd7627ff329a39691239322df3bc88e962ad02 Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez <xhernandez@redhat.com>
+Date: Mon, 1 Mar 2021 05:19:39 +0100
+Subject: [PATCH 538/538] afr: fix coverity issue introduced by 90cefde
+
+Fixes coverity issues 1447029 and 1447028.
+
+Backport of:
+> Upstream-patch-link: https://github.com/gluster/glusterfs/pull/2201
+> Updates: #2161
+> Change-Id: I6a564231d6aeb76de20675b7ced5d45eed8c377f
+> Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+
+BUG: 1911292
+Change-Id: I6a564231d6aeb76de20675b7ced5d45eed8c377f
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/229200
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/afr/src/afr-inode-read.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/cluster/afr/src/afr-inode-read.c b/xlators/cluster/afr/src/afr-inode-read.c
+index 98e195a..d874172 100644
+--- a/xlators/cluster/afr/src/afr-inode-read.c
++++ b/xlators/cluster/afr/src/afr-inode-read.c
+@@ -918,13 +918,13 @@ afr_update_local_dicts(call_frame_t *frame, dict_t *dict, dict_t *xdata)
+     }
+ 
+     if (dict != NULL) {
+-        if (dict_copy(dict, local->dict) < 0) {
++        if (dict_copy(dict, local->dict) == NULL) {
+             goto done;
+         }
+     }
+ 
+     if (xdata != NULL) {
+-        if (dict_copy(xdata, local->xdata_rsp) < 0) {
++        if (dict_copy(xdata, local->xdata_rsp) == NULL) {
+             goto done;
+         }
+     }
+-- 
+1.8.3.1
+

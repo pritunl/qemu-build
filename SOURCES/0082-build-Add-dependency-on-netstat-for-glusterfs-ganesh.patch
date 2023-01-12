@@ -1,0 +1,59 @@
+From 6d6841a996a52488e8a18606f386bba0a12b4231 Mon Sep 17 00:00:00 2001
+From: Soumya Koduri <skoduri@redhat.com>
+Date: Fri, 18 Nov 2016 12:47:06 +0530
+Subject: [PATCH 082/124] build: Add dependency on netstat for
+ glusterfs-ganesha pkg
+
+portblock resource-agent needs netstat command but this dependency
+should have been ideally added to resource-agents package. But the
+fixes (bug1395594, bug1395596) are going to be available only
+in the future RHEL 6.9 and RHEL 7.4 releases. Hence as an interim
+workaround, we agreed to add this dependency for glusterfs-ganesha package.
+
+label : DOWNSTREAM ONLY
+
+Change-Id: I6ac1003103755d7534dd079c821bbaacd8dd94b8
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167167
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfs.spec.in | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index e55e255..bc27058 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -466,6 +466,12 @@ Requires:         pcs, dbus
+ Requires:         cman, pacemaker, corosync
+ %endif
+ 
++%if ( 0%{?fedora} ) || ( 0%{?rhel} && 0%{?rhel} > 5 )
++# we need portblock resource-agent in 3.9.5 and later.
++Requires:         resource-agents >= 3.9.5
++Requires:         net-tools
++%endif
++
+ %if ( 0%{?fedora} && 0%{?fedora} > 25 )
+ Requires: selinux-policy >= 3.13.1-160
+ Requires(post):   policycoreutils-python-utils
+@@ -1951,6 +1957,14 @@ fi
+ %endif
+ 
+ %changelog
++* Sun Apr 7 2019 Soumya Koduri <skoduri@redhat.com>
++- As an interim fix add dependency on netstat(/net-tools) for glusterfs-ganesha package (#1395574)
++
++* Sun Apr 7 2019 Soumya Koduri <skoduri@redhat.com>
++- Add dependency on portblock resource agent for ganesha package (#1278336)
++- Fix incorrect Requires for portblock resource agent (#1278336)
++- Update version checks for portblock resource agent on RHEL (#1278336)
++
+ * Sat Apr 6 2019 Jiffin Tony Thottan <jthottan@redhat.com>
+ - Adding ganesha ha resources back in gluster repository
+ 
+-- 
+1.8.3.1
+

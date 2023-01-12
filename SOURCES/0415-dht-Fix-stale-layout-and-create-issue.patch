@@ -1,0 +1,523 @@
+From ba23e6d8f4eff11a228816149a8a1ccd6df41146 Mon Sep 17 00:00:00 2001
+From: Susant Palai <spalai@redhat.com>
+Date: Fri, 27 Dec 2019 12:06:19 +0530
+Subject: [PATCH 415/449] dht: Fix stale-layout and create issue
+
+Problem: With lookup-optimize set to on by default, a client with
+stale-layout can create a new file on a wrong subvol. This will lead to
+possible duplicate files if two different clients attempt to create the
+same file with two different layouts.
+
+Solution: Send in-memory layout to be cross checked at posix before
+commiting a "create". In case of a mismatch, sync the client layout with
+that of the server and attempt the create fop one more time.
+
+test: Manual, testcase(attached)
+
+(Backport of https://review.gluster.org/#/c/glusterfs/+/23927/)
+
+BUG: 1748865
+Change-Id: I6c82c97418654ae8eb3b81ab65f1247aa4002ceb
+Signed-off-by: Susant Palai <spalai@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202465
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/distribute/bug-1786679.t              |  69 +++++++++++
+ xlators/cluster/dht/src/dht-common.c             | 147 ++++++++++++++++++++---
+ xlators/cluster/dht/src/dht-common.h             |   6 +
+ xlators/protocol/client/src/client-rpc-fops_v2.c |   9 +-
+ xlators/storage/posix/src/posix-entry-ops.c      |  29 ++++-
+ xlators/storage/posix/src/posix-helpers.c        |  76 ++++++++++++
+ xlators/storage/posix/src/posix.h                |   4 +
+ 7 files changed, 321 insertions(+), 19 deletions(-)
+ create mode 100755 tests/bugs/distribute/bug-1786679.t
+
+diff --git a/tests/bugs/distribute/bug-1786679.t b/tests/bugs/distribute/bug-1786679.t
+new file mode 100755
+index 0000000..219ce51
+--- /dev/null
++++ b/tests/bugs/distribute/bug-1786679.t
+@@ -0,0 +1,69 @@
++#!/bin/bash
++
++SCRIPT_TIMEOUT=250
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../dht.rc
++
++
++# create 2 subvols
++# create a dir
++# create a file
++# change layout
++# remove the file
++# execute create from a different mount
++# Without the patch, the file will be present on both of the bricks
++
++cleanup
++
++function get_layout () {
++
++layout=`getfattr -n trusted.glusterfs.dht -e hex $1 2>&1 | grep dht | gawk -F"=" '{print $2}'`
++
++echo $layout
++
++}
++
++function set_layout()
++{
++    setfattr -n  "trusted.glusterfs.dht" -v $1 $2
++}
++
++TEST glusterd
++TEST pidof glusterd
++
++BRICK1=$B0/${V0}-0
++BRICK2=$B0/${V0}-1
++
++TEST $CLI volume create $V0 $H0:$BRICK1 $H0:$BRICK2
++TEST $CLI volume start $V0
++
++# Mount FUSE and create symlink
++TEST glusterfs -s $H0 --volfile-id $V0 $M0
++TEST mkdir $M0/dir
++TEST touch $M0/dir/file
++TEST ! stat "$BRICK1/dir/file"
++TEST stat "$BRICK2/dir/file"
++
++layout1="$(get_layout "$BRICK1/dir")"
++layout2="$(get_layout "$BRICK2/dir")"
++
++TEST set_layout $layout1 "$BRICK2/dir"
++TEST set_layout $layout2 "$BRICK1/dir"
++
++TEST rm $M0/dir/file -f
++TEST gluster v set $V0 client-log-level DEBUG
++
++#Without the patch in place, this client will create the file in $BRICK2
++#which will lead to two files being on both the bricks when a new client
++#create the file with the same name
++TEST touch $M0/dir/file
++
++TEST glusterfs -s $H0 --volfile-id $V0 $M1
++TEST touch $M1/dir/file
++
++TEST stat "$BRICK1/dir/file"
++TEST ! stat "$BRICK2/dir/file"
++
++cleanup
+diff --git a/xlators/cluster/dht/src/dht-common.c b/xlators/cluster/dht/src/dht-common.c
+index 7890e7a..6aa18f3 100644
+--- a/xlators/cluster/dht/src/dht-common.c
++++ b/xlators/cluster/dht/src/dht-common.c
+@@ -8262,6 +8262,11 @@ dht_create_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int op_ret,
+     xlator_t *prev = NULL;
+     int ret = -1;
+     dht_local_t *local = NULL;
++    gf_boolean_t parent_layout_changed = _gf_false;
++    char pgfid[GF_UUID_BUF_SIZE] = {0};
++    xlator_t *subvol = NULL;
++
++    local = frame->local;
+ 
+     local = frame->local;
+     if (!local) {
+@@ -8270,8 +8275,69 @@ dht_create_cbk(call_frame_t *frame, void *cookie, xlator_t *this, int op_ret,
+         goto out;
+     }
+ 
+-    if (op_ret == -1)
++    if (op_ret == -1) {
++        local->op_errno = op_errno;
++        parent_layout_changed = (xdata &&
++                                 dict_get(xdata, GF_PREOP_CHECK_FAILED))
++                                    ? _gf_true
++                                    : _gf_false;
++
++        if (parent_layout_changed) {
++            if (local && local->lock[0].layout.parent_layout.locks) {
++                /* Returning failure as the layout could not be fixed even under
++                 * the lock */
++                goto out;
++            }
++
++            gf_uuid_unparse(local->loc.parent->gfid, pgfid);
++            gf_msg(this->name, GF_LOG_INFO, 0, DHT_MSG_PARENT_LAYOUT_CHANGED,
++                   "create (%s/%s) (path: %s): parent layout "
++                   "changed. Attempting a layout refresh and then a "
++                   "retry",
++                   pgfid, local->loc.name, local->loc.path);
++
++            /*
++              dht_refresh_layout needs directory info in local->loc.Hence,
++              storing the parent_loc in local->loc and storing the create
++              context in local->loc2. We will restore this information in
++              dht_creation_do.
++             */
++
++            loc_wipe(&local->loc2);
++
++            ret = loc_copy(&local->loc2, &local->loc);
++            if (ret) {
++                gf_msg(this->name, GF_LOG_ERROR, ENOMEM, DHT_MSG_NO_MEMORY,
++                       "loc_copy failed %s", local->loc.path);
++
++                goto out;
++            }
++
++            loc_wipe(&local->loc);
++
++            ret = dht_build_parent_loc(this, &local->loc, &local->loc2,
++                                       &op_errno);
++
++            if (ret) {
++                gf_msg(this->name, GF_LOG_ERROR, ENOMEM, DHT_MSG_LOC_FAILED,
++                       "parent loc build failed");
++                goto out;
++            }
++
++            subvol = dht_subvol_get_hashed(this, &local->loc2);
++
++            ret = dht_create_lock(frame, subvol);
++            if (ret < 0) {
++                gf_msg(this->name, GF_LOG_ERROR, 0, DHT_MSG_INODE_LK_ERROR,
++                       "locking parent failed");
++                goto out;
++            }
++
++            return 0;
++        }
++
+         goto out;
++    }
+ 
+     prev = cookie;
+ 
+@@ -8392,6 +8458,8 @@ dht_create_wind_to_avail_subvol(call_frame_t *frame, xlator_t *this,
+         gf_msg_debug(this->name, 0, "creating %s on %s", loc->path,
+                      subvol->name);
+ 
++        dht_set_parent_layout_in_dict(loc, this, local);
++
+         STACK_WIND_COOKIE(frame, dht_create_cbk, subvol, subvol,
+                           subvol->fops->create, loc, flags, mode, umask, fd,
+                           params);
+@@ -8400,10 +8468,6 @@ dht_create_wind_to_avail_subvol(call_frame_t *frame, xlator_t *this,
+         avail_subvol = dht_free_disk_available_subvol(this, subvol, local);
+ 
+         if (avail_subvol != subvol) {
+-            local->params = dict_ref(params);
+-            local->flags = flags;
+-            local->mode = mode;
+-            local->umask = umask;
+             local->cached_subvol = avail_subvol;
+             local->hashed_subvol = subvol;
+ 
+@@ -8419,6 +8483,8 @@ dht_create_wind_to_avail_subvol(call_frame_t *frame, xlator_t *this,
+         gf_msg_debug(this->name, 0, "creating %s on %s", loc->path,
+                      subvol->name);
+ 
++        dht_set_parent_layout_in_dict(loc, this, local);
++
+         STACK_WIND_COOKIE(frame, dht_create_cbk, subvol, subvol,
+                           subvol->fops->create, loc, flags, mode, umask, fd,
+                           params);
+@@ -8680,6 +8746,60 @@ err:
+ }
+ 
+ int
++dht_set_parent_layout_in_dict(loc_t *loc, xlator_t *this, dht_local_t *local)
++{
++    dht_conf_t *conf = this->private;
++    dht_layout_t *parent_layout = NULL;
++    int *parent_disk_layout = NULL;
++    xlator_t *hashed_subvol = NULL;
++    char pgfid[GF_UUID_BUF_SIZE] = {0};
++    int ret = 0;
++
++    gf_uuid_unparse(loc->parent->gfid, pgfid);
++
++    parent_layout = dht_layout_get(this, loc->parent);
++    hashed_subvol = dht_subvol_get_hashed(this, loc);
++
++    ret = dht_disk_layout_extract_for_subvol(this, parent_layout, hashed_subvol,
++                                             &parent_disk_layout);
++    if (ret == -1) {
++        gf_msg(this->name, GF_LOG_WARNING, local->op_errno,
++               DHT_MSG_PARENT_LAYOUT_CHANGED,
++               "%s (%s/%s) (path: %s): "
++               "extracting in-memory layout of parent failed. ",
++               gf_fop_list[local->fop], pgfid, loc->name, loc->path);
++        goto err;
++    }
++
++    ret = dict_set_str_sizen(local->params, GF_PREOP_PARENT_KEY,
++                             conf->xattr_name);
++    if (ret < 0) {
++        gf_msg(this->name, GF_LOG_WARNING, local->op_errno,
++               DHT_MSG_PARENT_LAYOUT_CHANGED,
++               "%s (%s/%s) (path: %s): "
++               "setting %s key in params dictionary failed. ",
++               gf_fop_list[local->fop], pgfid, loc->name, loc->path,
++               GF_PREOP_PARENT_KEY);
++        goto err;
++    }
++
++    ret = dict_set_bin(local->params, conf->xattr_name, parent_disk_layout,
++                       4 * 4);
++    if (ret < 0) {
++        gf_msg(this->name, GF_LOG_WARNING, local->op_errno,
++               DHT_MSG_PARENT_LAYOUT_CHANGED,
++               "%s (%s/%s) (path: %s): "
++               "setting parent-layout in params dictionary failed. ",
++               gf_fop_list[local->fop], pgfid, loc->name, loc->path);
++        goto err;
++    }
++
++err:
++    dht_layout_unref(this, parent_layout);
++    return ret;
++}
++
++int
+ dht_create(call_frame_t *frame, xlator_t *this, loc_t *loc, int32_t flags,
+            mode_t mode, mode_t umask, fd_t *fd, dict_t *params)
+ {
+@@ -8705,6 +8825,11 @@ dht_create(call_frame_t *frame, xlator_t *this, loc_t *loc, int32_t flags,
+         goto err;
+     }
+ 
++    local->params = dict_ref(params);
++    local->flags = flags;
++    local->mode = mode;
++    local->umask = umask;
++
+     if (dht_filter_loc_subvol_key(this, loc, &local->loc, &subvol)) {
+         gf_msg(this->name, GF_LOG_INFO, 0, DHT_MSG_SUBVOL_INFO,
+                "creating %s on %s (got create on %s)", local->loc.path,
+@@ -8720,10 +8845,6 @@ dht_create(call_frame_t *frame, xlator_t *this, loc_t *loc, int32_t flags,
+ 
+         if (hashed_subvol && (hashed_subvol != subvol)) {
+             /* Create the linkto file and then the data file */
+-            local->params = dict_ref(params);
+-            local->flags = flags;
+-            local->mode = mode;
+-            local->umask = umask;
+             local->cached_subvol = subvol;
+             local->hashed_subvol = hashed_subvol;
+ 
+@@ -8736,6 +8857,9 @@ dht_create(call_frame_t *frame, xlator_t *this, loc_t *loc, int32_t flags,
+          * file as we expect a lookup everywhere if there are problems
+          * with the parent layout
+          */
++
++        dht_set_parent_layout_in_dict(loc, this, local);
++
+         STACK_WIND_COOKIE(frame, dht_create_cbk, subvol, subvol,
+                           subvol->fops->create, &local->loc, flags, mode, umask,
+                           fd, params);
+@@ -8787,11 +8911,6 @@ dht_create(call_frame_t *frame, xlator_t *this, loc_t *loc, int32_t flags,
+                     goto err;
+                 }
+ 
+-                local->params = dict_ref(params);
+-                local->flags = flags;
+-                local->mode = mode;
+-                local->umask = umask;
+-
+                 loc_wipe(&local->loc);
+ 
+                 ret = dht_build_parent_loc(this, &local->loc, loc, &op_errno);
+diff --git a/xlators/cluster/dht/src/dht-common.h b/xlators/cluster/dht/src/dht-common.h
+index 8e65111..1b3e826 100644
+--- a/xlators/cluster/dht/src/dht-common.h
++++ b/xlators/cluster/dht/src/dht-common.h
+@@ -1549,4 +1549,10 @@ dht_check_remote_fd_failed_error(dht_local_t *local, int op_ret, int op_errno);
+ int
+ dht_dir_layout_error_check(xlator_t *this, inode_t *inode);
+ 
++int32_t
++dht_create_lock(call_frame_t *frame, xlator_t *subvol);
++
++int
++dht_set_parent_layout_in_dict(loc_t *loc, xlator_t *this, dht_local_t *local);
++
+ #endif /* _DHT_H */
+diff --git a/xlators/protocol/client/src/client-rpc-fops_v2.c b/xlators/protocol/client/src/client-rpc-fops_v2.c
+index 2673b6e..613dda8 100644
+--- a/xlators/protocol/client/src/client-rpc-fops_v2.c
++++ b/xlators/protocol/client/src/client-rpc-fops_v2.c
+@@ -2094,11 +2094,12 @@ client4_0_create_cbk(struct rpc_req *req, struct iovec *iov, int count,
+         goto out;
+     }
+ 
++    ret = client_post_create_v2(this, &rsp, &stbuf, &preparent, &postparent,
++                                local, &xdata);
++    if (ret < 0)
++        goto out;
++
+     if (-1 != rsp.op_ret) {
+-        ret = client_post_create_v2(this, &rsp, &stbuf, &preparent, &postparent,
+-                                    local, &xdata);
+-        if (ret < 0)
+-            goto out;
+         ret = client_add_fd_to_saved_fds(frame->this, fd, &local->loc,
+                                          local->flags, rsp.fd, 0);
+         if (ret) {
+diff --git a/xlators/storage/posix/src/posix-entry-ops.c b/xlators/storage/posix/src/posix-entry-ops.c
+index bea0bbf..65650b3 100644
+--- a/xlators/storage/posix/src/posix-entry-ops.c
++++ b/xlators/storage/posix/src/posix-entry-ops.c
+@@ -2070,6 +2070,8 @@ posix_create(call_frame_t *frame, xlator_t *this, loc_t *loc, int32_t flags,
+     gf_boolean_t entry_created = _gf_false, gfid_set = _gf_false;
+     mode_t mode_bit = 0;
+ 
++    dict_t *xdata_rsp = dict_ref(xdata);
++
+     DECLARE_OLD_FS_ID_VAR;
+ 
+     VALIDATE_OR_GOTO(frame, out);
+@@ -2118,6 +2120,28 @@ posix_create(call_frame_t *frame, xlator_t *this, loc_t *loc, int32_t flags,
+         was_present = 0;
+     }
+ 
++    if (!was_present) {
++        if (posix_is_layout_stale(xdata, par_path, this)) {
++            op_ret = -1;
++            op_errno = EIO;
++            if (!xdata_rsp) {
++                xdata_rsp = dict_new();
++                if (!xdata_rsp) {
++                    op_errno = ENOMEM;
++                    goto out;
++                }
++            }
++
++            if (dict_set_int32_sizen(xdata_rsp, GF_PREOP_CHECK_FAILED, 1) ==
++                -1) {
++                gf_msg(this->name, GF_LOG_ERROR, errno, P_MSG_DICT_SET_FAILED,
++                       "setting key %s in dict failed", GF_PREOP_CHECK_FAILED);
++            }
++
++            goto out;
++        }
++    }
++
+     if (priv->o_direct)
+         _flags |= O_DIRECT;
+ 
+@@ -2239,7 +2263,10 @@ out:
+ 
+     STACK_UNWIND_STRICT(create, frame, op_ret, op_errno, fd,
+                         (loc) ? loc->inode : NULL, &stbuf, &preparent,
+-                        &postparent, xdata);
++                        &postparent, xdata_rsp);
++
++    if (xdata_rsp)
++        dict_unref(xdata_rsp);
+ 
+     return 0;
+ }
+diff --git a/xlators/storage/posix/src/posix-helpers.c b/xlators/storage/posix/src/posix-helpers.c
+index 35dd3b6..2c27d22 100644
+--- a/xlators/storage/posix/src/posix-helpers.c
++++ b/xlators/storage/posix/src/posix-helpers.c
+@@ -3559,3 +3559,79 @@ posix_update_iatt_buf(struct iatt *buf, int fd, char *loc, dict_t *xattr_req)
+         }
+     }
+ }
++
++gf_boolean_t
++posix_is_layout_stale(dict_t *xdata, char *par_path, xlator_t *this)
++{
++    int op_ret = 0;
++    ssize_t size = 0;
++    char value_buf[4096] = {
++        0,
++    };
++    gf_boolean_t have_val = _gf_false;
++    data_t *arg_data = NULL;
++    char *xattr_name = NULL;
++    gf_boolean_t is_stale = _gf_false;
++
++    op_ret = dict_get_str_sizen(xdata, GF_PREOP_PARENT_KEY, &xattr_name);
++    if (xattr_name == NULL) {
++        op_ret = 0;
++        goto out;
++    }
++
++    arg_data = dict_get(xdata, xattr_name);
++    if (!arg_data) {
++        op_ret = 0;
++        goto out;
++    }
++
++    size = sys_lgetxattr(par_path, xattr_name, value_buf,
++                         sizeof(value_buf) - 1);
++
++    if (size >= 0) {
++        have_val = _gf_true;
++    } else {
++        if (errno == ERANGE) {
++            gf_msg(this->name, GF_LOG_INFO, errno, P_MSG_PREOP_CHECK_FAILED,
++                   "getxattr on key (%s) path (%s) failed due to"
++                   " buffer overflow",
++                   xattr_name, par_path);
++            size = sys_lgetxattr(par_path, xattr_name, NULL, 0);
++        }
++        if (size < 0) {
++            op_ret = -1;
++            gf_msg(this->name, GF_LOG_ERROR, errno, P_MSG_PREOP_CHECK_FAILED,
++                   "getxattr on key (%s)  failed, path : %s", xattr_name,
++                   par_path);
++            goto out;
++        }
++    }
++
++    if (!have_val) {
++        size = sys_lgetxattr(par_path, xattr_name, value_buf, size);
++        if (size < 0) {
++            gf_msg(this->name, GF_LOG_ERROR, errno, P_MSG_PREOP_CHECK_FAILED,
++                   "getxattr on key (%s) failed (%s)", xattr_name,
++                   strerror(errno));
++            goto out;
++        }
++    }
++
++    if ((arg_data->len != size) || (memcmp(arg_data->data, value_buf, size))) {
++        gf_msg(this->name, GF_LOG_INFO, EIO, P_MSG_PREOP_CHECK_FAILED,
++               "failing preop as on-disk xattr value differs from argument "
++               "value for key %s",
++               xattr_name);
++        op_ret = -1;
++    }
++
++out:
++    dict_del_sizen(xdata, xattr_name);
++    dict_del_sizen(xdata, GF_PREOP_PARENT_KEY);
++
++    if (op_ret == -1) {
++        is_stale = _gf_true;
++    }
++
++    return is_stale;
++}
+diff --git a/xlators/storage/posix/src/posix.h b/xlators/storage/posix/src/posix.h
+index dd51062..ac9d83c 100644
+--- a/xlators/storage/posix/src/posix.h
++++ b/xlators/storage/posix/src/posix.h
+@@ -671,4 +671,8 @@ posix_spawn_ctx_janitor_thread(xlator_t *this);
+ 
+ void
+ posix_update_iatt_buf(struct iatt *buf, int fd, char *loc, dict_t *xdata);
++
++gf_boolean_t
++posix_is_layout_stale(dict_t *xdata, char *par_path, xlator_t *this);
++
+ #endif /* _POSIX_H */
+-- 
+1.8.3.1
+

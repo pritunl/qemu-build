@@ -1,0 +1,44 @@
+From 147cff762b307bf60519bae4cdefc62f655119a7 Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Wed, 30 Oct 2019 10:47:17 +0530
+Subject: [PATCH 331/335] features/locks: Do special handling for op-version <
+ 3.12.0
+
+Problem:
+Patch https://code.engineering.redhat.com/gerrit/#/c/140080/ diverges from
+its upstream patch(https://review.gluster.org/c/glusterfs/+/20031) in op-version.
+On upstream special-handling happens for version < 3.10.0 whereas for downstream
+special-handling happens for version < 3.12.0.
+    When rebase happened for 3.5.0 from upstream, this downstream specific change
+is missed as there was no special downstream-only patch tracking this difference.
+This leads to I/O errors on upgrade from 3.3.1->3.5.0
+
+Fix:
+Do special handling for op-version < 3.12.0 as in 3.4.x
+
+Change-Id: I72fec058bdfb3cd30d017d205c90aa61aec86c5d
+Label: DOWNSTREAM ONLY
+BUG: 1766640
+Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/185835
+Reviewed-by: Xavi Hernandez Juan <xhernandez@redhat.com>
+---
+ xlators/features/locks/src/posix.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/features/locks/src/posix.c b/xlators/features/locks/src/posix.c
+index 9db5ac6..4592240 100644
+--- a/xlators/features/locks/src/posix.c
++++ b/xlators/features/locks/src/posix.c
+@@ -57,7 +57,7 @@ fetch_pathinfo(xlator_t *, inode_t *, int32_t *, char **);
+     do {                                                                       \
+         pl_local_t *__local = NULL;                                            \
+         if (frame->root->client &&                                             \
+-            (frame->root->client->opversion < GD_OP_VERSION_3_10_0)) {         \
++            (frame->root->client->opversion < GD_OP_VERSION_3_12_0)) {         \
+             __local = frame->local;                                            \
+             PL_STACK_UNWIND_AND_FREE(__local, fop, frame, op_ret, params);     \
+         } else {                                                               \
+-- 
+1.8.3.1
+

@@ -1,0 +1,52 @@
+From a92b4f6373cb18544325436cf86abfebd6780d79 Mon Sep 17 00:00:00 2001
+From: Homma <homma@allworks.co.jp>
+Date: Fri, 5 Jul 2019 16:10:41 +0530
+Subject: [PATCH 409/449] system/posix-acl: update ctx only if iatt is non-NULL
+
+We need to safe-guard against possible zero'ing out of iatt
+structure in acl ctx, which can cause many issues.
+
+> upstream patch: https://review.gluster.org/#/c/glusterfs/+/23003/
+> fixes: 1668286
+> Change-Id: Ie81a57d7453a6624078de3be8c0845bf4d432773
+> Signed-off-by: Amar Tumballi <amarts@redhat.com>
+
+BUG: 1781649
+Change-Id: I655b61551d30215b9f23cafc3ef9a5c0d98a43d0
+Signed-off-by: Raghavendra M <raghavendra@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202446
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/system/posix-acl/src/posix-acl.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/xlators/system/posix-acl/src/posix-acl.c b/xlators/system/posix-acl/src/posix-acl.c
+index 38e48b8..c6ba281 100644
+--- a/xlators/system/posix-acl/src/posix-acl.c
++++ b/xlators/system/posix-acl/src/posix-acl.c
+@@ -875,6 +875,13 @@ posix_acl_ctx_update(inode_t *inode, xlator_t *this, struct iatt *buf,
+     int ret = 0;
+     int i = 0;
+ 
++    if (!buf || !buf->ia_ctime) {
++        /* No need to update ctx if buf is empty */
++        gf_log_callingfn(this->name, GF_LOG_DEBUG, "iatt struct is empty (%d)",
++                         fop);
++        goto out;
++    }
++
+     LOCK(&inode->lock);
+     {
+         ctx = __posix_acl_ctx_get(inode, this, _gf_true);
+@@ -928,6 +935,7 @@ posix_acl_ctx_update(inode_t *inode, xlator_t *this, struct iatt *buf,
+     }
+ unlock:
+     UNLOCK(&inode->lock);
++out:
+     return ret;
+ }
+ 
+-- 
+1.8.3.1
+

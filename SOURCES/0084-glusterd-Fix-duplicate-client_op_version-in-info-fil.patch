@@ -1,0 +1,37 @@
+From d7bee4a4ad0878003e19711e20994c42c4d2bd9e Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Tue, 9 Apr 2019 16:15:09 +0530
+Subject: [PATCH 084/124] glusterd: Fix duplicate client_op_version in info
+ file
+
+This must have been introduced while applying downstream only patches at
+RHGS 3.5.0 branch.
+
+Change-Id: I231249cca2a7bce29ef53cf95f9d2377b8203283
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167341
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-store.c | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-store.c b/xlators/mgmt/glusterd/src/glusterd-store.c
+index fb52957..351bd9e 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-store.c
++++ b/xlators/mgmt/glusterd/src/glusterd-store.c
+@@ -1022,11 +1022,6 @@ glusterd_volume_exclude_options_write(int fd, glusterd_volinfo_t *volinfo)
+             goto out;
+     }
+ 
+-    snprintf(buf, sizeof(buf), "%d", volinfo->client_op_version);
+-    ret = gf_store_save_value(fd, GLUSTERD_STORE_KEY_VOL_CLIENT_OP_VERSION,
+-                              buf);
+-    if (ret)
+-        goto out;
+     if (volinfo->caps) {
+         snprintf(buf, sizeof(buf), "%d", volinfo->caps);
+         ret = gf_store_save_value(fd, GLUSTERD_STORE_KEY_VOL_CAPS, buf);
+-- 
+1.8.3.1
+

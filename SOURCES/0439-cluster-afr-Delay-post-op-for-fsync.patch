@@ -1,0 +1,438 @@
+From 3ed98fc9dcb39223032e343fd5b0ad17fa3cae14 Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Fri, 29 May 2020 14:24:53 +0530
+Subject: [PATCH 439/449] cluster/afr: Delay post-op for fsync
+
+Problem:
+AFR doesn't delay post-op for fsync fop. For fsync heavy workloads
+this leads to un-necessary fxattrop/finodelk for every fsync leading
+to bad performance.
+
+Fix:
+Have delayed post-op for fsync. Add special flag in xdata to indicate
+that afr shouldn't delay post-op in cases where either the
+process will terminate or graph-switch would happen. Otherwise it leads
+to un-necessary heals when the graph-switch/process-termination
+happens before delayed-post-op completes.
+
+> Upstream-patch: https://review.gluster.org/c/glusterfs/+/24473
+> Fixes: #1253
+
+BUG: 1838479
+Change-Id: I531940d13269a111c49e0510d49514dc169f4577
+Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202676
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ api/src/glfs-resolve.c                         |  14 ++-
+ tests/basic/afr/durability-off.t               |   2 +
+ tests/basic/gfapi/gfapi-graph-switch-open-fd.t |  44 +++++++++
+ tests/basic/gfapi/gfapi-keep-writing.c         | 129 +++++++++++++++++++++++++
+ xlators/cluster/afr/src/afr-inode-write.c      |  11 ++-
+ xlators/cluster/afr/src/afr-transaction.c      |   9 +-
+ xlators/cluster/afr/src/afr.h                  |   2 +-
+ xlators/cluster/dht/src/dht-rebalance.c        |  15 ++-
+ xlators/mount/fuse/src/fuse-bridge.c           |  23 ++++-
+ 9 files changed, 239 insertions(+), 10 deletions(-)
+ create mode 100644 tests/basic/gfapi/gfapi-graph-switch-open-fd.t
+ create mode 100644 tests/basic/gfapi/gfapi-keep-writing.c
+
+diff --git a/api/src/glfs-resolve.c b/api/src/glfs-resolve.c
+index a79f490..062b7dc 100644
+--- a/api/src/glfs-resolve.c
++++ b/api/src/glfs-resolve.c
+@@ -722,6 +722,7 @@ glfs_migrate_fd_safe(struct glfs *fs, xlator_t *newsubvol, fd_t *oldfd)
+         0,
+     };
+     char uuid1[64];
++    dict_t *xdata = NULL;
+ 
+     oldinode = oldfd->inode;
+     oldsubvol = oldinode->table->xl;
+@@ -730,7 +731,15 @@ glfs_migrate_fd_safe(struct glfs *fs, xlator_t *newsubvol, fd_t *oldfd)
+         return fd_ref(oldfd);
+ 
+     if (!oldsubvol->switched) {
+-        ret = syncop_fsync(oldsubvol, oldfd, 0, NULL, NULL, NULL, NULL);
++        xdata = dict_new();
++        if (!xdata || dict_set_int8(xdata, "last-fsync", 1)) {
++            gf_msg(fs->volname, GF_LOG_WARNING, ENOMEM, API_MSG_FSYNC_FAILED,
++                   "last-fsync set failed on %s graph %s (%d)",
++                   uuid_utoa_r(oldfd->inode->gfid, uuid1),
++                   graphid_str(oldsubvol), oldsubvol->graph->id);
++        }
++
++        ret = syncop_fsync(oldsubvol, oldfd, 0, NULL, NULL, xdata, NULL);
+         DECODE_SYNCOP_ERR(ret);
+         if (ret) {
+             gf_msg(fs->volname, GF_LOG_WARNING, errno, API_MSG_FSYNC_FAILED,
+@@ -809,6 +818,9 @@ out:
+         newfd = NULL;
+     }
+ 
++    if (xdata)
++        dict_unref(xdata);
++
+     return newfd;
+ }
+ 
+diff --git a/tests/basic/afr/durability-off.t b/tests/basic/afr/durability-off.t
+index 155ffa0..6e0f18b 100644
+--- a/tests/basic/afr/durability-off.t
++++ b/tests/basic/afr/durability-off.t
+@@ -26,6 +26,8 @@ TEST $CLI volume heal $V0
+ EXPECT_WITHIN $HEAL_TIMEOUT "0" get_pending_heal_count $V0
+ EXPECT "^0$" echo $($CLI volume profile $V0 info | grep -w FSYNC | wc -l)
+ 
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 1
+ #Test that fsyncs happen when durability is on
+ TEST $CLI volume set $V0 cluster.ensure-durability on
+ TEST $CLI volume set $V0 performance.strict-write-ordering on
+diff --git a/tests/basic/gfapi/gfapi-graph-switch-open-fd.t b/tests/basic/gfapi/gfapi-graph-switch-open-fd.t
+new file mode 100644
+index 0000000..2e666be
+--- /dev/null
++++ b/tests/basic/gfapi/gfapi-graph-switch-open-fd.t
+@@ -0,0 +1,44 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++
++cleanup;
++
++TEST glusterd
++
++TEST $CLI volume create $V0 replica 3 ${H0}:$B0/brick{0..2};
++EXPECT 'Created' volinfo_field $V0 'Status';
++
++TEST $CLI volume start $V0;
++EXPECT 'Started' volinfo_field $V0 'Status';
++
++TEST $GFS --volfile-id=$V0 --volfile-server=$H0 $M0;
++TEST touch $M0/sync
++logdir=`gluster --print-logdir`
++
++TEST build_tester $(dirname $0)/gfapi-keep-writing.c -lgfapi
++
++
++#Launch a program to keep doing writes on an fd
++./$(dirname $0)/gfapi-keep-writing ${H0} $V0 $logdir/gfapi-async-calls-test.log sync &
++p=$!
++sleep 1 #Let some writes go through
++#Check if graph switch will lead to any pending markers for ever
++TEST $CLI volume set $V0 performance.quick-read off
++TEST $CLI volume set $V0 performance.io-cache off
++TEST $CLI volume set $V0 performance.stat-prefetch off
++TEST $CLI volume set $V0 performance.read-ahead off
++
++
++TEST rm -f $M0/sync #Make sure the glfd is closed
++TEST wait #Wait for background process to die
++#Goal is to check if there is permanent FOOL changelog
++sleep 5
++EXPECT "0x000000000000000000000000" afr_get_changelog_xattr $B0/brick0/glfs_test.txt trusted.afr.dirty
++EXPECT "0x000000000000000000000000" afr_get_changelog_xattr $B0/brick1/glfs_test.txt trusted.afr.dirty
++EXPECT "0x000000000000000000000000" afr_get_changelog_xattr $B0/brick2/glfs_test.txt trusted.afr.dirty
++
++cleanup_tester $(dirname $0)/gfapi-async-calls-test
++
++cleanup;
+diff --git a/tests/basic/gfapi/gfapi-keep-writing.c b/tests/basic/gfapi/gfapi-keep-writing.c
+new file mode 100644
+index 0000000..91b59ce
+--- /dev/null
++++ b/tests/basic/gfapi/gfapi-keep-writing.c
+@@ -0,0 +1,129 @@
++#include <fcntl.h>
++#include <unistd.h>
++#include <time.h>
++#include <limits.h>
++#include <string.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <errno.h>
++#include <glusterfs/api/glfs.h>
++#include <glusterfs/api/glfs-handles.h>
++
++#define LOG_ERR(msg)                                                           \
++    do {                                                                       \
++        fprintf(stderr, "%s : Error (%s)\n", msg, strerror(errno));            \
++    } while (0)
++
++glfs_t *
++init_glfs(const char *hostname, const char *volname, const char *logfile)
++{
++    int ret = -1;
++    glfs_t *fs = NULL;
++
++    fs = glfs_new(volname);
++    if (!fs) {
++        LOG_ERR("glfs_new failed");
++        return NULL;
++    }
++
++    ret = glfs_set_volfile_server(fs, "tcp", hostname, 24007);
++    if (ret < 0) {
++        LOG_ERR("glfs_set_volfile_server failed");
++        goto out;
++    }
++
++    ret = glfs_set_logging(fs, logfile, 7);
++    if (ret < 0) {
++        LOG_ERR("glfs_set_logging failed");
++        goto out;
++    }
++
++    ret = glfs_init(fs);
++    if (ret < 0) {
++        LOG_ERR("glfs_init failed");
++        goto out;
++    }
++
++    ret = 0;
++out:
++    if (ret) {
++        glfs_fini(fs);
++        fs = NULL;
++    }
++
++    return fs;
++}
++
++int
++glfs_test_function(const char *hostname, const char *volname,
++                   const char *logfile, const char *syncfile)
++{
++    int ret = -1;
++    int flags = O_CREAT | O_RDWR;
++    glfs_t *fs = NULL;
++    glfs_fd_t *glfd = NULL;
++    const char *buff = "This is from my prog\n";
++    const char *filename = "glfs_test.txt";
++    struct stat buf = {0};
++
++    fs = init_glfs(hostname, volname, logfile);
++    if (fs == NULL) {
++        LOG_ERR("init_glfs failed");
++        return -1;
++    }
++
++    glfd = glfs_creat(fs, filename, flags, 0644);
++    if (glfd == NULL) {
++        LOG_ERR("glfs_creat failed");
++        goto out;
++    }
++
++    while (glfs_stat(fs, syncfile, &buf) == 0) {
++        ret = glfs_write(glfd, buff, strlen(buff), flags);
++        if (ret < 0) {
++            LOG_ERR("glfs_write failed");
++            goto out;
++        }
++    }
++
++    ret = glfs_close(glfd);
++    if (ret < 0) {
++        LOG_ERR("glfs_write failed");
++        goto out;
++    }
++
++out:
++    ret = glfs_fini(fs);
++    if (ret) {
++        LOG_ERR("glfs_fini failed");
++    }
++
++    return ret;
++}
++
++int
++main(int argc, char *argv[])
++{
++    int ret = 0;
++    char *hostname = NULL;
++    char *volname = NULL;
++    char *logfile = NULL;
++    char *syncfile = NULL;
++
++    if (argc != 5) {
++        fprintf(stderr, "Invalid argument\n");
++        exit(1);
++    }
++
++    hostname = argv[1];
++    volname = argv[2];
++    logfile = argv[3];
++    syncfile = argv[4];
++
++    ret = glfs_test_function(hostname, volname, logfile, syncfile);
++    if (ret) {
++        LOG_ERR("glfs_test_function failed");
++    }
++
++    return ret;
++}
+diff --git a/xlators/cluster/afr/src/afr-inode-write.c b/xlators/cluster/afr/src/afr-inode-write.c
+index 7fcc9d4..df82b6e 100644
+--- a/xlators/cluster/afr/src/afr-inode-write.c
++++ b/xlators/cluster/afr/src/afr-inode-write.c
+@@ -2492,6 +2492,7 @@ afr_fsync(call_frame_t *frame, xlator_t *this, fd_t *fd, int32_t datasync,
+     call_frame_t *transaction_frame = NULL;
+     int ret = -1;
+     int32_t op_errno = ENOMEM;
++    int8_t last_fsync = 0;
+ 
+     transaction_frame = copy_frame(frame);
+     if (!transaction_frame)
+@@ -2501,10 +2502,16 @@ afr_fsync(call_frame_t *frame, xlator_t *this, fd_t *fd, int32_t datasync,
+     if (!local)
+         goto out;
+ 
+-    if (xdata)
++    if (xdata) {
+         local->xdata_req = dict_copy_with_ref(xdata, NULL);
+-    else
++        if (dict_get_int8(xdata, "last-fsync", &last_fsync) == 0) {
++            if (last_fsync) {
++                local->transaction.disable_delayed_post_op = _gf_true;
++            }
++        }
++    } else {
+         local->xdata_req = dict_new();
++    }
+ 
+     if (!local->xdata_req)
+         goto out;
+diff --git a/xlators/cluster/afr/src/afr-transaction.c b/xlators/cluster/afr/src/afr-transaction.c
+index 8e65ae2..ffd0ab8 100644
+--- a/xlators/cluster/afr/src/afr-transaction.c
++++ b/xlators/cluster/afr/src/afr-transaction.c
+@@ -2385,8 +2385,13 @@ afr_is_delayed_changelog_post_op_needed(call_frame_t *frame, xlator_t *this,
+         goto out;
+     }
+ 
+-    if ((local->op != GF_FOP_WRITE) && (local->op != GF_FOP_FXATTROP)) {
+-        /*Only allow writes but shard does [f]xattrops on writes, so
++    if (local->transaction.disable_delayed_post_op) {
++        goto out;
++    }
++
++    if ((local->op != GF_FOP_WRITE) && (local->op != GF_FOP_FXATTROP) &&
++        (local->op != GF_FOP_FSYNC)) {
++        /*Only allow writes/fsyncs but shard does [f]xattrops on writes, so
+          * they are fine too*/
+         goto out;
+     }
+diff --git a/xlators/cluster/afr/src/afr.h b/xlators/cluster/afr/src/afr.h
+index 18f1a6a..ff96246 100644
+--- a/xlators/cluster/afr/src/afr.h
++++ b/xlators/cluster/afr/src/afr.h
+@@ -854,7 +854,7 @@ typedef struct _afr_local {
+ 
+         int (*unwind)(call_frame_t *frame, xlator_t *this);
+ 
+-        /* post-op hook */
++        gf_boolean_t disable_delayed_post_op;
+     } transaction;
+ 
+     syncbarrier_t barrier;
+diff --git a/xlators/cluster/dht/src/dht-rebalance.c b/xlators/cluster/dht/src/dht-rebalance.c
+index d0c21b4..e9974cd 100644
+--- a/xlators/cluster/dht/src/dht-rebalance.c
++++ b/xlators/cluster/dht/src/dht-rebalance.c
+@@ -1550,6 +1550,7 @@ dht_migrate_file(xlator_t *this, loc_t *loc, xlator_t *from, xlator_t *to,
+     xlator_t *old_target = NULL;
+     xlator_t *hashed_subvol = NULL;
+     fd_t *linkto_fd = NULL;
++    dict_t *xdata = NULL;
+ 
+     if (from == to) {
+         gf_msg_debug(this->name, 0,
+@@ -1868,7 +1869,15 @@ dht_migrate_file(xlator_t *this, loc_t *loc, xlator_t *from, xlator_t *to,
+ 
+     /* TODO: Sync the locks */
+ 
+-    ret = syncop_fsync(to, dst_fd, 0, NULL, NULL, NULL, NULL);
++    xdata = dict_new();
++    if (!xdata || dict_set_int8(xdata, "last-fsync", 1)) {
++        gf_log(this->name, GF_LOG_ERROR,
++               "%s: failed to set last-fsync flag on "
++               "%s (%s)",
++               loc->path, to->name, strerror(ENOMEM));
++    }
++
++    ret = syncop_fsync(to, dst_fd, 0, NULL, NULL, xdata, NULL);
+     if (ret) {
+         gf_log(this->name, GF_LOG_WARNING, "%s: failed to fsync on %s (%s)",
+                loc->path, to->name, strerror(-ret));
+@@ -2342,11 +2351,15 @@ out:
+ 
+     if (dst_fd)
+         syncop_close(dst_fd);
++
+     if (src_fd)
+         syncop_close(src_fd);
+     if (linkto_fd)
+         syncop_close(linkto_fd);
+ 
++    if (xdata)
++        dict_unref(xdata);
++
+     loc_wipe(&tmp_loc);
+     loc_wipe(&parent_loc);
+ 
+diff --git a/xlators/mount/fuse/src/fuse-bridge.c b/xlators/mount/fuse/src/fuse-bridge.c
+index fdeec49..4264fad 100644
+--- a/xlators/mount/fuse/src/fuse-bridge.c
++++ b/xlators/mount/fuse/src/fuse-bridge.c
+@@ -5559,6 +5559,7 @@ fuse_migrate_fd(xlator_t *this, fd_t *basefd, xlator_t *old_subvol,
+     char create_in_progress = 0;
+     fuse_fd_ctx_t *basefd_ctx = NULL;
+     fd_t *oldfd = NULL;
++    dict_t *xdata = NULL;
+ 
+     basefd_ctx = fuse_fd_ctx_get(this, basefd);
+     GF_VALIDATE_OR_GOTO("glusterfs-fuse", basefd_ctx, out);
+@@ -5595,10 +5596,23 @@ fuse_migrate_fd(xlator_t *this, fd_t *basefd, xlator_t *old_subvol,
+     }
+ 
+     if (oldfd->inode->table->xl == old_subvol) {
+-        if (IA_ISDIR(oldfd->inode->ia_type))
++        if (IA_ISDIR(oldfd->inode->ia_type)) {
+             ret = syncop_fsyncdir(old_subvol, oldfd, 0, NULL, NULL);
+-        else
+-            ret = syncop_fsync(old_subvol, oldfd, 0, NULL, NULL, NULL, NULL);
++        } else {
++            xdata = dict_new();
++            if (!xdata || dict_set_int8(xdata, "last-fsync", 1)) {
++                gf_log("glusterfs-fuse", GF_LOG_WARNING,
++                       "last-fsync set failed (%s) on fd (%p)"
++                       "(basefd:%p basefd-inode.gfid:%s) "
++                       "(old-subvolume:%s-%d new-subvolume:%s-%d)",
++                       strerror(ENOMEM), oldfd, basefd,
++                       uuid_utoa(basefd->inode->gfid), old_subvol->name,
++                       old_subvol->graph->id, new_subvol->name,
++                       new_subvol->graph->id);
++            }
++
++            ret = syncop_fsync(old_subvol, oldfd, 0, NULL, NULL, xdata, NULL);
++        }
+ 
+         if (ret < 0) {
+             gf_log("glusterfs-fuse", GF_LOG_WARNING,
+@@ -5653,6 +5667,9 @@ out:
+ 
+     fd_unref(oldfd);
+ 
++    if (xdata)
++        dict_unref(xdata);
++
+     return ret;
+ }
+ 
+-- 
+1.8.3.1
+

@@ -1,0 +1,42 @@
+From c283f15ac9bfb1c98ce95ed0000ebed81cd3b318 Mon Sep 17 00:00:00 2001
+From: Poornima G <pgurusid@redhat.com>
+Date: Wed, 26 Apr 2017 14:07:58 +0530
+Subject: [PATCH 16/52] glusterd, parallel-readdir: Change the op-version of
+ parallel-readdir to 31100
+
+Issue: Downstream 3.2 was released with op-version 31001, parallel-readdir
+feature in upstream was released in 3.10 and hence with op-version 31000.
+With this, parallel-readdir will be allowed in 3.2 cluster/clients as well.
+But 3.2 didn't have parallel-readdir feature backported.
+
+Fix:
+Increase the op-version of parallel-readdir feature only in downstream
+to 31100(3.3 highest op-version)
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I2640520985627f3a1cb4fb96e28350f8bb9b146c
+Signed-off-by: Poornima G <pgurusid@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/104403
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index d07fc10..a31ecda 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -2718,7 +2718,7 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+      .option = "parallel-readdir",
+      .value = "off",
+      .type = DOC,
+-     .op_version = GD_OP_VERSION_3_10_0,
++     .op_version = GD_OP_VERSION_3_11_0,
+      .validate_fn = validate_parallel_readdir,
+      .description = "If this option is enabled, the readdir operation "
+                     "is performed in parallel on all the bricks, thus "
+-- 
+1.8.3.1
+

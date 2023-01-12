@@ -1,0 +1,1059 @@
+From 2f5969a77493814e242e6bac3c6bf7acf3202e0f Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez <xhernandez@redhat.com>
+Date: Tue, 5 Mar 2019 18:58:20 +0100
+Subject: [PATCH 209/221] core: avoid dynamic TLS allocation when possible
+
+Some interdependencies between logging and memory management functions
+make it impossible to use the logging framework before initializing
+memory subsystem because they both depend on Thread Local Storage
+allocated through pthread_key_create() during initialization.
+
+This causes a crash when we try to log something very early in the
+initialization phase.
+
+To prevent this, several dynamically allocated TLS structures have
+been replaced by static TLS reserved at compile time using '__thread'
+keyword. This also reduces the number of error sources, making
+initialization simpler.
+
+Upstream patch:
+> BUG: 1193929
+> Upstream patch link: https://review.gluster.org/c/glusterfs/+/22302
+> Change-Id: I8ea2e072411e30790d50084b6b7e909c7bb01d50
+> Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+
+Change-Id: I8ea2e072411e30790d50084b6b7e909c7bb01d50
+Updates: bz#1722801
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/174711
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ api/src/glfs.c                                     |   3 +-
+ cli/src/cli.c                                      |   3 +-
+ glusterfsd/src/glusterfsd.c                        |   4 +-
+ libglusterfs/src/globals.c                         | 289 ++++-----------------
+ libglusterfs/src/glusterfs/globals.h               |   6 +-
+ libglusterfs/src/glusterfs/mem-pool.h              |   7 +-
+ libglusterfs/src/libglusterfs.sym                  |   3 +-
+ libglusterfs/src/mem-pool.c                        |  98 +++----
+ libglusterfs/src/syncop.c                          | 133 ++--------
+ .../changelog/lib/src/gf-changelog-helpers.c       |  51 +---
+ xlators/features/changelog/lib/src/gf-changelog.c  |   3 +-
+ xlators/nfs/server/src/mount3udp_svc.c             |   6 +-
+ 12 files changed, 114 insertions(+), 492 deletions(-)
+
+diff --git a/api/src/glfs.c b/api/src/glfs.c
+index 6bbb620..f36616d 100644
+--- a/api/src/glfs.c
++++ b/api/src/glfs.c
+@@ -829,8 +829,7 @@ pub_glfs_new(const char *volname)
+      * Do this as soon as possible in case something else depends on
+      * pool allocations.
+      */
+-    mem_pools_init_early();
+-    mem_pools_init_late();
++    mem_pools_init();
+ 
+     fs = glfs_new_fs(volname);
+     if (!fs)
+diff --git a/cli/src/cli.c b/cli/src/cli.c
+index ff39a98..99a16a0 100644
+--- a/cli/src/cli.c
++++ b/cli/src/cli.c
+@@ -795,8 +795,7 @@ main(int argc, char *argv[])
+     int ret = -1;
+     glusterfs_ctx_t *ctx = NULL;
+ 
+-    mem_pools_init_early();
+-    mem_pools_init_late();
++    mem_pools_init();
+ 
+     ctx = glusterfs_ctx_new();
+     if (!ctx)
+diff --git a/glusterfsd/src/glusterfsd.c b/glusterfsd/src/glusterfsd.c
+index 6aee4c1..2172af4 100644
+--- a/glusterfsd/src/glusterfsd.c
++++ b/glusterfsd/src/glusterfsd.c
+@@ -2722,8 +2722,6 @@ main(int argc, char *argv[])
+     };
+     cmd_args_t *cmd = NULL;
+ 
+-    mem_pools_init_early();
+-
+     gf_check_and_set_mem_acct(argc, argv);
+ 
+     ctx = glusterfs_ctx_new();
+@@ -2838,7 +2836,7 @@ main(int argc, char *argv[])
+      * the parent, but we want to do it as soon as possible after that in
+      * case something else depends on pool allocations.
+      */
+-    mem_pools_init_late();
++    mem_pools_init();
+ 
+ #ifdef GF_LINUX_HOST_OS
+     ret = set_oom_score_adj(ctx);
+diff --git a/libglusterfs/src/globals.c b/libglusterfs/src/globals.c
+index 4fec063..02098e6 100644
+--- a/libglusterfs/src/globals.c
++++ b/libglusterfs/src/globals.c
+@@ -99,16 +99,19 @@ const char *gf_upcall_list[GF_UPCALL_FLAGS_MAXVALUE] = {
+ glusterfs_ctx_t *global_ctx = NULL;
+ pthread_mutex_t global_ctx_mutex = PTHREAD_MUTEX_INITIALIZER;
+ xlator_t global_xlator;
+-static pthread_key_t this_xlator_key;
+-static pthread_key_t synctask_key;
+-static pthread_key_t uuid_buf_key;
+-static char global_uuid_buf[GF_UUID_BUF_SIZE];
+-static pthread_key_t lkowner_buf_key;
+-static char global_lkowner_buf[GF_LKOWNER_BUF_SIZE];
+-static pthread_key_t leaseid_buf_key;
+ static int gf_global_mem_acct_enable = 1;
+ static pthread_once_t globals_inited = PTHREAD_ONCE_INIT;
+ 
++static pthread_key_t free_key;
++
++static __thread xlator_t *thread_xlator = NULL;
++static __thread void *thread_synctask = NULL;
++static __thread void *thread_leaseid = NULL;
++static __thread struct syncopctx thread_syncopctx = {};
++static __thread char thread_uuid_buf[GF_UUID_BUF_SIZE] = {};
++static __thread char thread_lkowner_buf[GF_LKOWNER_BUF_SIZE] = {};
++static __thread char thread_leaseid_buf[GF_LEASE_ID_BUF_SIZE] = {};
++
+ int
+ gf_global_mem_acct_enable_get(void)
+ {
+@@ -122,12 +125,6 @@ gf_global_mem_acct_enable_set(int val)
+     return 0;
+ }
+ 
+-void
+-glusterfs_this_destroy(void *ptr)
+-{
+-    FREE(ptr);
+-}
+-
+ static struct xlator_cbks global_cbks = {
+     .forget = NULL,
+     .release = NULL,
+@@ -212,18 +209,9 @@ struct volume_options global_xl_options[] = {
+ 
+ static volume_opt_list_t global_xl_opt_list;
+ 
+-int
++void
+ glusterfs_this_init()
+ {
+-    int ret = 0;
+-    ret = pthread_key_create(&this_xlator_key, glusterfs_this_destroy);
+-    if (ret != 0) {
+-        gf_msg("", GF_LOG_WARNING, ret, LG_MSG_PTHREAD_KEY_CREATE_FAILED,
+-               "failed to create "
+-               "the pthread key");
+-        return ret;
+-    }
+-
+     global_xlator.name = "glusterfs";
+     global_xlator.type = GF_GLOBAL_XLATOR_NAME;
+     global_xlator.cbks = &global_cbks;
+@@ -237,301 +225,120 @@ glusterfs_this_init()
+     global_xl_opt_list.given_opt = global_xl_options;
+ 
+     list_add_tail(&global_xl_opt_list.list, &global_xlator.volume_options);
+-
+-    return ret;
+ }
+ 
+ xlator_t **
+ __glusterfs_this_location()
+ {
+-    xlator_t **this_location = NULL;
+-    int ret = 0;
+-
+-    this_location = pthread_getspecific(this_xlator_key);
+-
+-    if (!this_location) {
+-        this_location = CALLOC(1, sizeof(*this_location));
+-        if (!this_location)
+-            goto out;
++    xlator_t **this_location;
+ 
+-        ret = pthread_setspecific(this_xlator_key, this_location);
+-        if (ret != 0) {
+-            FREE(this_location);
+-            this_location = NULL;
+-            goto out;
+-        }
+-    }
+-out:
+-    if (this_location) {
+-        if (!*this_location)
+-            *this_location = &global_xlator;
++    this_location = &thread_xlator;
++    if (*this_location == NULL) {
++        thread_xlator = &global_xlator;
+     }
++
+     return this_location;
+ }
+ 
+ xlator_t *
+ glusterfs_this_get()
+ {
+-    xlator_t **this_location = NULL;
+-
+-    this_location = __glusterfs_this_location();
+-    if (!this_location)
+-        return &global_xlator;
+-
+-    return *this_location;
++    return *__glusterfs_this_location();
+ }
+ 
+-int
++void
+ glusterfs_this_set(xlator_t *this)
+ {
+-    xlator_t **this_location = NULL;
+-
+-    this_location = __glusterfs_this_location();
+-    if (!this_location)
+-        return -ENOMEM;
+-
+-    *this_location = this;
+-
+-    return 0;
++    thread_xlator = this;
+ }
+ 
+ /* SYNCOPCTX */
+-static pthread_key_t syncopctx_key;
+-
+-static void
+-syncopctx_key_destroy(void *ptr)
+-{
+-    struct syncopctx *opctx = ptr;
+-
+-    if (opctx) {
+-        if (opctx->groups)
+-            GF_FREE(opctx->groups);
+-
+-        GF_FREE(opctx);
+-    }
+-
+-    return;
+-}
+ 
+ void *
+ syncopctx_getctx()
+ {
+-    void *opctx = NULL;
+-
+-    opctx = pthread_getspecific(syncopctx_key);
+-
+-    return opctx;
+-}
+-
+-int
+-syncopctx_setctx(void *ctx)
+-{
+-    int ret = 0;
+-
+-    ret = pthread_setspecific(syncopctx_key, ctx);
+-
+-    return ret;
+-}
+-
+-static int
+-syncopctx_init(void)
+-{
+-    int ret;
+-
+-    ret = pthread_key_create(&syncopctx_key, syncopctx_key_destroy);
+-
+-    return ret;
++    return &thread_syncopctx;
+ }
+ 
+ /* SYNCTASK */
+ 
+-int
+-synctask_init()
+-{
+-    int ret = 0;
+-
+-    ret = pthread_key_create(&synctask_key, NULL);
+-
+-    return ret;
+-}
+-
+ void *
+ synctask_get()
+ {
+-    void *synctask = NULL;
+-
+-    synctask = pthread_getspecific(synctask_key);
+-
+-    return synctask;
++    return thread_synctask;
+ }
+ 
+-int
++void
+ synctask_set(void *synctask)
+ {
+-    int ret = 0;
+-
+-    pthread_setspecific(synctask_key, synctask);
+-
+-    return ret;
++    thread_synctask = synctask;
+ }
+ 
+ // UUID_BUFFER
+ 
+-void
+-glusterfs_uuid_buf_destroy(void *ptr)
+-{
+-    FREE(ptr);
+-}
+-
+-int
+-glusterfs_uuid_buf_init()
+-{
+-    int ret = 0;
+-
+-    ret = pthread_key_create(&uuid_buf_key, glusterfs_uuid_buf_destroy);
+-    return ret;
+-}
+-
+ char *
+ glusterfs_uuid_buf_get()
+ {
+-    char *buf;
+-    int ret = 0;
+-
+-    buf = pthread_getspecific(uuid_buf_key);
+-    if (!buf) {
+-        buf = MALLOC(GF_UUID_BUF_SIZE);
+-        ret = pthread_setspecific(uuid_buf_key, (void *)buf);
+-        if (ret)
+-            buf = global_uuid_buf;
+-    }
+-    return buf;
++    return thread_uuid_buf;
+ }
+ 
+ /* LKOWNER_BUFFER */
+ 
+-void
+-glusterfs_lkowner_buf_destroy(void *ptr)
+-{
+-    FREE(ptr);
+-}
+-
+-int
+-glusterfs_lkowner_buf_init()
+-{
+-    int ret = 0;
+-
+-    ret = pthread_key_create(&lkowner_buf_key, glusterfs_lkowner_buf_destroy);
+-    return ret;
+-}
+-
+ char *
+ glusterfs_lkowner_buf_get()
+ {
+-    char *buf;
+-    int ret = 0;
+-
+-    buf = pthread_getspecific(lkowner_buf_key);
+-    if (!buf) {
+-        buf = MALLOC(GF_LKOWNER_BUF_SIZE);
+-        ret = pthread_setspecific(lkowner_buf_key, (void *)buf);
+-        if (ret)
+-            buf = global_lkowner_buf;
+-    }
+-    return buf;
++    return thread_lkowner_buf;
+ }
+ 
+ /* Leaseid buffer */
+-void
+-glusterfs_leaseid_buf_destroy(void *ptr)
+-{
+-    FREE(ptr);
+-}
+-
+-int
+-glusterfs_leaseid_buf_init()
+-{
+-    int ret = 0;
+-
+-    ret = pthread_key_create(&leaseid_buf_key, glusterfs_leaseid_buf_destroy);
+-    return ret;
+-}
+ 
+ char *
+ glusterfs_leaseid_buf_get()
+ {
+     char *buf = NULL;
+-    int ret = 0;
+ 
+-    buf = pthread_getspecific(leaseid_buf_key);
+-    if (!buf) {
+-        buf = CALLOC(1, GF_LEASE_ID_BUF_SIZE);
+-        ret = pthread_setspecific(leaseid_buf_key, (void *)buf);
+-        if (ret) {
+-            FREE(buf);
+-            buf = NULL;
+-        }
++    buf = thread_leaseid;
++    if (buf == NULL) {
++        buf = thread_leaseid_buf;
++        thread_leaseid = buf;
+     }
++
+     return buf;
+ }
+ 
+ char *
+ glusterfs_leaseid_exist()
+ {
+-    return pthread_getspecific(leaseid_buf_key);
++    return thread_leaseid;
+ }
+ 
+ static void
+-gf_globals_init_once()
++glusterfs_cleanup(void *ptr)
+ {
+-    int ret = 0;
+-
+-    ret = glusterfs_this_init();
+-    if (ret) {
+-        gf_msg("", GF_LOG_CRITICAL, 0, LG_MSG_TRANSLATOR_INIT_FAILED,
+-               "ERROR: glusterfs-translator init failed");
+-        goto out;
+-    }
+-
+-    ret = glusterfs_uuid_buf_init();
+-    if (ret) {
+-        gf_msg("", GF_LOG_CRITICAL, 0, LG_MSG_UUID_BUF_INIT_FAILED,
+-               "ERROR: glusterfs uuid buffer init failed");
+-        goto out;
++    if (thread_syncopctx.groups != NULL) {
++        GF_FREE(thread_syncopctx.groups);
+     }
+ 
+-    ret = glusterfs_lkowner_buf_init();
+-    if (ret) {
+-        gf_msg("", GF_LOG_CRITICAL, 0, LG_MSG_LKOWNER_BUF_INIT_FAILED,
+-               "ERROR: glusterfs lkowner buffer init failed");
+-        goto out;
+-    }
++    mem_pool_thread_destructor();
++}
+ 
+-    ret = glusterfs_leaseid_buf_init();
+-    if (ret) {
+-        gf_msg("", GF_LOG_CRITICAL, 0, LG_MSG_LEASEID_BUF_INIT_FAILED,
+-               "ERROR: glusterfs leaseid buffer init failed");
+-        goto out;
+-    }
++static void
++gf_globals_init_once()
++{
++    int ret = 0;
+ 
+-    ret = synctask_init();
+-    if (ret) {
+-        gf_msg("", GF_LOG_CRITICAL, 0, LG_MSG_SYNCTASK_INIT_FAILED,
+-               "ERROR: glusterfs synctask init failed");
+-        goto out;
+-    }
++    glusterfs_this_init();
+ 
+-    ret = syncopctx_init();
+-    if (ret) {
+-        gf_msg("", GF_LOG_CRITICAL, 0, LG_MSG_SYNCOPCTX_INIT_FAILED,
+-               "ERROR: glusterfs syncopctx init failed");
+-        goto out;
+-    }
+-out:
++    /* This is needed only to cleanup the potential allocation of
++     * thread_syncopctx.groups. */
++    ret = pthread_key_create(&free_key, glusterfs_cleanup);
++    if (ret != 0) {
++        gf_msg("", GF_LOG_ERROR, ret, LG_MSG_PTHREAD_KEY_CREATE_FAILED,
++               "failed to create the pthread key");
+ 
+-    if (ret) {
+         gf_msg("", GF_LOG_CRITICAL, 0, LG_MSG_GLOBAL_INIT_FAILED,
+                "Exiting as global initialization failed");
++
+         exit(ret);
+     }
+ }
+diff --git a/libglusterfs/src/glusterfs/globals.h b/libglusterfs/src/glusterfs/globals.h
+index e45db14..55476f6 100644
+--- a/libglusterfs/src/glusterfs/globals.h
++++ b/libglusterfs/src/glusterfs/globals.h
+@@ -147,7 +147,7 @@ xlator_t **
+ __glusterfs_this_location(void);
+ xlator_t *
+ glusterfs_this_get(void);
+-int
++void
+ glusterfs_this_set(xlator_t *);
+ 
+ extern xlator_t global_xlator;
+@@ -156,13 +156,11 @@ extern struct volume_options global_xl_options[];
+ /* syncopctx */
+ void *
+ syncopctx_getctx(void);
+-int
+-syncopctx_setctx(void *ctx);
+ 
+ /* task */
+ void *
+ synctask_get(void);
+-int
++void
+ synctask_set(void *);
+ 
+ /* uuid_buf */
+diff --git a/libglusterfs/src/glusterfs/mem-pool.h b/libglusterfs/src/glusterfs/mem-pool.h
+index 0250b59..c5a486b 100644
+--- a/libglusterfs/src/glusterfs/mem-pool.h
++++ b/libglusterfs/src/glusterfs/mem-pool.h
+@@ -279,9 +279,7 @@ struct mem_pool_shared {
+ };
+ 
+ void
+-mem_pools_init_early(void); /* basic initialization of memory pools */
+-void
+-mem_pools_init_late(void); /* start the pool_sweeper thread */
++mem_pools_init(void); /* start the pool_sweeper thread */
+ void
+ mem_pools_fini(void); /* cleanup memory pools */
+ 
+@@ -306,6 +304,9 @@ void
+ mem_pool_destroy(struct mem_pool *pool);
+ 
+ void
++mem_pool_thread_destructor(void);
++
++void
+ gf_mem_acct_enable_set(void *ctx);
+ 
+ #endif /* _MEM_POOL_H */
+diff --git a/libglusterfs/src/libglusterfs.sym b/libglusterfs/src/libglusterfs.sym
+index 7a2edef..86215d2 100644
+--- a/libglusterfs/src/libglusterfs.sym
++++ b/libglusterfs/src/libglusterfs.sym
+@@ -872,8 +872,7 @@ mem_get0
+ mem_pool_destroy
+ mem_pool_new_fn
+ mem_pools_fini
+-mem_pools_init_early
+-mem_pools_init_late
++mem_pools_init
+ mem_put
+ mkdir_p
+ next_token
+diff --git a/libglusterfs/src/mem-pool.c b/libglusterfs/src/mem-pool.c
+index 9b4ea52..ab78804 100644
+--- a/libglusterfs/src/mem-pool.c
++++ b/libglusterfs/src/mem-pool.c
+@@ -353,7 +353,6 @@ free:
+     FREE(ptr);
+ }
+ 
+-static pthread_key_t pool_key;
+ static pthread_mutex_t pool_lock = PTHREAD_MUTEX_INITIALIZER;
+ static struct list_head pool_threads;
+ static pthread_mutex_t pool_free_lock = PTHREAD_MUTEX_INITIALIZER;
+@@ -361,6 +360,8 @@ static struct list_head pool_free_threads;
+ static struct mem_pool_shared pools[NPOOLS];
+ static size_t pool_list_size;
+ 
++static __thread per_thread_pool_list_t *thread_pool_list = NULL;
++
+ #if !defined(GF_DISABLE_MEMPOOL)
+ #define N_COLD_LISTS 1024
+ #define POOL_SWEEP_SECS 30
+@@ -373,7 +374,6 @@ typedef struct {
+ 
+ enum init_state {
+     GF_MEMPOOL_INIT_NONE = 0,
+-    GF_MEMPOOL_INIT_PREINIT,
+     GF_MEMPOOL_INIT_EARLY,
+     GF_MEMPOOL_INIT_LATE,
+     GF_MEMPOOL_INIT_DESTROY
+@@ -486,9 +486,9 @@ pool_sweeper(void *arg)
+ }
+ 
+ void
+-pool_destructor(void *arg)
++mem_pool_thread_destructor(void)
+ {
+-    per_thread_pool_list_t *pool_list = arg;
++    per_thread_pool_list_t *pool_list = thread_pool_list;
+ 
+     /* The pool-sweeper thread will take it from here.
+      *
+@@ -499,7 +499,10 @@ pool_destructor(void *arg)
+      * This change can modify what mem_put() does, but both possibilities are
+      * fine until the sweeper thread kicks in. The real synchronization must be
+      * between mem_put() and the sweeper thread. */
+-    pool_list->poison = 1;
++    if (pool_list != NULL) {
++        pool_list->poison = 1;
++        thread_pool_list = NULL;
++    }
+ }
+ 
+ static __attribute__((constructor)) void
+@@ -522,46 +525,14 @@ mem_pools_preinit(void)
+     pool_list_size = sizeof(per_thread_pool_list_t) +
+                      sizeof(per_thread_pool_t) * (NPOOLS - 1);
+ 
+-    init_done = GF_MEMPOOL_INIT_PREINIT;
++    init_done = GF_MEMPOOL_INIT_EARLY;
+ }
+ 
+-/* Use mem_pools_init_early() function for basic initialization. There will be
+- * no cleanup done by the pool_sweeper thread until mem_pools_init_late() has
+- * been called. Calling mem_get() will be possible after this function has
+- * setup the basic structures. */
++/* Call mem_pools_init() once threading has been configured completely. This
++ * prevent the pool_sweeper thread from getting killed once the main() thread
++ * exits during deamonizing. */
+ void
+-mem_pools_init_early(void)
+-{
+-    pthread_mutex_lock(&init_mutex);
+-    /* Use a pthread_key destructor to clean up when a thread exits.
+-     *
+-     * We won't increase init_count here, that is only done when the
+-     * pool_sweeper thread is started too.
+-     */
+-    if (init_done == GF_MEMPOOL_INIT_PREINIT ||
+-        init_done == GF_MEMPOOL_INIT_DESTROY) {
+-        /* key has not been created yet */
+-        if (pthread_key_create(&pool_key, pool_destructor) != 0) {
+-            gf_log("mem-pool", GF_LOG_CRITICAL,
+-                   "failed to initialize mem-pool key");
+-        }
+-
+-        init_done = GF_MEMPOOL_INIT_EARLY;
+-    } else {
+-        gf_log("mem-pool", GF_LOG_CRITICAL,
+-               "incorrect order of mem-pool initialization "
+-               "(init_done=%d)",
+-               init_done);
+-    }
+-
+-    pthread_mutex_unlock(&init_mutex);
+-}
+-
+-/* Call mem_pools_init_late() once threading has been configured completely.
+- * This prevent the pool_sweeper thread from getting killed once the main()
+- * thread exits during deamonizing. */
+-void
+-mem_pools_init_late(void)
++mem_pools_init(void)
+ {
+     pthread_mutex_lock(&init_mutex);
+     if ((init_count++) == 0) {
+@@ -580,13 +551,12 @@ mem_pools_fini(void)
+     switch (init_count) {
+         case 0:
+             /*
+-             * If init_count is already zero (as e.g. if somebody called
+-             * this before mem_pools_init_late) then the sweeper was
+-             * probably never even started so we don't need to stop it.
+-             * Even if there's some crazy circumstance where there is a
+-             * sweeper but init_count is still zero, that just means we'll
+-             * leave it running.  Not perfect, but far better than any
+-             * known alternative.
++             * If init_count is already zero (as e.g. if somebody called this
++             * before mem_pools_init) then the sweeper was probably never even
++             * started so we don't need to stop it. Even if there's some crazy
++             * circumstance where there is a sweeper but init_count is still
++             * zero, that just means we'll leave it running. Not perfect, but
++             * far better than any known alternative.
+              */
+             break;
+         case 1: {
+@@ -594,20 +564,17 @@ mem_pools_fini(void)
+             per_thread_pool_list_t *next_pl;
+             unsigned int i;
+ 
+-            /* if only mem_pools_init_early() was called, sweeper_tid will
+-             * be invalid and the functions will error out. That is not
+-             * critical. In all other cases, the sweeper_tid will be valid
+-             * and the thread gets stopped. */
++            /* if mem_pools_init() was not called, sweeper_tid will be invalid
++             * and the functions will error out. That is not critical. In all
++             * other cases, the sweeper_tid will be valid and the thread gets
++             * stopped. */
+             (void)pthread_cancel(sweeper_tid);
+             (void)pthread_join(sweeper_tid, NULL);
+ 
+-            /* Need to clean the pool_key to prevent further usage of the
+-             * per_thread_pool_list_t structure that is stored for each
+-             * thread.
+-             * This also prevents calling pool_destructor() when a thread
+-             * exits, so there is no chance on a use-after-free of the
+-             * per_thread_pool_list_t structure. */
+-            (void)pthread_key_delete(pool_key);
++            /* At this point all threads should have already terminated, so
++             * it should be safe to destroy all pending per_thread_pool_list_t
++             * structures that are stored for each thread. */
++            mem_pool_thread_destructor();
+ 
+             /* free all objects from all pools */
+             list_for_each_entry_safe(pool_list, next_pl, &pool_threads,
+@@ -642,11 +609,7 @@ mem_pools_fini(void)
+ 
+ #else
+ void
+-mem_pools_init_early(void)
+-{
+-}
+-void
+-mem_pools_init_late(void)
++mem_pools_init(void)
+ {
+ }
+ void
+@@ -734,7 +697,7 @@ mem_get_pool_list(void)
+     per_thread_pool_list_t *pool_list;
+     unsigned int i;
+ 
+-    pool_list = pthread_getspecific(pool_key);
++    pool_list = thread_pool_list;
+     if (pool_list) {
+         return pool_list;
+     }
+@@ -767,7 +730,8 @@ mem_get_pool_list(void)
+     list_add(&pool_list->thr_list, &pool_threads);
+     (void)pthread_mutex_unlock(&pool_lock);
+ 
+-    (void)pthread_setspecific(pool_key, pool_list);
++    thread_pool_list = pool_list;
++
+     return pool_list;
+ }
+ 
+diff --git a/libglusterfs/src/syncop.c b/libglusterfs/src/syncop.c
+index c05939a..2eb7b49 100644
+--- a/libglusterfs/src/syncop.c
++++ b/libglusterfs/src/syncop.c
+@@ -26,28 +26,10 @@ syncopctx_setfsuid(void *uid)
+ 
+     opctx = syncopctx_getctx();
+ 
+-    /* alloc for this thread the first time */
+-    if (!opctx) {
+-        opctx = GF_CALLOC(1, sizeof(*opctx), gf_common_mt_syncopctx);
+-        if (!opctx) {
+-            ret = -1;
+-            goto out;
+-        }
+-
+-        ret = syncopctx_setctx(opctx);
+-        if (ret != 0) {
+-            GF_FREE(opctx);
+-            opctx = NULL;
+-            goto out;
+-        }
+-    }
++    opctx->uid = *(uid_t *)uid;
++    opctx->valid |= SYNCOPCTX_UID;
+ 
+ out:
+-    if (opctx && uid) {
+-        opctx->uid = *(uid_t *)uid;
+-        opctx->valid |= SYNCOPCTX_UID;
+-    }
+-
+     return ret;
+ }
+ 
+@@ -66,28 +48,10 @@ syncopctx_setfsgid(void *gid)
+ 
+     opctx = syncopctx_getctx();
+ 
+-    /* alloc for this thread the first time */
+-    if (!opctx) {
+-        opctx = GF_CALLOC(1, sizeof(*opctx), gf_common_mt_syncopctx);
+-        if (!opctx) {
+-            ret = -1;
+-            goto out;
+-        }
+-
+-        ret = syncopctx_setctx(opctx);
+-        if (ret != 0) {
+-            GF_FREE(opctx);
+-            opctx = NULL;
+-            goto out;
+-        }
+-    }
++    opctx->gid = *(gid_t *)gid;
++    opctx->valid |= SYNCOPCTX_GID;
+ 
+ out:
+-    if (opctx && gid) {
+-        opctx->gid = *(gid_t *)gid;
+-        opctx->valid |= SYNCOPCTX_GID;
+-    }
+-
+     return ret;
+ }
+ 
+@@ -107,43 +71,20 @@ syncopctx_setfsgroups(int count, const void *groups)
+ 
+     opctx = syncopctx_getctx();
+ 
+-    /* alloc for this thread the first time */
+-    if (!opctx) {
+-        opctx = GF_CALLOC(1, sizeof(*opctx), gf_common_mt_syncopctx);
+-        if (!opctx) {
+-            ret = -1;
+-            goto out;
+-        }
+-
+-        ret = syncopctx_setctx(opctx);
+-        if (ret != 0) {
+-            GF_FREE(opctx);
+-            opctx = NULL;
+-            goto out;
+-        }
+-    }
+-
+     /* resize internal groups as required */
+     if (count && opctx->grpsize < count) {
+         if (opctx->groups) {
+-            tmpgroups = GF_REALLOC(opctx->groups, (sizeof(gid_t) * count));
+-            /* NOTE: Not really required to zero the reallocation,
+-             * as ngrps controls the validity of data,
+-             * making a note irrespective */
+-            if (tmpgroups == NULL) {
+-                opctx->grpsize = 0;
+-                GF_FREE(opctx->groups);
+-                opctx->groups = NULL;
+-                ret = -1;
+-                goto out;
+-            }
+-        } else {
+-            tmpgroups = GF_CALLOC(count, sizeof(gid_t), gf_common_mt_syncopctx);
+-            if (tmpgroups == NULL) {
+-                opctx->grpsize = 0;
+-                ret = -1;
+-                goto out;
+-            }
++            /* Group list will be updated later, so no need to keep current
++             * data and waste time copying it. It's better to free the current
++             * allocation and then allocate a fresh new memory block. */
++            GF_FREE(opctx->groups);
++            opctx->groups = NULL;
++            opctx->grpsize = 0;
++        }
++        tmpgroups = GF_MALLOC(count * sizeof(gid_t), gf_common_mt_syncopctx);
++        if (tmpgroups == NULL) {
++            ret = -1;
++            goto out;
+         }
+ 
+         opctx->groups = tmpgroups;
+@@ -177,28 +118,10 @@ syncopctx_setfspid(void *pid)
+ 
+     opctx = syncopctx_getctx();
+ 
+-    /* alloc for this thread the first time */
+-    if (!opctx) {
+-        opctx = GF_CALLOC(1, sizeof(*opctx), gf_common_mt_syncopctx);
+-        if (!opctx) {
+-            ret = -1;
+-            goto out;
+-        }
+-
+-        ret = syncopctx_setctx(opctx);
+-        if (ret != 0) {
+-            GF_FREE(opctx);
+-            opctx = NULL;
+-            goto out;
+-        }
+-    }
++    opctx->pid = *(pid_t *)pid;
++    opctx->valid |= SYNCOPCTX_PID;
+ 
+ out:
+-    if (opctx && pid) {
+-        opctx->pid = *(pid_t *)pid;
+-        opctx->valid |= SYNCOPCTX_PID;
+-    }
+-
+     return ret;
+ }
+ 
+@@ -217,28 +140,10 @@ syncopctx_setfslkowner(gf_lkowner_t *lk_owner)
+ 
+     opctx = syncopctx_getctx();
+ 
+-    /* alloc for this thread the first time */
+-    if (!opctx) {
+-        opctx = GF_CALLOC(1, sizeof(*opctx), gf_common_mt_syncopctx);
+-        if (!opctx) {
+-            ret = -1;
+-            goto out;
+-        }
+-
+-        ret = syncopctx_setctx(opctx);
+-        if (ret != 0) {
+-            GF_FREE(opctx);
+-            opctx = NULL;
+-            goto out;
+-        }
+-    }
++    opctx->lk_owner = *lk_owner;
++    opctx->valid |= SYNCOPCTX_LKOWNER;
+ 
+ out:
+-    if (opctx && lk_owner) {
+-        opctx->lk_owner = *lk_owner;
+-        opctx->valid |= SYNCOPCTX_LKOWNER;
+-    }
+-
+     return ret;
+ }
+ 
+diff --git a/xlators/features/changelog/lib/src/gf-changelog-helpers.c b/xlators/features/changelog/lib/src/gf-changelog-helpers.c
+index 03dac5e..e5a9db4 100644
+--- a/xlators/features/changelog/lib/src/gf-changelog-helpers.c
++++ b/xlators/features/changelog/lib/src/gf-changelog-helpers.c
+@@ -64,20 +64,7 @@ gf_rfc3986_encode_space_newline(unsigned char *s, char *enc, char *estr)
+  *       made a part of libglusterfs.
+  */
+ 
+-static pthread_key_t rl_key;
+-static pthread_once_t rl_once = PTHREAD_ONCE_INIT;
+-
+-static void
+-readline_destructor(void *ptr)
+-{
+-    GF_FREE(ptr);
+-}
+-
+-static void
+-readline_once(void)
+-{
+-    pthread_key_create(&rl_key, readline_destructor);
+-}
++static __thread read_line_t thread_tsd = {};
+ 
+ static ssize_t
+ my_read(read_line_t *tsd, int fd, char *ptr)
+@@ -97,27 +84,6 @@ my_read(read_line_t *tsd, int fd, char *ptr)
+     return 1;
+ }
+ 
+-static int
+-gf_readline_init_once(read_line_t **tsd)
+-{
+-    if (pthread_once(&rl_once, readline_once) != 0)
+-        return -1;
+-
+-    *tsd = pthread_getspecific(rl_key);
+-    if (*tsd)
+-        goto out;
+-
+-    *tsd = GF_CALLOC(1, sizeof(**tsd), gf_changelog_mt_libgfchangelog_rl_t);
+-    if (!*tsd)
+-        return -1;
+-
+-    if (pthread_setspecific(rl_key, *tsd) != 0)
+-        return -1;
+-
+-out:
+-    return 0;
+-}
+-
+ ssize_t
+ gf_readline(int fd, void *vptr, size_t maxlen)
+ {
+@@ -125,10 +91,7 @@ gf_readline(int fd, void *vptr, size_t maxlen)
+     size_t rc = 0;
+     char c = ' ';
+     char *ptr = NULL;
+-    read_line_t *tsd = NULL;
+-
+-    if (gf_readline_init_once(&tsd))
+-        return -1;
++    read_line_t *tsd = &thread_tsd;
+ 
+     ptr = vptr;
+     for (n = 1; n < maxlen; n++) {
+@@ -151,10 +114,7 @@ off_t
+ gf_lseek(int fd, off_t offset, int whence)
+ {
+     off_t off = 0;
+-    read_line_t *tsd = NULL;
+-
+-    if (gf_readline_init_once(&tsd))
+-        return -1;
++    read_line_t *tsd = &thread_tsd;
+ 
+     off = sys_lseek(fd, offset, whence);
+     if (off == -1)
+@@ -169,10 +129,7 @@ gf_lseek(int fd, off_t offset, int whence)
+ int
+ gf_ftruncate(int fd, off_t length)
+ {
+-    read_line_t *tsd = NULL;
+-
+-    if (gf_readline_init_once(&tsd))
+-        return -1;
++    read_line_t *tsd = &thread_tsd;
+ 
+     if (sys_ftruncate(fd, 0))
+         return -1;
+diff --git a/xlators/features/changelog/lib/src/gf-changelog.c b/xlators/features/changelog/lib/src/gf-changelog.c
+index 7ed9e55..d6acb37 100644
+--- a/xlators/features/changelog/lib/src/gf-changelog.c
++++ b/xlators/features/changelog/lib/src/gf-changelog.c
+@@ -237,9 +237,8 @@ gf_changelog_init_master()
+ {
+     int ret = 0;
+ 
+-    mem_pools_init_early();
+     ret = gf_changelog_init_context();
+-    mem_pools_init_late();
++    mem_pools_init();
+ 
+     return ret;
+ }
+diff --git a/xlators/nfs/server/src/mount3udp_svc.c b/xlators/nfs/server/src/mount3udp_svc.c
+index d5e4169..0688779eb 100644
+--- a/xlators/nfs/server/src/mount3udp_svc.c
++++ b/xlators/nfs/server/src/mount3udp_svc.c
+@@ -216,11 +216,7 @@ mount3udp_thread(void *argv)
+ 
+     GF_ASSERT(nfsx);
+ 
+-    if (glusterfs_this_set(nfsx)) {
+-        gf_msg(GF_MNT, GF_LOG_ERROR, ENOMEM, NFS_MSG_XLATOR_SET_FAIL,
+-               "Failed to set xlator, nfs.mount-udp will not work");
+-        return NULL;
+-    }
++    glusterfs_this_set(nfsx);
+ 
+     transp = svcudp_create(RPC_ANYSOCK);
+     if (transp == NULL) {
+-- 
+1.8.3.1
+

@@ -1,0 +1,41 @@
+From 4fa3c0be983c3f99c2785036ded5ef5ab390419b Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Mon, 6 May 2019 15:57:16 +0530
+Subject: [PATCH 211/221] libglusterfs: Fix compilation when --disable-mempool
+ is used
+
+Upstream patch:
+> BUG: 1193929
+> Upstream patch link: https://review.gluster.org/c/glusterfs/+/22665
+> Change-Id: I245c065b209bcce5db939b6a0a934ba6fd393b47
+> Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+
+Updates: bz#1722801
+Change-Id: I245c065b209bcce5db939b6a0a934ba6fd393b47
+Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/174713
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ libglusterfs/src/mem-pool.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/libglusterfs/src/mem-pool.c b/libglusterfs/src/mem-pool.c
+index ca25ffc..df167b6 100644
+--- a/libglusterfs/src/mem-pool.c
++++ b/libglusterfs/src/mem-pool.c
+@@ -616,6 +616,11 @@ void
+ mem_pools_fini(void)
+ {
+ }
++void
++mem_pool_thread_destructor(void)
++{
++}
++
+ #endif
+ 
+ struct mem_pool *
+-- 
+1.8.3.1
+

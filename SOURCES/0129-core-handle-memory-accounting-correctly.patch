@@ -1,0 +1,401 @@
+From f305ee93ec9dbbd679e1eb58c7c0bf8d9b5659d5 Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez <xhernandez@redhat.com>
+Date: Fri, 12 Apr 2019 13:40:59 +0200
+Subject: [PATCH 129/141] core: handle memory accounting correctly
+
+When a translator stops, memory accounting for that translator is not
+destroyed (because there could remain memory allocated that references
+it), but mutexes that coordinate updates of memory accounting were
+destroyed. This caused incorrect memory accounting and even crashes in
+debug mode.
+
+This patch also fixes some other things:
+
+* Reduce the number of atomic operations needed to manage memory
+  accounting.
+* Correctly account memory when realloc() is used.
+* Merge two critical sections into one.
+* Cleaned the code a bit.
+
+Upstream patch:
+> Change-Id: Id5eaee7338729b9bc52c931815ca3ff1e5a7dcc8
+> Upstream patch link : https://review.gluster.org/#/c/glusterfs/+/22554/
+> BUG: 1659334
+> Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+
+Change-Id: Id5eaee7338729b9bc52c931815ca3ff1e5a7dcc8
+Fixes: bz#1702270
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/169325
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ libglusterfs/src/glusterfs/xlator.h |   2 +
+ libglusterfs/src/libglusterfs.sym   |   1 +
+ libglusterfs/src/mem-pool.c         | 193 ++++++++++++++++--------------------
+ libglusterfs/src/xlator.c           |  23 +++--
+ 4 files changed, 105 insertions(+), 114 deletions(-)
+
+diff --git a/libglusterfs/src/glusterfs/xlator.h b/libglusterfs/src/glusterfs/xlator.h
+index 06152ec..8998976 100644
+--- a/libglusterfs/src/glusterfs/xlator.h
++++ b/libglusterfs/src/glusterfs/xlator.h
+@@ -1035,6 +1035,8 @@ gf_boolean_t
+ loc_is_nameless(loc_t *loc);
+ int
+ xlator_mem_acct_init(xlator_t *xl, int num_types);
++void
++xlator_mem_acct_unref(struct mem_acct *mem_acct);
+ int
+ is_gf_log_command(xlator_t *trans, const char *name, char *value);
+ int
+diff --git a/libglusterfs/src/libglusterfs.sym b/libglusterfs/src/libglusterfs.sym
+index fa2025e..cf5757c 100644
+--- a/libglusterfs/src/libglusterfs.sym
++++ b/libglusterfs/src/libglusterfs.sym
+@@ -1093,6 +1093,7 @@ xlator_foreach
+ xlator_foreach_depth_first
+ xlator_init
+ xlator_mem_acct_init
++xlator_mem_acct_unref
+ xlator_notify
+ xlator_option_info_list
+ xlator_option_init_bool
+diff --git a/libglusterfs/src/mem-pool.c b/libglusterfs/src/mem-pool.c
+index 34cb87a..3934a78 100644
+--- a/libglusterfs/src/mem-pool.c
++++ b/libglusterfs/src/mem-pool.c
+@@ -35,61 +35,92 @@ gf_mem_acct_enable_set(void *data)
+     return;
+ }
+ 
+-int
+-gf_mem_set_acct_info(xlator_t *xl, char **alloc_ptr, size_t size, uint32_t type,
+-                     const char *typestr)
++static void *
++gf_mem_header_prepare(struct mem_header *header, size_t size)
+ {
+-    void *ptr = NULL;
+-    struct mem_header *header = NULL;
++    void *ptr;
+ 
+-    if (!alloc_ptr)
+-        return -1;
++    header->size = size;
+ 
+-    ptr = *alloc_ptr;
++    ptr = header + 1;
+ 
+-    GF_ASSERT(xl != NULL);
++    /* data follows in this gap of 'size' bytes */
++    *(uint32_t *)(ptr + size) = GF_MEM_TRAILER_MAGIC;
+ 
+-    GF_ASSERT(xl->mem_acct != NULL);
++    return ptr;
++}
+ 
+-    GF_ASSERT(type <= xl->mem_acct->num_types);
++static void *
++gf_mem_set_acct_info(struct mem_acct *mem_acct, struct mem_header *header,
++                     size_t size, uint32_t type, const char *typestr)
++{
++    struct mem_acct_rec *rec = NULL;
++    bool new_ref = false;
+ 
+-    LOCK(&xl->mem_acct->rec[type].lock);
+-    {
+-        if (!xl->mem_acct->rec[type].typestr)
+-            xl->mem_acct->rec[type].typestr = typestr;
+-        xl->mem_acct->rec[type].size += size;
+-        xl->mem_acct->rec[type].num_allocs++;
+-        xl->mem_acct->rec[type].total_allocs++;
+-        xl->mem_acct->rec[type].max_size = max(xl->mem_acct->rec[type].max_size,
+-                                               xl->mem_acct->rec[type].size);
+-        xl->mem_acct->rec[type].max_num_allocs = max(
+-            xl->mem_acct->rec[type].max_num_allocs,
+-            xl->mem_acct->rec[type].num_allocs);
+-    }
+-    UNLOCK(&xl->mem_acct->rec[type].lock);
++    if (mem_acct != NULL) {
++        GF_ASSERT(type <= mem_acct->num_types);
+ 
+-    GF_ATOMIC_INC(xl->mem_acct->refcnt);
++        rec = &mem_acct->rec[type];
++        LOCK(&rec->lock);
++        {
++            if (!rec->typestr) {
++                rec->typestr = typestr;
++            }
++            rec->size += size;
++            new_ref = (rec->num_allocs == 0);
++            rec->num_allocs++;
++            rec->total_allocs++;
++            rec->max_size = max(rec->max_size, rec->size);
++            rec->max_num_allocs = max(rec->max_num_allocs, rec->num_allocs);
++
++#ifdef DEBUG
++            list_add(&header->acct_list, &rec->obj_list);
++#endif
++        }
++        UNLOCK(&rec->lock);
++
++        /* We only take a reference for each memory type used, not for each
++         * allocation. This minimizes the use of atomic operations. */
++        if (new_ref) {
++            GF_ATOMIC_INC(mem_acct->refcnt);
++        }
++    }
+ 
+-    header = (struct mem_header *)ptr;
+     header->type = type;
+-    header->size = size;
+-    header->mem_acct = xl->mem_acct;
++    header->mem_acct = mem_acct;
+     header->magic = GF_MEM_HEADER_MAGIC;
+ 
++    return gf_mem_header_prepare(header, size);
++}
++
++static void *
++gf_mem_update_acct_info(struct mem_acct *mem_acct, struct mem_header *header,
++                        size_t size)
++{
++    struct mem_acct_rec *rec = NULL;
++
++    if (mem_acct != NULL) {
++        rec = &mem_acct->rec[header->type];
++        LOCK(&rec->lock);
++        {
++            rec->size += size - header->size;
++            rec->total_allocs++;
++            rec->max_size = max(rec->max_size, rec->size);
++
+ #ifdef DEBUG
+-    INIT_LIST_HEAD(&header->acct_list);
+-    LOCK(&xl->mem_acct->rec[type].lock);
+-    {
+-        list_add(&header->acct_list, &(xl->mem_acct->rec[type].obj_list));
+-    }
+-    UNLOCK(&xl->mem_acct->rec[type].lock);
++            /* The old 'header' already was present in 'obj_list', but
++             * realloc() could have changed its address. We need to remove
++             * the old item from the list and add the new one. This can be
++             * done this way because list_move() doesn't use the pointers
++             * to the old location (which are not valid anymore) already
++             * present in the list, it simply overwrites them. */
++            list_move(&header->acct_list, &rec->obj_list);
+ #endif
+-    ptr += sizeof(struct mem_header);
+-    /* data follows in this gap of 'size' bytes */
+-    *(uint32_t *)(ptr + size) = GF_MEM_TRAILER_MAGIC;
++        }
++        UNLOCK(&rec->lock);
++    }
+ 
+-    *alloc_ptr = ptr;
+-    return 0;
++    return gf_mem_header_prepare(header, size);
+ }
+ 
+ void *
+@@ -97,7 +128,7 @@ __gf_calloc(size_t nmemb, size_t size, uint32_t type, const char *typestr)
+ {
+     size_t tot_size = 0;
+     size_t req_size = 0;
+-    char *ptr = NULL;
++    void *ptr = NULL;
+     xlator_t *xl = NULL;
+ 
+     if (!THIS->ctx->mem_acct_enable)
+@@ -114,16 +145,15 @@ __gf_calloc(size_t nmemb, size_t size, uint32_t type, const char *typestr)
+         gf_msg_nomem("", GF_LOG_ALERT, tot_size);
+         return NULL;
+     }
+-    gf_mem_set_acct_info(xl, &ptr, req_size, type, typestr);
+ 
+-    return (void *)ptr;
++    return gf_mem_set_acct_info(xl->mem_acct, ptr, req_size, type, typestr);
+ }
+ 
+ void *
+ __gf_malloc(size_t size, uint32_t type, const char *typestr)
+ {
+     size_t tot_size = 0;
+-    char *ptr = NULL;
++    void *ptr = NULL;
+     xlator_t *xl = NULL;
+ 
+     if (!THIS->ctx->mem_acct_enable)
+@@ -138,84 +168,32 @@ __gf_malloc(size_t size, uint32_t type, const char *typestr)
+         gf_msg_nomem("", GF_LOG_ALERT, tot_size);
+         return NULL;
+     }
+-    gf_mem_set_acct_info(xl, &ptr, size, type, typestr);
+ 
+-    return (void *)ptr;
++    return gf_mem_set_acct_info(xl->mem_acct, ptr, size, type, typestr);
+ }
+ 
+ void *
+ __gf_realloc(void *ptr, size_t size)
+ {
+     size_t tot_size = 0;
+-    char *new_ptr;
+-    struct mem_header *old_header = NULL;
+-    struct mem_header *new_header = NULL;
+-    struct mem_header tmp_header;
++    struct mem_header *header = NULL;
+ 
+     if (!THIS->ctx->mem_acct_enable)
+         return REALLOC(ptr, size);
+ 
+     REQUIRE(NULL != ptr);
+ 
+-    old_header = (struct mem_header *)(ptr - GF_MEM_HEADER_SIZE);
+-    GF_ASSERT(old_header->magic == GF_MEM_HEADER_MAGIC);
+-    tmp_header = *old_header;
+-
+-#ifdef DEBUG
+-    int type = 0;
+-    size_t copy_size = 0;
+-
+-    /* Making these changes for realloc is not straightforward. So
+-     * I am simulating realloc using calloc and free
+-     */
+-
+-    type = tmp_header.type;
+-    new_ptr = __gf_calloc(1, size, type,
+-                          tmp_header.mem_acct->rec[type].typestr);
+-    if (new_ptr) {
+-        copy_size = (size > tmp_header.size) ? tmp_header.size : size;
+-        memcpy(new_ptr, ptr, copy_size);
+-        __gf_free(ptr);
+-    }
+-
+-    /* This is not quite what the man page says should happen */
+-    return new_ptr;
+-#endif
++    header = (struct mem_header *)(ptr - GF_MEM_HEADER_SIZE);
++    GF_ASSERT(header->magic == GF_MEM_HEADER_MAGIC);
+ 
+     tot_size = size + GF_MEM_HEADER_SIZE + GF_MEM_TRAILER_SIZE;
+-    new_ptr = realloc(old_header, tot_size);
+-    if (!new_ptr) {
++    header = realloc(header, tot_size);
++    if (!header) {
+         gf_msg_nomem("", GF_LOG_ALERT, tot_size);
+         return NULL;
+     }
+ 
+-    /*
+-     * We used to pass (char **)&ptr as the second
+-     * argument after the value of realloc was saved
+-     * in ptr, but the compiler warnings complained
+-     * about the casting to and forth from void ** to
+-     * char **.
+-     * TBD: it would be nice to adjust the memory accounting info here,
+-     * but calling gf_mem_set_acct_info here is wrong because it bumps
+-     * up counts as though this is a new allocation - which it's not.
+-     * The consequence of doing nothing here is only that the sizes will be
+-     * wrong, but at least the counts won't be.
+-    uint32_t           type = 0;
+-    xlator_t          *xl = NULL;
+-    type = header->type;
+-    xl = (xlator_t *) header->xlator;
+-    gf_mem_set_acct_info (xl, &new_ptr, size, type, NULL);
+-     */
+-
+-    new_header = (struct mem_header *)new_ptr;
+-    *new_header = tmp_header;
+-    new_header->size = size;
+-
+-    new_ptr += sizeof(struct mem_header);
+-    /* data follows in this gap of 'size' bytes */
+-    *(uint32_t *)(new_ptr + size) = GF_MEM_TRAILER_MAGIC;
+-
+-    return (void *)new_ptr;
++    return gf_mem_update_acct_info(header->mem_acct, header, size);
+ }
+ 
+ int
+@@ -321,6 +299,7 @@ __gf_free(void *free_ptr)
+     void *ptr = NULL;
+     struct mem_acct *mem_acct;
+     struct mem_header *header = NULL;
++    bool last_ref = false;
+ 
+     if (!THIS->ctx->mem_acct_enable) {
+         FREE(free_ptr);
+@@ -352,16 +331,18 @@ __gf_free(void *free_ptr)
+         mem_acct->rec[header->type].num_allocs--;
+         /* If all the instances are freed up then ensure typestr is set
+          * to NULL */
+-        if (!mem_acct->rec[header->type].num_allocs)
++        if (!mem_acct->rec[header->type].num_allocs) {
++            last_ref = true;
+             mem_acct->rec[header->type].typestr = NULL;
++        }
+ #ifdef DEBUG
+         list_del(&header->acct_list);
+ #endif
+     }
+     UNLOCK(&mem_acct->rec[header->type].lock);
+ 
+-    if (GF_ATOMIC_DEC(mem_acct->refcnt) == 0) {
+-        FREE(mem_acct);
++    if (last_ref) {
++        xlator_mem_acct_unref(mem_acct);
+     }
+ 
+ free:
+diff --git a/libglusterfs/src/xlator.c b/libglusterfs/src/xlator.c
+index 5d6f8d2..022c3ed 100644
+--- a/libglusterfs/src/xlator.c
++++ b/libglusterfs/src/xlator.c
+@@ -736,6 +736,19 @@ xlator_mem_acct_init(xlator_t *xl, int num_types)
+ }
+ 
+ void
++xlator_mem_acct_unref(struct mem_acct *mem_acct)
++{
++    uint32_t i;
++
++    if (GF_ATOMIC_DEC(mem_acct->refcnt) == 0) {
++        for (i = 0; i < mem_acct->num_types; i++) {
++            LOCK_DESTROY(&(mem_acct->rec[i].lock));
++        }
++        FREE(mem_acct);
++    }
++}
++
++void
+ xlator_tree_fini(xlator_t *xl)
+ {
+     xlator_t *top = NULL;
+@@ -766,7 +779,6 @@ xlator_list_destroy(xlator_list_t *list)
+ int
+ xlator_memrec_free(xlator_t *xl)
+ {
+-    uint32_t i = 0;
+     struct mem_acct *mem_acct = NULL;
+ 
+     if (!xl) {
+@@ -775,13 +787,8 @@ xlator_memrec_free(xlator_t *xl)
+     mem_acct = xl->mem_acct;
+ 
+     if (mem_acct) {
+-        for (i = 0; i < mem_acct->num_types; i++) {
+-            LOCK_DESTROY(&(mem_acct->rec[i].lock));
+-        }
+-        if (GF_ATOMIC_DEC(mem_acct->refcnt) == 0) {
+-            FREE(mem_acct);
+-            xl->mem_acct = NULL;
+-        }
++        xlator_mem_acct_unref(mem_acct);
++        xl->mem_acct = NULL;
+     }
+ 
+     return 0;
+-- 
+1.8.3.1
+

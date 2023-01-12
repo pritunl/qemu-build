@@ -1,0 +1,155 @@
+From 8a8c508b529f7609fc5caa10bc79ba817f5d274a Mon Sep 17 00:00:00 2001
+From: Milan Zink <mzink@redhat.com>
+Date: Mon, 5 Feb 2018 15:04:37 +0100
+Subject: [PATCH 343/344] extras/hooks: syntactical errors in SELinux hooks,
+ scipt logic improved
+
+Backport of https://review.gluster.org/c/glusterfs/+/19502
+
+Change-Id: Ia5fa1df81bbaec3a84653d136a331c76b457f42c
+BUG: 1686800
+Signed-off-by: Anoop C S <anoopcs@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/187692
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Niels de Vos <ndevos@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ .../create/post/S10selinux-label-brick.sh          | 13 +++--
+ .../delete/pre/S10selinux-del-fcontext.sh          | 60 +++++++++++++---------
+ tests/bugs/glusterfs-server/bug-877992.t           |  4 +-
+ 3 files changed, 46 insertions(+), 31 deletions(-)
+
+diff --git a/extras/hook-scripts/create/post/S10selinux-label-brick.sh b/extras/hook-scripts/create/post/S10selinux-label-brick.sh
+index de242d2..f9b4b1a 100755
+--- a/extras/hook-scripts/create/post/S10selinux-label-brick.sh
++++ b/extras/hook-scripts/create/post/S10selinux-label-brick.sh
+@@ -34,18 +34,21 @@ parse_args () {
+ 
+ set_brick_labels()
+ {
+-  volname=${1}
++  volname="${1}"
+ 
+   # grab the path for each local brick
+-  brickpath="/var/lib/glusterd/vols/${volname}/bricks/*"
+-  brickdirs=$(grep '^path=' "${brickpath}" | cut -d= -f 2 | sort -u)
++  brickpath="/var/lib/glusterd/vols/${volname}/bricks/"
++  brickdirs=$(
++    find "${brickpath}" -type f -exec grep '^path=' {} \; | \
++    cut -d= -f 2 | \
++    sort -u
++  )
+ 
+   for b in ${brickdirs}; do
+     # Add a file context for each brick path and associate with the
+     # glusterd_brick_t SELinux type.
+-    pattern="${b}\(/.*\)?"
++    pattern="${b}(/.*)?"
+     semanage fcontext --add -t glusterd_brick_t -r s0 "${pattern}"
+-
+     # Set the labels on the new brick path.
+     restorecon -R "${b}"
+   done
+diff --git a/extras/hook-scripts/delete/pre/S10selinux-del-fcontext.sh b/extras/hook-scripts/delete/pre/S10selinux-del-fcontext.sh
+index 6eba66f..e7f4e8f 100755
+--- a/extras/hook-scripts/delete/pre/S10selinux-del-fcontext.sh
++++ b/extras/hook-scripts/delete/pre/S10selinux-del-fcontext.sh
+@@ -15,45 +15,55 @@ OPTSPEC="volname:"
+ VOL=
+ 
+ function parse_args () {
+-        ARGS=$(getopt -o '' -l $OPTSPEC -n $PROGNAME -- "$@")
+-        eval set -- "$ARGS"
+-
+-        while true; do
+-        case $1 in
+-        --volname)
+-         shift
+-         VOL=$1
+-         ;;
+-        *)
+-         shift
+-         break
+-         ;;
+-        esac
++  ARGS=$(getopt -o '' -l ${OPTSPEC} -n ${PROGNAME} -- "$@")
++  eval set -- "${ARGS}"
++
++  while true; do
++    case ${1} in
++      --volname)
++        shift
++        VOL=${1}
++      ;;
++      *)
+         shift
+-        done
++        break
++      ;;
++    esac
++    shift
++  done
+ }
+ 
+ function delete_brick_fcontext()
+ {
+-        volname=$1
++  volname="${1}"
++
++  # grab the path for each local brick
++  brickpath="/var/lib/glusterd/vols/${volname}/bricks/"
++  brickdirs=$(
++    find "${brickpath}" -type f -exec grep '^path=' {} \; | \
++    cut -d= -f 2 | \
++    sort -u
++  )
++
++  for b in ${brickdirs}
++  do
++    # remove the file context associated with the brick path
++    pattern="${b}(/.*)?"
++    semanage fcontext --delete "${pattern}"
+ 
+-        # grab the path for each local brick
+-        brickdirs=$(grep '^path=' /var/lib/glusterd/vols/${volname}/bricks/* | cut -d= -f 2)
++    # remove the labels on brick path.
++    restorecon -R "${b}"
++ done
+ 
+-        for b in $brickdirs
+-        do
+-                # remove the file context associated with the brick path
+-                semanage fcontext --delete $b\(/.*\)?
+-        done
+ }
+ 
+ SELINUX_STATE=$(which getenforce && getenforce)
+ [ "${SELINUX_STATE}" = 'Disabled' ] && exit 0
+ 
+ parse_args "$@"
+-[ -z "$VOL" ] && exit 1
++[ -z "${VOL}" ] && exit 1
+ 
+-delete_brick_fcontext $VOL
++delete_brick_fcontext "${VOL}"
+ 
+ # failure to delete the fcontext is not fatal
+ exit 0
+diff --git a/tests/bugs/glusterfs-server/bug-877992.t b/tests/bugs/glusterfs-server/bug-877992.t
+index aeb73ed..300000b 100755
+--- a/tests/bugs/glusterfs-server/bug-877992.t
++++ b/tests/bugs/glusterfs-server/bug-877992.t
+@@ -46,7 +46,9 @@ TEST $CLI volume create $V0 $H0:$B0/${V0}1;
+ EXPECT "$V0" volinfo_field $V0 'Volume Name';
+ EXPECT 'Created' volinfo_field $V0 'Status';
+ EXPECT 'createPre' cat /tmp/pre.out;
+-EXPECT 'createPost' cat /tmp/post.out;
++# Spost.sh comes after S10selinux-label-brick.sh under create post hook script
++# list. So consider the delay in setting SELinux context on bricks
++EXPECT_WITHIN 5 'createPost' cat /tmp/post.out;
+ hooks_cleanup 'create'
+ 
+ 
+-- 
+1.8.3.1
+

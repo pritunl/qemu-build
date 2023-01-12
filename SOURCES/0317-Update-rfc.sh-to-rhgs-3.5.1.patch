@@ -1,0 +1,43 @@
+From 985ef94c63859907339c11b158e4540a5568d638 Mon Sep 17 00:00:00 2001
+From: Rinku Kothiya <rkothiya@redhat.com>
+Date: Mon, 18 Nov 2019 02:25:25 -0500
+Subject: [PATCH 317/335] Update rfc.sh to rhgs-3.5.1
+
+Signed-off-by: Rinku Kothiya <rkothiya@redhat.com>
+---
+ README | 9 +++++++++
+ rfc.sh | 2 +-
+ 2 files changed, 10 insertions(+), 1 deletion(-)
+ create mode 100644 README
+
+diff --git a/README b/README
+new file mode 100644
+index 0000000..44a118b
+--- /dev/null
++++ b/README
+@@ -0,0 +1,9 @@
++
++'master' branch is just dummy branch in downstream. Any reference to 'upstream'
++will point to http://git.gluster.org.
++
++You can checkout the release specific branch by running below command
++ bash$ git checkout -t -b rhs-x.y origin/rhs-x.y
++
++Happy Hacking!!
++
+diff --git a/rfc.sh b/rfc.sh
+index 94c92ef..69ddd2b 100755
+--- a/rfc.sh
++++ b/rfc.sh
+@@ -18,7 +18,7 @@ done
+ shift $((OPTIND-1))
+ 
+ 
+-branch="rhgs-3.5.0";
++branch="rhgs-3.5.1";
+ 
+ set_hooks_commit_msg()
+ {
+-- 
+1.8.3.1
+

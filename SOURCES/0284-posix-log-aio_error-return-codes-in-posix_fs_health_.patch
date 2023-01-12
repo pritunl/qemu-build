@@ -1,0 +1,61 @@
+From 243075b593c6fccbffb3e82ffcfdb58acfd68269 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Thu, 22 Aug 2019 15:51:43 +0530
+Subject: [PATCH 284/284] posix: log aio_error return codes in
+ posix_fs_health_check
+
+Problem: Sometime brick is going down to health check thread is
+         failed without logging error codes return by aio system calls.
+         As per aio_error man page it returns a positive error number
+         if the asynchronous I/O operation failed.
+
+Solution: log aio_error return codes in error message
+
+> Change-Id: I2496b1bc16e602b0fd3ad53e211de11ec8c641ef
+> Fixes: bz#1744519
+> Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+> Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/23284/
+
+Change-Id: I2496b1bc16e602b0fd3ad53e211de11ec8c641ef
+BUG: 1744518
+Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/179211
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/storage/posix/src/posix-helpers.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/xlators/storage/posix/src/posix-helpers.c b/xlators/storage/posix/src/posix-helpers.c
+index ef5bfd5..d143d4c 100644
+--- a/xlators/storage/posix/src/posix-helpers.c
++++ b/xlators/storage/posix/src/posix-helpers.c
+@@ -2025,7 +2025,6 @@ posix_fs_health_check(xlator_t *this)
+     if (ret != 0) {
+         op_errno = errno;
+         op = "aio_write_error";
+-        ret = -1;
+         goto out;
+     }
+ 
+@@ -2064,7 +2063,6 @@ posix_fs_health_check(xlator_t *this)
+     if (ret != 0) {
+         op_errno = errno;
+         op = "aio_read_error";
+-        ret = -1;
+         goto out;
+     }
+ 
+@@ -2089,7 +2087,8 @@ out:
+     }
+     if (ret && file_path[0]) {
+         gf_msg(this->name, GF_LOG_WARNING, errno, P_MSG_HEALTHCHECK_FAILED,
+-               "%s() on %s returned", op, file_path);
++               "%s() on %s returned ret is %d error is %s", op, file_path, ret,
++               ret != -1 ? strerror(ret) : strerror(op_errno));
+         gf_event(EVENT_POSIX_HEALTH_CHECK_FAILED,
+                  "op=%s;path=%s;error=%s;brick=%s:%s timeout is %d", op,
+                  file_path, strerror(op_errno), priv->hostname, priv->base_path,
+-- 
+1.8.3.1
+

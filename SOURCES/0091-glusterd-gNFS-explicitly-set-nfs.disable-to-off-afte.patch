@@ -1,0 +1,110 @@
+From ca3a4ebeddfef8c6909ff5388787a91ee52fd675 Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Thu, 15 Dec 2016 17:14:01 +0530
+Subject: [PATCH 091/124] glusterd/gNFS : explicitly set "nfs.disable" to "off"
+ after 3.2 upgrade
+
+Gluster NFS was enabled by default for all volumes till 3.1. But 3.2 onwards
+for the new volumes it will be disabled by setting "nfs.disable" to "on".
+This take patch will take care of existing volume in such a way that if the
+option is not configured, it will set "nfs.disable" to "off" during op-version
+bump up.
+
+Also this patch removes the warning message while enabling gluster NFS for
+a volume.
+
+label : DOWNSTREAM ONLY
+
+Change-Id: Ib199c3180204f917791b4627c58d846750d18a5a
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/93146
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167574
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ cli/src/cli-cmd-parser.c                   | 16 ---------------
+ xlators/mgmt/glusterd/src/glusterd-op-sm.c | 31 ++++++++++++------------------
+ 2 files changed, 12 insertions(+), 35 deletions(-)
+
+diff --git a/cli/src/cli-cmd-parser.c b/cli/src/cli-cmd-parser.c
+index f85958b..92ceb8e 100644
+--- a/cli/src/cli-cmd-parser.c
++++ b/cli/src/cli-cmd-parser.c
+@@ -1678,22 +1678,6 @@ cli_cmd_volume_set_parse(struct cli_state *state, const char **words,
+                 goto out;
+             }
+         }
+-        if ((!strcmp(key, "nfs.disable")) && (!strcmp(value, "off"))) {
+-            question =
+-                "Gluster NFS is being deprecated in favor "
+-                "of NFS-Ganesha Enter \"yes\" to continue "
+-                "using Gluster NFS";
+-            answer = cli_cmd_get_confirmation(state, question);
+-            if (GF_ANSWER_NO == answer) {
+-                gf_log("cli", GF_LOG_ERROR,
+-                       "Operation "
+-                       "cancelled, exiting");
+-                *op_errstr = gf_strdup("Aborted by user.");
+-                ret = -1;
+-                goto out;
+-            }
+-        }
+-
+         if ((strcmp(key, "cluster.brick-multiplex") == 0)) {
+             question =
+                 "Brick-multiplexing is supported only for "
+diff --git a/xlators/mgmt/glusterd/src/glusterd-op-sm.c b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+index 06ea8cf..df8a6ab 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-op-sm.c
++++ b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+@@ -2502,32 +2502,25 @@ glusterd_update_volumes_dict(glusterd_volinfo_t *volinfo)
+ 
+     /* 3.9.0 onwards gNFS will be disabled by default. In case of an upgrade
+      * from anything below than 3.9.0 to 3.9.x, the value for nfs.disable is
+-     * set to 'on' for all volumes even if it is explicitly set to 'off' in
++     * set to 'off' for all volumes even if it is explicitly set to 'on' in
+      * previous version. This change is only applicable to downstream code.
+-     * Setting nfs.disable to 'on' at op-version bump up flow is the ideal
++     * Setting nfs.disable to 'off' at op-version bump up flow is the ideal
+      * way here. The same is also applicable for transport.address-family
+      * where if the transport type is set to tcp then transport.address-family
+      * is defaulted to 'inet'.
+      */
+     if (conf->op_version >= GD_OP_VERSION_3_9_0) {
+         if (!(dict_get_str_boolean(volinfo->dict, NFS_DISABLE_MAP_KEY, 0))) {
+-            gf_msg(this->name, GF_LOG_INFO, 0, 0,
+-                   "Gluster NFS is"
+-                   " being deprecated in favor of NFS-Ganesha, "
+-                   "hence setting nfs.disable to 'on' for volume "
+-                   "%s. Please re-enable it if requires",
+-                   volinfo->volname);
+-        }
+-
+-        ret = dict_set_dynstr_with_alloc(volinfo->dict, NFS_DISABLE_MAP_KEY,
+-                                         "on");
+-        if (ret) {
+-            gf_msg(this->name, GF_LOG_ERROR, errno, GD_MSG_DICT_SET_FAILED,
+-                   "Failed to set "
+-                   "option ' NFS_DISABLE_MAP_KEY ' on "
+-                   "volume %s",
+-                   volinfo->volname);
+-            goto out;
++            ret = dict_set_dynstr_with_alloc(volinfo->dict, NFS_DISABLE_MAP_KEY,
++                                             "off");
++            if (ret) {
++                gf_msg(this->name, GF_LOG_ERROR, errno, GD_MSG_DICT_SET_FAILED,
++                       "Failed to set "
++                       "option ' NFS_DISABLE_MAP_KEY ' off "
++                       "volume %s",
++                       volinfo->volname);
++                goto out;
++            }
+         }
+ 
+         ret = dict_get_strn(volinfo->dict, "transport.address-family",
+-- 
+1.8.3.1
+

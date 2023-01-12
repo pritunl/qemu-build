@@ -1,0 +1,41 @@
+From 954eabaeb76a0f93a32210b6bf63157ad2c0fb22 Mon Sep 17 00:00:00 2001
+From: Uri Lublin <uril@redhat.com>
+Date: Wed, 17 Jun 2020 11:52:05 +0300
+Subject: [PATCH] test-websocket: check setsockopt return value
+
+Acked-by: Frediano Ziglio <fziglio@redhat.com>
+---
+ server/tests/test-websocket.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/server/tests/test-websocket.c b/server/tests/test-websocket.c
+index 2115411e..701f5408 100644
+--- a/server/tests/test-websocket.c
++++ b/server/tests/test-websocket.c
+@@ -146,7 +146,10 @@ main(int argc, char **argv)
+     }
+ 
+     int enable = 1;
+-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable));
++    if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR,
++                   (const void *) &enable, sizeof(enable)) < 0) {
++        err(1, "setsockopt reuseaddr");
++    }
+ 
+     if (non_blocking) {
+         red_socket_set_non_blocking(sock, true);
+@@ -200,7 +203,10 @@ handle_client(int new_sock)
+     }
+ 
+     int enable = 1;
+-    setsockopt(new_sock, SOL_TCP, TCP_NODELAY, (const void *) &enable, sizeof(enable));
++    if (setsockopt(new_sock, SOL_TCP, TCP_NODELAY,
++                   (const void *) &enable, sizeof(enable)) < 0) {
++        err(1, "setsockopt nodelay");
++    }
+ 
+     // wait header
+     wait_for(new_sock, POLLIN);
+-- 
+2.26.2
+

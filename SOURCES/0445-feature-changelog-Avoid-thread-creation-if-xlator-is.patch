@@ -1,0 +1,481 @@
+From dc03340654d921916ac3890d713fc84ef4bb1e28 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Sat, 29 Sep 2018 13:15:35 +0530
+Subject: [PATCH 445/449] feature/changelog: Avoid thread creation if xlator is
+ not enabled
+
+Problem:
+Changelog creates threads even if the changelog is not enabled
+
+Background:
+Changelog xlator broadly does two things
+  1. Journalling - Cosumers are geo-rep and glusterfind
+  2. Event Notification for registered events like (open, release etc) -
+     Consumers are bitrot, geo-rep
+
+The existing option "changelog.changelog" controls journalling and
+there is no option to control event notification and is enabled by
+default. So when bitrot/geo-rep is not enabled on the volume, threads
+and resources(rpc and rbuf) related to event notifications consumes
+resources and cpu cycle which is unnecessary.
+
+Solution:
+The solution is to have two different options as below.
+ 1. changelog-notification : Event notifications
+ 2. changelog : Journalling
+
+This patch introduces the option "changelog-notification" which is
+not exposed to user. When either bitrot or changelog (journalling)
+is enabled, it internally enbales 'changelog-notification'. But
+once the 'changelog-notification' is enabled, it will not be disabled
+for the life time of the brick process even after bitrot and changelog
+is disabled. As of now, rpc resource cleanup has lot of races and is
+difficult to cleanup cleanly. If allowed, it leads to memory leaks
+and crashes on enable/disable of bitrot or changelog (journal) in a
+loop. Hence to be safer, the event notification is not disabled within
+lifetime of process once enabled.
+
+> Change-Id: Ifd00286e0966049e8eb9f21567fe407cf11bb02a
+> Updates: #475
+> Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+> (Cherry pick from commit 6de80bcd6366778ac34ce58ec496fa08cc02bd0b)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/21896/)
+
+BUG: 1790336
+Change-Id: Ifd00286e0966049e8eb9f21567fe407cf11bb02a
+Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202778
+Tested-by: Mohit Agrawal <moagrawa@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ rpc/rpc-lib/src/rpcsvc.c                           |  26 ++--
+ tests/basic/changelog/changelog-history.t          |  12 +-
+ tests/bugs/bitrot/bug-1227996.t                    |   1 -
+ tests/bugs/bitrot/bug-1245981.t                    |   4 +-
+ xlators/features/changelog/src/changelog-helpers.h |   4 +
+ .../features/changelog/src/changelog-rpc-common.c  |   3 +
+ xlators/features/changelog/src/changelog.c         | 149 +++++++++++++++------
+ xlators/mgmt/glusterd/src/glusterd-volgen.c        |  13 ++
+ 8 files changed, 154 insertions(+), 58 deletions(-)
+
+diff --git a/rpc/rpc-lib/src/rpcsvc.c b/rpc/rpc-lib/src/rpcsvc.c
+index b058932..3f184bf 100644
+--- a/rpc/rpc-lib/src/rpcsvc.c
++++ b/rpc/rpc-lib/src/rpcsvc.c
+@@ -1865,6 +1865,18 @@ rpcsvc_program_unregister(rpcsvc_t *svc, rpcsvc_program_t *program)
+         goto out;
+     }
+ 
++    pthread_rwlock_rdlock(&svc->rpclock);
++    {
++        list_for_each_entry(prog, &svc->programs, program)
++        {
++            if ((prog->prognum == program->prognum) &&
++                (prog->progver == program->progver)) {
++                break;
++            }
++        }
++    }
++    pthread_rwlock_unlock(&svc->rpclock);
++
+     ret = rpcsvc_program_unregister_portmap(program);
+     if (ret == -1) {
+         gf_log(GF_RPCSVC, GF_LOG_ERROR,
+@@ -1881,17 +1893,6 @@ rpcsvc_program_unregister(rpcsvc_t *svc, rpcsvc_program_t *program)
+         goto out;
+     }
+ #endif
+-    pthread_rwlock_rdlock(&svc->rpclock);
+-    {
+-        list_for_each_entry(prog, &svc->programs, program)
+-        {
+-            if ((prog->prognum == program->prognum) &&
+-                (prog->progver == program->progver)) {
+-                break;
+-            }
+-        }
+-    }
+-    pthread_rwlock_unlock(&svc->rpclock);
+ 
+     gf_log(GF_RPCSVC, GF_LOG_DEBUG,
+            "Program unregistered: %s, Num: %d,"
+@@ -1912,6 +1913,9 @@ rpcsvc_program_unregister(rpcsvc_t *svc, rpcsvc_program_t *program)
+ 
+     ret = 0;
+ out:
++    if (prog)
++        GF_FREE(prog);
++
+     if (ret == -1) {
+         if (program) {
+             gf_log(GF_RPCSVC, GF_LOG_ERROR,
+diff --git a/tests/basic/changelog/changelog-history.t b/tests/basic/changelog/changelog-history.t
+index 3ce4098..b56e247 100644
+--- a/tests/basic/changelog/changelog-history.t
++++ b/tests/basic/changelog/changelog-history.t
+@@ -5,6 +5,7 @@
+ 
+ cleanup;
+ 
++SCRIPT_TIMEOUT=300
+ HISTORY_BIN_PATH=$(dirname $0)/../../utils/changelog
+ build_tester $HISTORY_BIN_PATH/get-history.c -lgfchangelog
+ 
+@@ -68,18 +69,21 @@ TEST $CLI volume set $V0 changelog.changelog off
+ sleep 3
+ time_after_disable=$(date '+%s')
+ 
++TEST $CLI volume set $V0 changelog.changelog on
++sleep 5
++
+ #Passes, gives the changelogs till continuous changelogs are available
+ # but returns 1
+-EXPECT "1" $HISTORY_BIN_PATH/get-history $time_after_enable1 $time_in_sec_htime2
++EXPECT_WITHIN 10 "1" $HISTORY_BIN_PATH/get-history $time_after_enable1 $time_in_sec_htime2
+ 
+ #Fails as start falls between htime files
+-EXPECT "-3" $HISTORY_BIN_PATH/get-history $time_between_htime $time_in_sec_htime1
++EXPECT_WITHIN 10 "-3" $HISTORY_BIN_PATH/get-history $time_between_htime $time_in_sec_htime1
+ 
+ #Passes as start and end falls in same htime file
+-EXPECT "0" $HISTORY_BIN_PATH/get-history $time_in_sec_htime1 $time_in_sec_htime2
++EXPECT_WITHIN 10 "0" $HISTORY_BIN_PATH/get-history $time_in_sec_htime1 $time_in_sec_htime2
+ 
+ #Passes, gives the changelogs till continuous changelogs are available
+-EXPECT "0" $HISTORY_BIN_PATH/get-history $time_in_sec_htime2 $time_after_disable
++EXPECT_WITHIN 10 "0" $HISTORY_BIN_PATH/get-history $time_in_sec_htime2 $time_after_disable
+ 
+ TEST rm $HISTORY_BIN_PATH/get-history
+ 
+diff --git a/tests/bugs/bitrot/bug-1227996.t b/tests/bugs/bitrot/bug-1227996.t
+index 47ebc42..121c7b5 100644
+--- a/tests/bugs/bitrot/bug-1227996.t
++++ b/tests/bugs/bitrot/bug-1227996.t
+@@ -17,7 +17,6 @@ TEST pidof glusterd;
+ ## Lets create and start the volume
+ TEST $CLI volume create $V0 $H0:$B0/${V0}0 $H0:$B0/${V0}1
+ TEST $CLI volume start $V0
+-
+ ## Enable bitrot on volume $V0
+ TEST $CLI volume bitrot $V0 enable
+ 
+diff --git a/tests/bugs/bitrot/bug-1245981.t b/tests/bugs/bitrot/bug-1245981.t
+index 2bed4d9..f395525 100644
+--- a/tests/bugs/bitrot/bug-1245981.t
++++ b/tests/bugs/bitrot/bug-1245981.t
+@@ -47,9 +47,9 @@ touch $M0/5
+ sleep `expr $SLEEP_TIME \* 2`
+ 
+ backpath=$(get_backend_paths $fname)
+-TEST getfattr -m . -n trusted.bit-rot.signature $backpath
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.bit-rot.signature' check_for_xattr 'trusted.bit-rot.signature' $backpath
+ 
+ backpath=$(get_backend_paths $M0/new_file)
+-TEST getfattr -m . -n trusted.bit-rot.signature $backpath
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 'trusted.bit-rot.signature' check_for_xattr 'trusted.bit-rot.signature' $backpath
+ 
+ cleanup;
+diff --git a/xlators/features/changelog/src/changelog-helpers.h b/xlators/features/changelog/src/changelog-helpers.h
+index 517c4dc..3afacc9 100644
+--- a/xlators/features/changelog/src/changelog-helpers.h
++++ b/xlators/features/changelog/src/changelog-helpers.h
+@@ -190,8 +190,12 @@ typedef struct changelog_ev_selector {
+ 
+ /* changelog's private structure */
+ struct changelog_priv {
++    /* changelog journalling */
+     gf_boolean_t active;
+ 
++    /* changelog live notifications */
++    gf_boolean_t rpc_active;
++
+     /* to generate unique socket file per brick */
+     char *changelog_brick;
+ 
+diff --git a/xlators/features/changelog/src/changelog-rpc-common.c b/xlators/features/changelog/src/changelog-rpc-common.c
+index dcdcfb1..f2d1853 100644
+--- a/xlators/features/changelog/src/changelog-rpc-common.c
++++ b/xlators/features/changelog/src/changelog-rpc-common.c
+@@ -263,6 +263,9 @@ changelog_rpc_server_destroy(xlator_t *this, rpcsvc_t *rpc, char *sockfile,
+     struct rpcsvc_program *prog = NULL;
+     rpc_transport_t *trans = NULL;
+ 
++    if (!rpc)
++        return;
++
+     while (*progs) {
+         prog = *progs;
+         (void)rpcsvc_program_unregister(rpc, prog);
+diff --git a/xlators/features/changelog/src/changelog.c b/xlators/features/changelog/src/changelog.c
+index d9025f3..ff06c09 100644
+--- a/xlators/features/changelog/src/changelog.c
++++ b/xlators/features/changelog/src/changelog.c
+@@ -34,6 +34,12 @@ static struct changelog_bootstrap cb_bootstrap[] = {
+     },
+ };
+ 
++static int
++changelog_init_rpc(xlator_t *this, changelog_priv_t *priv);
++
++static int
++changelog_init(xlator_t *this, changelog_priv_t *priv);
++
+ /* Entry operations - TYPE III */
+ 
+ /**
+@@ -2008,6 +2014,11 @@ notify(xlator_t *this, int event, void *data, ...)
+     uint64_t clntcnt = 0;
+     changelog_clnt_t *conn = NULL;
+     gf_boolean_t cleanup_notify = _gf_false;
++    char sockfile[UNIX_PATH_MAX] = {
++        0,
++    };
++    rpcsvc_listener_t *listener = NULL;
++    rpcsvc_listener_t *next = NULL;
+ 
+     INIT_LIST_HEAD(&queue);
+ 
+@@ -2021,23 +2032,40 @@ notify(xlator_t *this, int event, void *data, ...)
+                "cleanup changelog rpc connection of brick %s",
+                priv->victim->name);
+ 
+-        this->cleanup_starting = 1;
+-        changelog_destroy_rpc_listner(this, priv);
+-        conn = &priv->connections;
+-        if (conn)
+-            changelog_ev_cleanup_connections(this, conn);
+-        xprtcnt = GF_ATOMIC_GET(priv->xprtcnt);
+-        clntcnt = GF_ATOMIC_GET(priv->clntcnt);
+-
+-        if (!xprtcnt && !clntcnt) {
+-            LOCK(&priv->lock);
+-            {
+-                cleanup_notify = priv->notify_down;
+-                priv->notify_down = _gf_true;
++        if (priv->rpc_active) {
++            this->cleanup_starting = 1;
++            changelog_destroy_rpc_listner(this, priv);
++            conn = &priv->connections;
++            if (conn)
++                changelog_ev_cleanup_connections(this, conn);
++            xprtcnt = GF_ATOMIC_GET(priv->xprtcnt);
++            clntcnt = GF_ATOMIC_GET(priv->clntcnt);
++            if (!xprtcnt && !clntcnt) {
++                LOCK(&priv->lock);
++                {
++                    cleanup_notify = priv->notify_down;
++                    priv->notify_down = _gf_true;
++                }
++                UNLOCK(&priv->lock);
++                list_for_each_entry_safe(listener, next, &priv->rpc->listeners,
++                                         list)
++                {
++                    if (listener->trans) {
++                        rpc_transport_unref(listener->trans);
++                    }
++                }
++                CHANGELOG_MAKE_SOCKET_PATH(priv->changelog_brick, sockfile,
++                                           UNIX_PATH_MAX);
++                sys_unlink(sockfile);
++                if (priv->rpc) {
++                    rpcsvc_destroy(priv->rpc);
++                    priv->rpc = NULL;
++                }
++                if (!cleanup_notify)
++                    default_notify(this, GF_EVENT_PARENT_DOWN, data);
+             }
+-            UNLOCK(&priv->lock);
+-            if (!cleanup_notify)
+-                default_notify(this, GF_EVENT_PARENT_DOWN, data);
++        } else {
++            default_notify(this, GF_EVENT_PARENT_DOWN, data);
+         }
+         goto out;
+     }
+@@ -2425,6 +2453,22 @@ changelog_barrier_pthread_destroy(changelog_priv_t *priv)
+     LOCK_DESTROY(&priv->bflags.lock);
+ }
+ 
++static void
++changelog_cleanup_rpc(xlator_t *this, changelog_priv_t *priv)
++{
++    /* terminate rpc server */
++    if (!this->cleanup_starting)
++        changelog_destroy_rpc_listner(this, priv);
++
++    (void)changelog_cleanup_rpc_threads(this, priv);
++    /* cleanup rot buffs */
++    rbuf_dtor(priv->rbuf);
++
++    /* cleanup poller thread */
++    if (priv->poller)
++        (void)changelog_thread_cleanup(this, priv->poller);
++}
++
+ int
+ reconfigure(xlator_t *this, dict_t *options)
+ {
+@@ -2433,6 +2477,9 @@ reconfigure(xlator_t *this, dict_t *options)
+     changelog_priv_t *priv = NULL;
+     gf_boolean_t active_earlier = _gf_true;
+     gf_boolean_t active_now = _gf_true;
++    gf_boolean_t rpc_active_earlier = _gf_true;
++    gf_boolean_t rpc_active_now = _gf_true;
++    gf_boolean_t iniate_rpc = _gf_false;
+     changelog_time_slice_t *slice = NULL;
+     changelog_log_data_t cld = {
+         0,
+@@ -2454,6 +2501,7 @@ reconfigure(xlator_t *this, dict_t *options)
+ 
+     ret = -1;
+     active_earlier = priv->active;
++    rpc_active_earlier = priv->rpc_active;
+ 
+     /* first stop the rollover and the fsync thread */
+     changelog_cleanup_helper_threads(this, priv);
+@@ -2487,6 +2535,29 @@ reconfigure(xlator_t *this, dict_t *options)
+         goto out;
+ 
+     GF_OPTION_RECONF("changelog", active_now, options, bool, out);
++    GF_OPTION_RECONF("changelog-notification", rpc_active_now, options, bool,
++                     out);
++
++    /* If journalling is enabled, enable rpc notifications */
++    if (active_now && !active_earlier) {
++        if (!rpc_active_earlier)
++            iniate_rpc = _gf_true;
++    }
++
++    if (rpc_active_now && !rpc_active_earlier) {
++        iniate_rpc = _gf_true;
++    }
++
++    /* TODO: Disable of changelog-notifications is not supported for now
++     * as there is no clean way of cleaning up of rpc resources
++     */
++
++    if (iniate_rpc) {
++        ret = changelog_init_rpc(this, priv);
++        if (ret)
++            goto out;
++        priv->rpc_active = _gf_true;
++    }
+ 
+     /**
+      * changelog_handle_change() handles changes that could possibly
+@@ -2618,6 +2689,7 @@ changelog_init_options(xlator_t *this, changelog_priv_t *priv)
+         goto dealloc_2;
+ 
+     GF_OPTION_INIT("changelog", priv->active, bool, dealloc_2);
++    GF_OPTION_INIT("changelog-notification", priv->rpc_active, bool, dealloc_2);
+     GF_OPTION_INIT("capture-del-path", priv->capture_del_path, bool, dealloc_2);
+ 
+     GF_OPTION_INIT("op-mode", tmp, str, dealloc_2);
+@@ -2656,22 +2728,6 @@ error_return:
+     return -1;
+ }
+ 
+-static void
+-changelog_cleanup_rpc(xlator_t *this, changelog_priv_t *priv)
+-{
+-    /* terminate rpc server */
+-    if (!this->cleanup_starting)
+-        changelog_destroy_rpc_listner(this, priv);
+-
+-    (void)changelog_cleanup_rpc_threads(this, priv);
+-    /* cleanup rot buffs */
+-    rbuf_dtor(priv->rbuf);
+-
+-    /* cleanup poller thread */
+-    if (priv->poller)
+-        (void)changelog_thread_cleanup(this, priv->poller);
+-}
+-
+ static int
+ changelog_init_rpc(xlator_t *this, changelog_priv_t *priv)
+ {
+@@ -2768,10 +2824,13 @@ init(xlator_t *this)
+     INIT_LIST_HEAD(&priv->queue);
+     priv->barrier_enabled = _gf_false;
+ 
+-    /* RPC ball rolling.. */
+-    ret = changelog_init_rpc(this, priv);
+-    if (ret)
+-        goto cleanup_barrier;
++    if (priv->rpc_active || priv->active) {
++        /* RPC ball rolling.. */
++        ret = changelog_init_rpc(this, priv);
++        if (ret)
++            goto cleanup_barrier;
++        priv->rpc_active = _gf_true;
++    }
+ 
+     ret = changelog_init(this, priv);
+     if (ret)
+@@ -2783,7 +2842,9 @@ init(xlator_t *this)
+     return 0;
+ 
+ cleanup_rpc:
+-    changelog_cleanup_rpc(this, priv);
++    if (priv->rpc_active) {
++        changelog_cleanup_rpc(this, priv);
++    }
+ cleanup_barrier:
+     changelog_barrier_pthread_destroy(priv);
+ cleanup_options:
+@@ -2808,9 +2869,10 @@ fini(xlator_t *this)
+     priv = this->private;
+ 
+     if (priv) {
+-        /* terminate RPC server/threads */
+-        changelog_cleanup_rpc(this, priv);
+-
++        if (priv->active || priv->rpc_active) {
++            /* terminate RPC server/threads */
++            changelog_cleanup_rpc(this, priv);
++        }
+         /* call barrier_disable to cancel timer */
+         if (priv->barrier_enabled)
+             __chlog_barrier_disable(this, &queue);
+@@ -2879,6 +2941,13 @@ struct volume_options options[] = {
+      .flags = OPT_FLAG_SETTABLE,
+      .level = OPT_STATUS_BASIC,
+      .tags = {"journal", "georep", "glusterfind"}},
++    {.key = {"changelog-notification"},
++     .type = GF_OPTION_TYPE_BOOL,
++     .default_value = "off",
++     .description = "enable/disable changelog live notification",
++     .op_version = {3},
++     .level = OPT_STATUS_BASIC,
++     .tags = {"bitrot", "georep"}},
+     {.key = {"changelog-brick"},
+      .type = GF_OPTION_TYPE_PATH,
+      .description = "brick path to generate unique socket file name."
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volgen.c b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+index 16346e7..13f84ea 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volgen.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+@@ -1876,6 +1876,19 @@ brick_graph_add_changelog(volgen_graph_t *graph, glusterd_volinfo_t *volinfo,
+     ret = xlator_set_fixed_option(xl, "changelog-dir", changelog_basepath);
+     if (ret)
+         goto out;
++
++    ret = glusterd_is_bitrot_enabled(volinfo);
++    if (ret == -1) {
++        goto out;
++    } else if (ret) {
++        ret = xlator_set_fixed_option(xl, "changelog-notification", "on");
++        if (ret)
++            goto out;
++    } else {
++        ret = xlator_set_fixed_option(xl, "changelog-notification", "off");
++        if (ret)
++            goto out;
++    }
+ out:
+     return ret;
+ }
+-- 
+1.8.3.1
+

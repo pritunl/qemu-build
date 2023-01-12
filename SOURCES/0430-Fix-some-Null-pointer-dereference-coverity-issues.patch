@@ -1,0 +1,291 @@
+From 7fe500a03d42dba6082c28ef7284c950c44fbfa3 Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez <xhernandez@redhat.com>
+Date: Wed, 22 May 2019 17:46:19 +0200
+Subject: [PATCH 430/449] Fix some "Null pointer dereference" coverity issues
+
+This patch fixes the following CID's:
+
+  * 1124829
+  * 1274075
+  * 1274083
+  * 1274128
+  * 1274135
+  * 1274141
+  * 1274143
+  * 1274197
+  * 1274205
+  * 1274210
+  * 1274211
+  * 1288801
+  * 1398629
+
+Backport of:
+> Upstream-patch-link: https://review.gluster.org/22767
+> Change-Id: Ia7c86cfab3245b20777ffa296e1a59748040f558
+> Updates: bz#789278
+> Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+
+BUG: 1787310
+Change-Id: Ia7c86cfab3245b20777ffa296e1a59748040f558
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202616
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ cli/src/cli-cmd-system.c                     |  2 +-
+ cli/src/cli-xml-output.c                     |  2 +-
+ glusterfsd/src/glusterfsd.c                  | 24 +++++++++++++-----------
+ libglusterfs/src/inode.c                     |  3 +++
+ rpc/rpc-lib/src/rpcsvc.c                     |  4 ++++
+ xlators/cluster/dht/src/dht-shared.c         |  4 ++++
+ xlators/cluster/dht/src/switch.c             |  9 +++++++++
+ xlators/features/trash/src/trash.c           |  2 +-
+ xlators/mgmt/glusterd/src/glusterd-geo-rep.c |  7 +++++--
+ xlators/nfs/server/src/mount3.c              |  6 ++++++
+ xlators/protocol/client/src/client.c         |  7 ++++++-
+ xlators/storage/posix/src/posix-helpers.c    |  3 +++
+ 12 files changed, 56 insertions(+), 17 deletions(-)
+
+diff --git a/cli/src/cli-cmd-system.c b/cli/src/cli-cmd-system.c
+index 8cd1542..cb3a9ea 100644
+--- a/cli/src/cli-cmd-system.c
++++ b/cli/src/cli-cmd-system.c
+@@ -446,7 +446,7 @@ cli_cmd_sys_exec_cbk(struct cli_state *state, struct cli_cmd_word *word,
+     dict_t *dict = NULL;
+     cli_local_t *local = NULL;
+ 
+-    if (wordcount < 3) {
++    if ((wordcount < 3) || (words[2] == NULL)) {
+         cli_usage_out(word->pattern);
+         goto out;
+     }
+diff --git a/cli/src/cli-xml-output.c b/cli/src/cli-xml-output.c
+index 006e2fb..903997c 100644
+--- a/cli/src/cli-xml-output.c
++++ b/cli/src/cli-xml-output.c
+@@ -64,7 +64,7 @@ cli_begin_xml_output(xmlTextWriterPtr *writer, xmlDocPtr *doc)
+     int ret = -1;
+ 
+     *writer = xmlNewTextWriterDoc(doc, 0);
+-    if (writer == NULL) {
++    if (*writer == NULL) {
+         ret = -1;
+         goto out;
+     }
+diff --git a/glusterfsd/src/glusterfsd.c b/glusterfsd/src/glusterfsd.c
+index 974fb88..9821180 100644
+--- a/glusterfsd/src/glusterfsd.c
++++ b/glusterfsd/src/glusterfsd.c
+@@ -1235,19 +1235,21 @@ parse_opts(int key, char *arg, struct argp_state *state)
+         case ARGP_BRICK_PORT_KEY:
+             n = 0;
+ 
+-            port_str = strtok_r(arg, ",", &tmp_str);
+-            if (gf_string2uint_base10(port_str, &n) == 0) {
+-                cmd_args->brick_port = n;
+-                port_str = strtok_r(NULL, ",", &tmp_str);
+-                if (port_str) {
+-                    if (gf_string2uint_base10(port_str, &n) == 0) {
+-                        cmd_args->brick_port2 = n;
+-                        break;
++            if (arg != NULL) {
++                port_str = strtok_r(arg, ",", &tmp_str);
++                if (gf_string2uint_base10(port_str, &n) == 0) {
++                    cmd_args->brick_port = n;
++                    port_str = strtok_r(NULL, ",", &tmp_str);
++                    if (port_str) {
++                        if (gf_string2uint_base10(port_str, &n) == 0) {
++                            cmd_args->brick_port2 = n;
++                            break;
++                        }
++                        argp_failure(state, -1, 0,
++                                     "wrong brick (listen) port %s", arg);
+                     }
+-                    argp_failure(state, -1, 0, "wrong brick (listen) port %s",
+-                                 arg);
++                    break;
+                 }
+-                break;
+             }
+ 
+             argp_failure(state, -1, 0, "unknown brick (listen) port %s", arg);
+diff --git a/libglusterfs/src/inode.c b/libglusterfs/src/inode.c
+index 9dbb25b..4c3c546 100644
+--- a/libglusterfs/src/inode.c
++++ b/libglusterfs/src/inode.c
+@@ -899,6 +899,9 @@ inode_resolve(inode_table_t *table, char *path)
+ 
+     parent = inode_ref(table->root);
+     str = tmp = gf_strdup(path);
++    if (str == NULL) {
++        goto out;
++    }
+ 
+     while (1) {
+         bname = strtok_r(str, "/", &saveptr);
+diff --git a/rpc/rpc-lib/src/rpcsvc.c b/rpc/rpc-lib/src/rpcsvc.c
+index 5a35139..b058932 100644
+--- a/rpc/rpc-lib/src/rpcsvc.c
++++ b/rpc/rpc-lib/src/rpcsvc.c
+@@ -2874,6 +2874,10 @@ rpcsvc_transport_peer_check_search(dict_t *options, char *pattern, char *ip,
+     }
+ 
+     dup_addrstr = gf_strdup(addrstr);
++    if (dup_addrstr == NULL) {
++        ret = -1;
++        goto err;
++    }
+     addrtok = strtok_r(dup_addrstr, ",", &svptr);
+     while (addrtok) {
+         /* CASEFOLD not present on Solaris */
+diff --git a/xlators/cluster/dht/src/dht-shared.c b/xlators/cluster/dht/src/dht-shared.c
+index ea4b7c6..58e3339 100644
+--- a/xlators/cluster/dht/src/dht-shared.c
++++ b/xlators/cluster/dht/src/dht-shared.c
+@@ -278,6 +278,10 @@ dht_parse_decommissioned_bricks(xlator_t *this, dht_conf_t *conf,
+         goto out;
+ 
+     dup_brick = gf_strdup(bricks);
++    if (dup_brick == NULL) {
++        goto out;
++    }
++
+     node = strtok_r(dup_brick, ",", &tmpstr);
+     while (node) {
+         for (i = 0; i < conf->subvolume_cnt; i++) {
+diff --git a/xlators/cluster/dht/src/switch.c b/xlators/cluster/dht/src/switch.c
+index a782fcd..207d109 100644
+--- a/xlators/cluster/dht/src/switch.c
++++ b/xlators/cluster/dht/src/switch.c
+@@ -610,9 +610,15 @@ set_switch_pattern(xlator_t *this, dht_conf_t *conf, const char *pattern_str)
+     /* Get the pattern for considering switch case.
+        "option block-size *avi:10MB" etc */
+     option_string = gf_strdup(pattern_str);
++    if (option_string == NULL) {
++        goto err;
++    }
+     switch_str = strtok_r(option_string, ";", &tmp_str);
+     while (switch_str) {
+         dup_str = gf_strdup(switch_str);
++        if (dup_str == NULL) {
++            goto err;
++        }
+         switch_opt = GF_CALLOC(1, sizeof(struct switch_struct),
+                                gf_switch_mt_switch_struct);
+         if (!switch_opt) {
+@@ -647,6 +653,9 @@ set_switch_pattern(xlator_t *this, dht_conf_t *conf, const char *pattern_str)
+ 
+         if (childs) {
+             dup_childs = gf_strdup(childs);
++            if (dup_childs == NULL) {
++                goto err;
++            }
+             child = strtok_r(dup_childs, ",", &tmp);
+             while (child) {
+                 if (gf_switch_valid_child(this, child)) {
+diff --git a/xlators/features/trash/src/trash.c b/xlators/features/trash/src/trash.c
+index d668436..f96ed73 100644
+--- a/xlators/features/trash/src/trash.c
++++ b/xlators/features/trash/src/trash.c
+@@ -170,7 +170,7 @@ store_eliminate_path(char *str, trash_elim_path **eliminate)
+     int ret = 0;
+     char *strtokptr = NULL;
+ 
+-    if (eliminate == NULL) {
++    if ((str == NULL) || (eliminate == NULL)) {
+         ret = EINVAL;
+         goto out;
+     }
+diff --git a/xlators/mgmt/glusterd/src/glusterd-geo-rep.c b/xlators/mgmt/glusterd/src/glusterd-geo-rep.c
+index 0f40bea..85c06c1 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-geo-rep.c
++++ b/xlators/mgmt/glusterd/src/glusterd-geo-rep.c
+@@ -5981,7 +5981,7 @@ glusterd_get_slave_info(char *slave, char **slave_url, char **hostname,
+     GF_ASSERT(this);
+ 
+     ret = glusterd_urltransform_single(slave, "normalize", &linearr);
+-    if (ret == -1) {
++    if ((ret == -1) || (linearr[0] == NULL)) {
+         ret = snprintf(errmsg, sizeof(errmsg) - 1, "Invalid Url: %s", slave);
+         errmsg[ret] = '\0';
+         *op_errstr = gf_strdup(errmsg);
+@@ -5992,7 +5992,10 @@ glusterd_get_slave_info(char *slave, char **slave_url, char **hostname,
+ 
+     tmp = strtok_r(linearr[0], "/", &save_ptr);
+     tmp = strtok_r(NULL, "/", &save_ptr);
+-    slave = strtok_r(tmp, ":", &save_ptr);
++    slave = NULL;
++    if (tmp != NULL) {
++        slave = strtok_r(tmp, ":", &save_ptr);
++    }
+     if (slave) {
+         ret = glusterd_geo_rep_parse_slave(slave, hostname, op_errstr);
+         if (ret) {
+diff --git a/xlators/nfs/server/src/mount3.c b/xlators/nfs/server/src/mount3.c
+index 396809c..734453c 100644
+--- a/xlators/nfs/server/src/mount3.c
++++ b/xlators/nfs/server/src/mount3.c
+@@ -3205,6 +3205,12 @@ mnt3_export_parse_auth_param(struct mnt3_export *exp, char *exportpath)
+     struct host_auth_spec *host = NULL;
+     int ret = 0;
+ 
++    if (exportpath == NULL) {
++        gf_msg(GF_MNT, GF_LOG_ERROR, EINVAL, NFS_MSG_PARSE_HOSTSPEC_FAIL,
++               "Export path is NULL");
++        return -1;
++    }
++
+     /* Using exportpath directly in strtok_r because we want
+      * to strip off AUTH parameter from exportpath. */
+     token = strtok_r(exportpath, "(", &savPtr);
+diff --git a/xlators/protocol/client/src/client.c b/xlators/protocol/client/src/client.c
+index e156d4d..ed855ca 100644
+--- a/xlators/protocol/client/src/client.c
++++ b/xlators/protocol/client/src/client.c
+@@ -1222,9 +1222,12 @@ client_set_remote_options(char *value, xlator_t *this)
+     char *remote_port_str = NULL;
+     char *tmp = NULL;
+     int remote_port = 0;
+-    int ret = 0;
++    int ret = -1;
+ 
+     dup_value = gf_strdup(value);
++    if (dup_value == NULL) {
++        goto out;
++    }
+     host = strtok_r(dup_value, ":", &tmp);
+     subvol = strtok_r(NULL, ":", &tmp);
+     remote_port_str = strtok_r(NULL, ":", &tmp);
+@@ -1238,6 +1241,7 @@ client_set_remote_options(char *value, xlator_t *this)
+         if (ret) {
+             gf_msg(this->name, GF_LOG_WARNING, 0, PC_MSG_DICT_SET_FAILED,
+                    "failed to set remote-host with %s", host);
++            GF_FREE(host_dup);
+             goto out;
+         }
+     }
+@@ -1252,6 +1256,7 @@ client_set_remote_options(char *value, xlator_t *this)
+         if (ret) {
+             gf_msg(this->name, GF_LOG_WARNING, 0, PC_MSG_DICT_SET_FAILED,
+                    "failed to set remote-host with %s", host);
++            GF_FREE(subvol_dup);
+             goto out;
+         }
+     }
+diff --git a/xlators/storage/posix/src/posix-helpers.c b/xlators/storage/posix/src/posix-helpers.c
+index 949c799..2336add 100644
+--- a/xlators/storage/posix/src/posix-helpers.c
++++ b/xlators/storage/posix/src/posix-helpers.c
+@@ -390,6 +390,9 @@ _posix_get_marker_quota_contributions(posix_xattr_filler_t *filler, char *key)
+     int i = 0, ret = 0;
+ 
+     tmp_key = ptr = gf_strdup(key);
++    if (tmp_key == NULL) {
++        return -1;
++    }
+     for (i = 0; i < 4; i++) {
+         token = strtok_r(tmp_key, ".", &saveptr);
+         tmp_key = NULL;
+-- 
+1.8.3.1
+

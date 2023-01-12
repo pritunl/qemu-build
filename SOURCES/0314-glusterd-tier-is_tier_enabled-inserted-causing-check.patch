@@ -1,0 +1,38 @@
+From 2a4f19df70276ba41db19938507297f7580286fa Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Fri, 25 Oct 2019 18:07:27 +0530
+Subject: [PATCH 314/314] glusterd/tier: is_tier_enabled inserted causing
+ checksum mismatch
+
+the volfile entry is_tier_enabled is checked for version 3.7.6 while it was
+supposed to check for 3.10. this is to fix it downstream only but changing the
+version of check to 3.13.1
+
+Label: DOWNSTREAM ONLY
+BUG: 1765555
+Change-Id: Id631f3ba520b3e7b126c7607dca1bb7874532e81
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/183932
+Reviewed-by: Sanju Rakonde <srakonde@redhat.com>
+Tested-by: Sanju Rakonde <srakonde@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-store.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-store.c b/xlators/mgmt/glusterd/src/glusterd-store.c
+index 4889217..8a10eb8 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-store.c
++++ b/xlators/mgmt/glusterd/src/glusterd-store.c
+@@ -1036,7 +1036,7 @@ glusterd_volume_exclude_options_write(int fd, glusterd_volinfo_t *volinfo)
+         if (ret)
+             goto out;
+     }
+-    if (conf->op_version >= GD_OP_VERSION_3_10_0) {
++    if (conf->op_version >= GD_OP_VERSION_3_13_1) {
+         snprintf(buf, sizeof(buf), "%d", volinfo->is_tier_enabled);
+         ret = gf_store_save_value(fd, GF_TIER_ENABLED, buf);
+         if (ret)
+-- 
+1.8.3.1
+

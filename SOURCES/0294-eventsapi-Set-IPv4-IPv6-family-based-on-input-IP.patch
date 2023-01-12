@@ -1,0 +1,59 @@
+From 2fa5476b95d4547bdde50f2281bf58b7db24e37a Mon Sep 17 00:00:00 2001
+From: Aravinda VK <avishwan@redhat.com>
+Date: Mon, 16 Sep 2019 10:04:26 +0530
+Subject: [PATCH 294/297] eventsapi: Set IPv4/IPv6 family based on input IP
+
+server.sin_family was set to AF_INET while creating socket connection,
+this was failing if the input address is IPv6(`::1`).
+
+With this patch, sin_family is set by reading the ai_family of
+`getaddrinfo` result.
+
+> upstream patch : https://review.gluster.org/#/c/glusterfs/+/23423/
+
+>Fixes: bz#1752330
+>Change-Id: I499f957b432842fa989c698f6e5b25b7016084eb
+>Signed-off-by: Aravinda VK <avishwan@redhat.com>
+
+BUG: 1732443
+Change-Id: I499f957b432842fa989c698f6e5b25b7016084eb
+Signed-off-by: Aravinda VK <avishwan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/181197
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/events.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/libglusterfs/src/events.c b/libglusterfs/src/events.c
+index 2509767..9d33783 100644
+--- a/libglusterfs/src/events.c
++++ b/libglusterfs/src/events.c
+@@ -42,6 +42,7 @@ _gf_event(eventtypes_t event, const char *fmt, ...)
+     struct addrinfo hints;
+     struct addrinfo *result = NULL;
+     xlator_t *this = THIS;
++    int sin_family = AF_INET;
+ 
+     /* Global context */
+     ctx = THIS->ctx;
+@@ -75,13 +76,15 @@ _gf_event(eventtypes_t event, const char *fmt, ...)
+             ret = EVENT_ERROR_RESOLVE;
+             goto out;
+         }
++
++        sin_family = result->ai_family;
+     } else {
+         /* Localhost, Use the defined IP for localhost */
+         host = gf_strdup(EVENT_HOST);
+     }
+ 
+     /* Socket Configurations */
+-    server.sin_family = AF_INET;
++    server.sin_family = sin_family;
+     server.sin_port = htons(EVENT_PORT);
+     ret = inet_pton(server.sin_family, host, &server.sin_addr);
+     if (ret <= 0) {
+-- 
+1.8.3.1
+

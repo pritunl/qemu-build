@@ -1,0 +1,151 @@
+From 022701465f3e642cdb7942995647615baa266a35 Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Thu, 11 Jul 2019 12:49:31 +0530
+Subject: [PATCH 245/255] Revert "shd/glusterd: Serialize shd manager to
+ prevent race condition"
+
+This reverts commit 646292b4f73bf1b506d034b85787f794963d7196.
+
+BUG: 1471742
+Change-Id: Ie21fbe18965d8bdea81f4276b57960a27a4db89d
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/175954
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ .../serialize-shd-manager-glusterd-restart.t       | 54 ----------------------
+ xlators/mgmt/glusterd/src/glusterd-shd-svc.c       | 14 ------
+ xlators/mgmt/glusterd/src/glusterd.c               |  1 -
+ xlators/mgmt/glusterd/src/glusterd.h               |  3 --
+ 4 files changed, 72 deletions(-)
+ delete mode 100644 tests/bugs/glusterd/serialize-shd-manager-glusterd-restart.t
+
+diff --git a/tests/bugs/glusterd/serialize-shd-manager-glusterd-restart.t b/tests/bugs/glusterd/serialize-shd-manager-glusterd-restart.t
+deleted file mode 100644
+index 3a27c2a..0000000
+--- a/tests/bugs/glusterd/serialize-shd-manager-glusterd-restart.t
++++ /dev/null
+@@ -1,54 +0,0 @@
+-#! /bin/bash
+-
+-. $(dirname $0)/../../include.rc
+-. $(dirname $0)/../../cluster.rc
+-
+-function check_peers {
+-count=`$CLI_1 peer status | grep 'Peer in Cluster (Connected)' | wc -l`
+-echo $count
+-}
+-
+-function check_shd {
+-ps aux | grep $1 | grep glustershd | wc -l
+-}
+-
+-cleanup
+-
+-
+-TEST launch_cluster 6
+-
+-TESTS_EXPECTED_IN_LOOP=25
+-for i in $(seq 2 6); do
+-    hostname="H$i"
+-    TEST $CLI_1 peer probe ${!hostname}
+-done
+-
+-
+-EXPECT_WITHIN $PROBE_TIMEOUT 5 check_peers;
+-for i in $(seq 1 5); do
+-
+-    TEST $CLI_1 volume create ${V0}_$i replica 3 $H1:$B1/${V0}_$i $H2:$B2/${V0}_$i $H3:$B3/${V0}_$i $H4:$B4/${V0}_$i $H5:$B5/${V0}_$i $H6:$B6/${V0}_$i
+-    TEST $CLI_1 volume start ${V0}_$i force
+-
+-done
+-
+-#kill a node
+-TEST kill_node 3
+-
+-TEST $glusterd_3;
+-EXPECT_WITHIN $PROBE_TIMEOUT 5 check_peers
+-
+-EXPECT_WITHIN $PROCESS_UP_TIMEOUT 1 check_shd $H3
+-
+-for i in $(seq 1 5); do
+-
+-    TEST $CLI_1 volume stop ${V0}_$i
+-    TEST $CLI_1 volume delete ${V0}_$i
+-
+-done
+-
+-for i in $(seq 1 6); do
+-    hostname="H$i"
+-    EXPECT_WITHIN $PROCESS_DOWN_TIMEOUT 0 check_shd ${!hostname}
+-done
+-cleanup
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+index 75f9a07..a9eab42 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+@@ -254,26 +254,14 @@ glusterd_shdsvc_manager(glusterd_svc_t *svc, void *data, int flags)
+ {
+     int ret = -1;
+     glusterd_volinfo_t *volinfo = NULL;
+-    glusterd_conf_t *conf = NULL;
+-    gf_boolean_t shd_restart = _gf_false;
+ 
+-    conf = THIS->private;
+     volinfo = data;
+-    GF_VALIDATE_OR_GOTO("glusterd", conf, out);
+     GF_VALIDATE_OR_GOTO("glusterd", svc, out);
+     GF_VALIDATE_OR_GOTO("glusterd", volinfo, out);
+ 
+     if (volinfo)
+         glusterd_volinfo_ref(volinfo);
+ 
+-    while (conf->restart_shd) {
+-        synclock_unlock(&conf->big_lock);
+-        sleep(2);
+-        synclock_lock(&conf->big_lock);
+-    }
+-    conf->restart_shd = _gf_true;
+-    shd_restart = _gf_true;
+-
+     ret = glusterd_shdsvc_create_volfile(volinfo);
+     if (ret)
+         goto out;
+@@ -322,8 +310,6 @@ glusterd_shdsvc_manager(glusterd_svc_t *svc, void *data, int flags)
+         }
+     }
+ out:
+-    if (shd_restart)
+-        conf->restart_shd = _gf_false;
+     if (volinfo)
+         glusterd_volinfo_unref(volinfo);
+     if (ret)
+diff --git a/xlators/mgmt/glusterd/src/glusterd.c b/xlators/mgmt/glusterd/src/glusterd.c
+index 6d7dd4a..c0973cb 100644
+--- a/xlators/mgmt/glusterd/src/glusterd.c
++++ b/xlators/mgmt/glusterd/src/glusterd.c
+@@ -1819,7 +1819,6 @@ init(xlator_t *this)
+     conf->rpc = rpc;
+     conf->uds_rpc = uds_rpc;
+     conf->gfs_mgmt = &gd_brick_prog;
+-    conf->restart_shd = _gf_false;
+     this->private = conf;
+     /* conf->workdir and conf->rundir are smaller than PATH_MAX; gcc's
+      * snprintf checking will throw an error here if sprintf is used.
+diff --git a/xlators/mgmt/glusterd/src/glusterd.h b/xlators/mgmt/glusterd/src/glusterd.h
+index 7d07d33..0fbc9dd 100644
+--- a/xlators/mgmt/glusterd/src/glusterd.h
++++ b/xlators/mgmt/glusterd/src/glusterd.h
+@@ -222,9 +222,6 @@ typedef struct {
+     gf_atomic_t blockers;
+     uint32_t mgmt_v3_lock_timeout;
+     gf_boolean_t restart_bricks;
+-    gf_boolean_t restart_shd;    /* This flag prevents running two shd manager
+-                                    simultaneously
+-                                 */
+     pthread_mutex_t attach_lock; /* Lock can be per process or a common one */
+     pthread_mutex_t volume_lock; /* We release the big_lock from lot of places
+                                     which might lead the modification of volinfo
+-- 
+1.8.3.1
+

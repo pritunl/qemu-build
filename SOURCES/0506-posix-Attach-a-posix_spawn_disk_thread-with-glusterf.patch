@@ -1,0 +1,499 @@
+From 17a9ce965ef2fec9ee5c8e4b76981bb7cbcf1352 Mon Sep 17 00:00:00 2001
+From: mohit84 <moagrawa@redhat.com>
+Date: Mon, 9 Nov 2020 17:15:42 +0530
+Subject: [PATCH 506/511] posix: Attach a posix_spawn_disk_thread with
+ glusterfs_ctx (#1595)
+
+Currently posix xlator spawns posix_disk_space_threads per brick and in
+case of brick_mux environment while glusterd attached bricks at maximum
+level(250) with a single brick process in that case 250 threads are
+spawned for all bricks and brick process memory size also increased.
+
+Solution: Attach a posix_disk_space thread with glusterfs_ctx to
+          spawn a thread per process basis instead of spawning a per brick
+
+> Fixes: #1482
+> Change-Id: I8dd88f252a950495b71742e2a7588bd5bb019ec7
+> Cherry-picked from commit 3f93be77e1acf5baacafa97a320e91e6879d1c0e
+> Reviewed on upstream link https://github.com/gluster/glusterfs/issues/1482
+> Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+
+Change-Id: I8dd88f252a950495b71742e2a7588bd5bb019ec7
+Bug: 1898776
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/220366
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfsd/src/glusterfsd.c                    |   4 +
+ libglusterfs/src/glusterfs/glusterfs.h         |   6 ++
+ xlators/storage/posix/src/posix-common.c       |  68 +++++++++++--
+ xlators/storage/posix/src/posix-handle.h       |   3 +-
+ xlators/storage/posix/src/posix-helpers.c      | 131 ++++++++++++++-----------
+ xlators/storage/posix/src/posix-inode-fd-ops.c |   3 +-
+ xlators/storage/posix/src/posix-mem-types.h    |   1 +
+ xlators/storage/posix/src/posix.h              |  12 ++-
+ 8 files changed, 160 insertions(+), 68 deletions(-)
+
+diff --git a/glusterfsd/src/glusterfsd.c b/glusterfsd/src/glusterfsd.c
+index 955bf1d..ac25255 100644
+--- a/glusterfsd/src/glusterfsd.c
++++ b/glusterfsd/src/glusterfsd.c
+@@ -1840,9 +1840,13 @@ glusterfs_ctx_defaults_init(glusterfs_ctx_t *ctx)
+     INIT_LIST_HEAD(&cmd_args->xlator_options);
+     INIT_LIST_HEAD(&cmd_args->volfile_servers);
+     ctx->pxl_count = 0;
++    ctx->diskxl_count = 0;
+     pthread_mutex_init(&ctx->fd_lock, NULL);
+     pthread_cond_init(&ctx->fd_cond, NULL);
+     INIT_LIST_HEAD(&ctx->janitor_fds);
++    pthread_mutex_init(&ctx->xl_lock, NULL);
++    pthread_cond_init(&ctx->xl_cond, NULL);
++    INIT_LIST_HEAD(&ctx->diskth_xl);
+ 
+     lim.rlim_cur = RLIM_INFINITY;
+     lim.rlim_max = RLIM_INFINITY;
+diff --git a/libglusterfs/src/glusterfs/glusterfs.h b/libglusterfs/src/glusterfs/glusterfs.h
+index bf6a987..d3400bf 100644
+--- a/libglusterfs/src/glusterfs/glusterfs.h
++++ b/libglusterfs/src/glusterfs/glusterfs.h
+@@ -740,7 +740,13 @@ struct _glusterfs_ctx {
+     pthread_t janitor;
+     /* The variable is use to save total posix xlator count */
+     uint32_t pxl_count;
++    uint32_t diskxl_count;
+ 
++    /* List of posix xlator use by disk thread*/
++    struct list_head diskth_xl;
++    pthread_mutex_t xl_lock;
++    pthread_cond_t xl_cond;
++    pthread_t disk_space_check;
+     char volume_id[GF_UUID_BUF_SIZE]; /* Used only in protocol/client */
+ };
+ typedef struct _glusterfs_ctx glusterfs_ctx_t;
+diff --git a/xlators/storage/posix/src/posix-common.c b/xlators/storage/posix/src/posix-common.c
+index e5c6e62..2c9030b 100644
+--- a/xlators/storage/posix/src/posix-common.c
++++ b/xlators/storage/posix/src/posix-common.c
+@@ -138,6 +138,36 @@ posix_inode(xlator_t *this)
+     return 0;
+ }
+ 
++static void
++delete_posix_diskxl(xlator_t *this)
++{
++    struct posix_private *priv = this->private;
++    struct posix_diskxl *pxl = priv->pxl;
++    glusterfs_ctx_t *ctx = this->ctx;
++    uint32_t count = 1;
++
++    if (pxl) {
++        pthread_mutex_lock(&ctx->xl_lock);
++        {
++            pxl->detach_notify = _gf_true;
++            while (pxl->is_use)
++                pthread_cond_wait(&pxl->cond, &ctx->xl_lock);
++            list_del_init(&pxl->list);
++            priv->pxl = NULL;
++            count = --ctx->diskxl_count;
++            if (count == 0)
++                pthread_cond_signal(&ctx->xl_cond);
++        }
++        pthread_mutex_unlock(&ctx->xl_lock);
++        pthread_cond_destroy(&pxl->cond);
++        GF_FREE(pxl);
++        if (count == 0) {
++            pthread_join(ctx->disk_space_check, NULL);
++            ctx->disk_space_check = 0;
++        }
++    }
++}
++
+ /**
+  * notify - when parent sends PARENT_UP, send CHILD_UP event from here
+  */
+@@ -194,6 +224,8 @@ posix_notify(xlator_t *this, int32_t event, void *data, ...)
+             }
+             pthread_mutex_unlock(&ctx->fd_lock);
+ 
++            delete_posix_diskxl(this);
++
+             gf_log(this->name, GF_LOG_INFO, "Sending CHILD_DOWN for brick %s",
+                    victim->name);
+             default_notify(this->parents->xlator, GF_EVENT_CHILD_DOWN, data);
+@@ -318,6 +350,7 @@ posix_reconfigure(xlator_t *this, dict_t *options)
+     int32_t force_directory_mode = -1;
+     int32_t create_mask = -1;
+     int32_t create_directory_mask = -1;
++    double old_disk_reserve = 0.0;
+ 
+     priv = this->private;
+ 
+@@ -383,6 +416,7 @@ posix_reconfigure(xlator_t *this, dict_t *options)
+                " fallback to <hostname>:<export>");
+     }
+ 
++    old_disk_reserve = priv->disk_reserve;
+     GF_OPTION_RECONF("reserve", priv->disk_reserve, options, percent_or_size,
+                      out);
+     /* option can be any one of percent or bytes */
+@@ -390,11 +424,19 @@ posix_reconfigure(xlator_t *this, dict_t *options)
+     if (priv->disk_reserve < 100.0)
+         priv->disk_unit = 'p';
+ 
+-    if (priv->disk_reserve) {
++    /* Delete a pxl object from a list of disk_reserve while something
++       is changed for reserve option during graph reconfigure
++    */
++    if (old_disk_reserve != priv->disk_reserve) {
++        delete_posix_diskxl(this);
++        old_disk_reserve = 0;
++    }
++
++    if (!old_disk_reserve && priv->disk_reserve) {
+         ret = posix_spawn_disk_space_check_thread(this);
+         if (ret) {
+             gf_msg(this->name, GF_LOG_INFO, 0, P_MSG_DISK_SPACE_CHECK_FAILED,
+-                   "Getting disk space check from thread failed");
++                   "Getting disk space check from thread failed ");
+             goto out;
+         }
+     }
+@@ -1008,13 +1050,13 @@ posix_init(xlator_t *this)
+                " fallback to <hostname>:<export>");
+     }
+ 
+-    _private->disk_space_check_active = _gf_false;
+     _private->disk_space_full = 0;
+ 
+     GF_OPTION_INIT("reserve", _private->disk_reserve, percent_or_size, out);
+ 
+     /* option can be any one of percent or bytes */
+     _private->disk_unit = 0;
++    pthread_cond_init(&_private->fd_cond, NULL);
+     if (_private->disk_reserve < 100.0)
+         _private->disk_unit = 'p';
+ 
+@@ -1162,12 +1204,6 @@ posix_fini(xlator_t *this)
+         priv->health_check = 0;
+     }
+ 
+-    if (priv->disk_space_check) {
+-        priv->disk_space_check_active = _gf_false;
+-        (void)gf_thread_cleanup_xint(priv->disk_space_check);
+-        priv->disk_space_check = 0;
+-    }
+-
+     if (priv->janitor) {
+         /*TODO: Make sure the synctask is also complete */
+         ret = gf_tw_del_timer(this->ctx->tw->timer_wheel, priv->janitor);
+@@ -1192,10 +1228,24 @@ posix_fini(xlator_t *this)
+         pthread_join(ctx->janitor, NULL);
+     }
+ 
++    pthread_mutex_lock(&ctx->xl_lock);
++    {
++        count = --ctx->diskxl_count;
++        if (count == 0)
++            pthread_cond_signal(&ctx->xl_cond);
++    }
++    pthread_mutex_unlock(&ctx->xl_lock);
++
++    if (count == 0) {
++        pthread_join(ctx->disk_space_check, NULL);
++        ctx->disk_space_check = 0;
++    }
++
+     if (priv->fsyncer) {
+         (void)gf_thread_cleanup_xint(priv->fsyncer);
+         priv->fsyncer = 0;
+     }
++
+     /*unlock brick dir*/
+     if (priv->mount_lock)
+         (void)sys_closedir(priv->mount_lock);
+diff --git a/xlators/storage/posix/src/posix-handle.h b/xlators/storage/posix/src/posix-handle.h
+index c4d7cb1..8e4c719 100644
+--- a/xlators/storage/posix/src/posix-handle.h
++++ b/xlators/storage/posix/src/posix-handle.h
+@@ -206,5 +206,6 @@ int
+ posix_check_internal_writes(xlator_t *this, fd_t *fd, int sysfd, dict_t *xdata);
+ 
+ void
+-posix_disk_space_check(xlator_t *this);
++posix_disk_space_check(struct posix_private* priv);
++
+ #endif /* !_POSIX_HANDLE_H */
+diff --git a/xlators/storage/posix/src/posix-helpers.c b/xlators/storage/posix/src/posix-helpers.c
+index ceac52a..110d383 100644
+--- a/xlators/storage/posix/src/posix-helpers.c
++++ b/xlators/storage/posix/src/posix-helpers.c
+@@ -2284,9 +2284,8 @@ unlock:
+ }
+ 
+ void
+-posix_disk_space_check(xlator_t *this)
++posix_disk_space_check(struct posix_private *priv)
+ {
+-    struct posix_private *priv = NULL;
+     char *subvol_path = NULL;
+     int op_ret = 0;
+     double size = 0;
+@@ -2295,16 +2294,14 @@ posix_disk_space_check(xlator_t *this)
+     double totsz = 0;
+     double freesz = 0;
+ 
+-    GF_VALIDATE_OR_GOTO(this->name, this, out);
+-    priv = this->private;
+-    GF_VALIDATE_OR_GOTO(this->name, priv, out);
++    GF_VALIDATE_OR_GOTO("posix-helpers", priv, out);
+ 
+     subvol_path = priv->base_path;
+ 
+     op_ret = sys_statvfs(subvol_path, &buf);
+ 
+     if (op_ret == -1) {
+-        gf_msg(this->name, GF_LOG_ERROR, errno, P_MSG_STATVFS_FAILED,
++        gf_msg("posix-disk", GF_LOG_ERROR, errno, P_MSG_STATVFS_FAILED,
+                "statvfs failed on %s", subvol_path);
+         goto out;
+     }
+@@ -2328,78 +2325,102 @@ out:
+ }
+ 
+ static void *
+-posix_disk_space_check_thread_proc(void *data)
++posix_ctx_disk_thread_proc(void *data)
+ {
+-    xlator_t *this = NULL;
+     struct posix_private *priv = NULL;
++    glusterfs_ctx_t *ctx = NULL;
+     uint32_t interval = 0;
+-    int ret = -1;
+-
+-    this = data;
+-    priv = this->private;
++    struct posix_diskxl *pthis = NULL;
++    xlator_t *this = NULL;
++    struct timespec sleep_till = {
++        0,
++    };
+ 
++    ctx = data;
+     interval = 5;
+-    gf_msg_debug(this->name, 0,
+-                 "disk-space thread started, "
++
++    gf_msg_debug("glusterfs_ctx", 0,
++                 "Ctx disk-space thread started, "
+                  "interval = %d seconds",
+                  interval);
+-    while (1) {
+-        /* aborting sleep() is a request to exit this thread, sleep()
+-         * will normally not return when cancelled */
+-        ret = sleep(interval);
+-        if (ret > 0)
+-            break;
+-        /* prevent thread errors while doing the health-check(s) */
+-        pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
+-
+-        /* Do the disk-check.*/
+-        posix_disk_space_check(this);
+-        if (!priv->disk_space_check_active)
+-            goto out;
+-        pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+-    }
+ 
+-out:
+-    gf_msg_debug(this->name, 0, "disk space check thread exiting");
+-    LOCK(&priv->lock);
++    pthread_mutex_lock(&ctx->xl_lock);
+     {
+-        priv->disk_space_check_active = _gf_false;
++        while (ctx->diskxl_count > 0) {
++            list_for_each_entry(pthis, &ctx->diskth_xl, list)
++            {
++                pthis->is_use = _gf_true;
++                pthread_mutex_unlock(&ctx->xl_lock);
++
++                THIS = this = pthis->xl;
++                priv = this->private;
++
++                posix_disk_space_check(priv);
++
++                pthread_mutex_lock(&ctx->xl_lock);
++                pthis->is_use = _gf_false;
++                /* Send a signal to posix_notify function */
++                if (pthis->detach_notify)
++                    pthread_cond_signal(&pthis->cond);
++            }
++
++            timespec_now_realtime(&sleep_till);
++            sleep_till.tv_sec += 5;
++            (void)pthread_cond_timedwait(&ctx->xl_cond, &ctx->xl_lock,
++                                         &sleep_till);
++        }
+     }
+-    UNLOCK(&priv->lock);
++    pthread_mutex_unlock(&ctx->xl_lock);
+ 
+     return NULL;
+ }
+ 
+ int
+-posix_spawn_disk_space_check_thread(xlator_t *xl)
++posix_spawn_disk_space_check_thread(xlator_t *this)
+ {
+-    struct posix_private *priv = NULL;
+-    int ret = -1;
++    int ret = 0;
++    glusterfs_ctx_t *ctx = this->ctx;
++    struct posix_diskxl *pxl = NULL;
++    struct posix_private *priv = this->private;
+ 
+-    priv = xl->private;
++    pxl = GF_CALLOC(1, sizeof(struct posix_diskxl), gf_posix_mt_diskxl_t);
++    if (!pxl) {
++        ret = -ENOMEM;
++        gf_log(this->name, GF_LOG_ERROR,
++               "Calloc is failed to allocate "
++               "memory for diskxl object");
++        goto out;
++    }
++    pthread_cond_init(&pxl->cond, NULL);
+ 
+-    LOCK(&priv->lock);
++    pthread_mutex_lock(&ctx->xl_lock);
+     {
+-        /* cancel the running thread  */
+-        if (priv->disk_space_check_active == _gf_true) {
+-            pthread_cancel(priv->disk_space_check);
+-            priv->disk_space_check_active = _gf_false;
+-        }
++        if (ctx->diskxl_count++ == 0) {
++            ret = gf_thread_create(&ctx->disk_space_check, NULL,
++                                   posix_ctx_disk_thread_proc, ctx,
++                                   "posixctxres");
+ 
+-        ret = gf_thread_create(&priv->disk_space_check, NULL,
+-                               posix_disk_space_check_thread_proc, xl,
+-                               "posix_reserve");
+-        if (ret) {
+-            priv->disk_space_check_active = _gf_false;
+-            gf_msg(xl->name, GF_LOG_ERROR, errno, P_MSG_DISK_SPACE_CHECK_FAILED,
+-                   "unable to setup disk space check thread");
+-            goto unlock;
++            if (ret) {
++                gf_msg(this->name, GF_LOG_ERROR, errno, P_MSG_THREAD_FAILED,
++                       "spawning disk space check thread failed");
++                ctx->diskxl_count--;
++                pthread_mutex_unlock(&ctx->xl_lock);
++                goto out;
++            }
+         }
++        pxl->xl = this;
++        priv->pxl = (void *)pxl;
++        list_add_tail(&pxl->list, &ctx->diskth_xl);
++    }
++    pthread_mutex_unlock(&ctx->xl_lock);
+ 
+-        priv->disk_space_check_active = _gf_true;
++out:
++    if (ret) {
++        if (pxl) {
++            pthread_cond_destroy(&pxl->cond);
++            GF_FREE(pxl);
++        }
+     }
+-unlock:
+-    UNLOCK(&priv->lock);
+     return ret;
+ }
+ 
+diff --git a/xlators/storage/posix/src/posix-inode-fd-ops.c b/xlators/storage/posix/src/posix-inode-fd-ops.c
+index 1d37aed..761e018 100644
+--- a/xlators/storage/posix/src/posix-inode-fd-ops.c
++++ b/xlators/storage/posix/src/posix-inode-fd-ops.c
+@@ -37,6 +37,7 @@
+ #include <fcntl.h>
+ #endif /* HAVE_LINKAT */
+ 
++#include "posix-handle.h"
+ #include <glusterfs/glusterfs.h>
+ #include <glusterfs/checksum.h>
+ #include <glusterfs/dict.h>
+@@ -713,7 +714,7 @@ posix_do_fallocate(call_frame_t *frame, xlator_t *this, fd_t *fd, int32_t flags,
+        option behaviour
+     */
+     if (priv->disk_reserve)
+-        posix_disk_space_check(this);
++        posix_disk_space_check(priv);
+ 
+     DISK_SPACE_CHECK_AND_GOTO(frame, priv, xdata, ret, ret, unlock);
+ 
+diff --git a/xlators/storage/posix/src/posix-mem-types.h b/xlators/storage/posix/src/posix-mem-types.h
+index 2253f38..bb4c56d 100644
+--- a/xlators/storage/posix/src/posix-mem-types.h
++++ b/xlators/storage/posix/src/posix-mem-types.h
+@@ -20,6 +20,7 @@ enum gf_posix_mem_types_ {
+     gf_posix_mt_paiocb,
+     gf_posix_mt_inode_ctx_t,
+     gf_posix_mt_mdata_attr,
++    gf_posix_mt_diskxl_t,
+     gf_posix_mt_end
+ };
+ #endif
+diff --git a/xlators/storage/posix/src/posix.h b/xlators/storage/posix/src/posix.h
+index 07f367b..4be979c 100644
+--- a/xlators/storage/posix/src/posix.h
++++ b/xlators/storage/posix/src/posix.h
+@@ -36,7 +36,6 @@
+ #include <glusterfs/compat.h>
+ #include <glusterfs/timer.h>
+ #include "posix-mem-types.h"
+-#include "posix-handle.h"
+ #include <glusterfs/call-stub.h>
+ 
+ #ifdef HAVE_LIBAIO
+@@ -138,6 +137,14 @@ struct posix_fd {
+     char _pad[4]; /* manual padding */
+ };
+ 
++struct posix_diskxl {
++    pthread_cond_t cond;
++    struct list_head list;
++    xlator_t *xl;
++    gf_boolean_t detach_notify;
++    gf_boolean_t is_use;
++};
++
+ struct posix_private {
+     char *base_path;
+     int32_t base_path_length;
+@@ -207,6 +214,7 @@ struct posix_private {
+     pthread_mutex_t janitor_mutex;
+     pthread_cond_t janitor_cond;
+     pthread_cond_t fd_cond;
++    pthread_cond_t disk_cond;
+     int fsync_queue_count;
+ 
+     enum {
+@@ -233,7 +241,6 @@ struct posix_private {
+     char disk_unit;
+     uint32_t disk_space_full;
+     pthread_t disk_space_check;
+-    gf_boolean_t disk_space_check_active;
+ 
+ #ifdef GF_DARWIN_HOST_OS
+     enum {
+@@ -263,6 +270,7 @@ struct posix_private {
+     gf_boolean_t ctime;
+     gf_boolean_t janitor_task_stop;
+     uint32_t rel_fdcount;
++    void *pxl;
+ };
+ 
+ typedef struct {
+-- 
+1.8.3.1
+

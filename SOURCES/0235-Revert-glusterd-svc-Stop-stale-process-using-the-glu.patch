@@ -1,0 +1,38 @@
+From b2040d8404e0ac44742cb903e3c8da2c832b2925 Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Thu, 11 Jul 2019 12:45:11 +0530
+Subject: [PATCH 235/255] Revert "glusterd/svc: Stop stale process using the
+ glusterd_proc_stop"
+
+This reverts commit fe9159ee42f0f67b01e6a495df8105ea0f66738d.
+
+BUG: 1471742
+Change-Id: Id5ac0d21319724141ad9bcb9b66435803ebe5f47
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/175944
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-svc-helper.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+index a6e662f..6a3ca52 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
++++ b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+@@ -488,9 +488,9 @@ glusterd_shd_svc_mux_init(glusterd_volinfo_t *volinfo, glusterd_svc_t *svc)
+ 
+             if (!mux_proc) {
+                 if (pid != -1 && sys_access(svc->proc.pidfile, R_OK) == 0) {
+-                    /* stale pid file, stop and unlink it */
+-                    glusterd_proc_stop(&svc->proc, SIGTERM, PROC_STOP_FORCE);
+-                    glusterd_unlink_file(svc->proc.pidfile);
++                    /* stale pid file, unlink it. */
++                    kill(pid, SIGTERM);
++                    sys_unlink(svc->proc.pidfile);
+                 }
+                 mux_proc = __gf_find_compatible_svc(GD_NODE_SHD);
+             }
+-- 
+1.8.3.1
+

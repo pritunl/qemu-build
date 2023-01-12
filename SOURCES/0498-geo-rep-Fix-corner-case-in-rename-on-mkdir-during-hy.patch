@@ -1,0 +1,69 @@
+From 11d648660b8bd246756f87b2f40c72fbabf084d1 Mon Sep 17 00:00:00 2001
+From: Sunny Kumar <sunkumar@redhat.com>
+Date: Tue, 19 May 2020 16:13:01 +0100
+Subject: [PATCH 498/511] geo-rep: Fix corner case in rename on mkdir during
+ hybrid crawl
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Problem:
+The issue is being hit during hybrid mode while handling rename on slave.
+In this special case the rename is recorded as mkdir and geo-rep process it
+by resolving the path form backend.
+
+While resolving the backend path during this special handling one corner case is not considered.
+
+<snip>
+Traceback (most recent call last):
+  File "/usr/libexec/glusterfs/python/syncdaemon/repce.py", line 118, in worker
+    res = getattr(self.obj, rmeth)(*in_data[2:])
+  File "/usr/libexec/glusterfs/python/syncdaemon/resource.py", line 588, in entry_ops
+    src_entry = get_slv_dir_path(slv_host, slv_volume, gfid)
+  File "/usr/libexec/glusterfs/python/syncdaemon/syncdutils.py", line 710, in get_slv_dir_path
+    dir_entry = os.path.join(pfx, pargfid, basename)
+  File "/usr/lib64/python2.7/posixpath.py", line 75, in join
+    if b.startswith('/'):
+AttributeError: 'int' object has no attribute 'startswith'
+
+In pyhthon3:
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/usr/lib64/python3.8/posixpath.py", line 90, in join
+    genericpath._check_arg_types('join', a, *p)
+  File "/usr/lib64/python3.8/genericpath.py", line 152, in _check_arg_types
+    raise TypeError(f'{funcname}() argument must be str, bytes, or '
+TypeError: join() argument must be str, bytes, or os.PathLike object, not 'int'
+</snip>
+
+>Change-Id: I8b926899c60ad8c4ffc886d57028ba70fd21e332
+>Fixes: #1250
+>Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+Upstream Patch: https://review.gluster.org/c/glusterfs/+/24468/
+
+BUG: 1835229
+Change-Id: I8b926899c60ad8c4ffc886d57028ba70fd21e332
+Signed-off-by: nik-redhat <nladha@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/220867
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ geo-replication/syncdaemon/syncdutils.py | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/geo-replication/syncdaemon/syncdutils.py b/geo-replication/syncdaemon/syncdutils.py
+index d5a94d4..26c79d0 100644
+--- a/geo-replication/syncdaemon/syncdutils.py
++++ b/geo-replication/syncdaemon/syncdutils.py
+@@ -732,6 +732,8 @@ def get_slv_dir_path(slv_host, slv_volume, gfid):
+                     else:
+                         dirpath = dirpath.strip("/")
+                         pargfid = get_gfid_from_mnt(dirpath)
++                        if isinstance(pargfid, int):
++                            return None
+                     dir_entry = os.path.join(pfx, pargfid, basename)
+                     return dir_entry
+ 
+-- 
+1.8.3.1
+

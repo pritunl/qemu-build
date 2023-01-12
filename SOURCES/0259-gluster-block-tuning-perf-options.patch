@@ -1,0 +1,47 @@
+From 775a62906030e5b5dc60f17284a7d516ce4118f9 Mon Sep 17 00:00:00 2001
+From: Prasanna Kumar Kalever <prasanna.kalever@redhat.com>
+Date: Thu, 27 Jun 2019 13:18:32 +0530
+Subject: [PATCH 259/261] gluster-block: tuning perf options
+
+As per the perf experiment run by Elvir, with NVME devices used for OCP (gluster)
+it was seen that particularly read operations (read/randread) benefited from
+these options.
+
+> upstream patch : https://review.gluster.org/#/c/glusterfs/+/22963/
+
+>Change-Id: Ibec4b96afd28e6f7e757b6ef203ccdbc0d9854d5
+>Fixes: bz#1727852
+>Signed-off-by: Prasanna Kumar Kalever <prasanna.kalever@redhat.com>
+
+Change-Id: Ibec4b96afd28e6f7e757b6ef203ccdbc0d9854d5
+BUG: 1708180
+Signed-off-by: Prasanna Kumar Kalever <prasanna.kalever@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/176724
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ extras/group-gluster-block | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/extras/group-gluster-block b/extras/group-gluster-block
+index 56b406e..1e39801 100644
+--- a/extras/group-gluster-block
++++ b/extras/group-gluster-block
+@@ -5,6 +5,14 @@ performance.stat-prefetch=off
+ performance.open-behind=off
+ performance.readdir-ahead=off
+ performance.strict-o-direct=on
++performance.client-io-threads=on
++performance.io-thread-count=32
++performance.high-prio-threads=32
++performance.normal-prio-threads=32
++performance.low-prio-threads=32
++performance.least-prio-threads=4
++client.event-threads=8
++server.event-threads=8
+ network.remote-dio=disable
+ cluster.eager-lock=enable
+ cluster.quorum-type=auto
+-- 
+1.8.3.1
+

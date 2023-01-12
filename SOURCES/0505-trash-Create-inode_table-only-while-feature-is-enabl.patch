@@ -1,0 +1,107 @@
+From 43a8e2c7441b14f5f238cb11d83f32f248b16abb Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawa@redhat.com>
+Date: Tue, 13 Oct 2020 18:56:20 +0530
+Subject: [PATCH 505/511] trash: Create inode_table only while feature is
+ enabled
+
+Currently trash xlator create a inode table(1M) even if
+feature is not enabled.In brick_mux environment while 250
+bricks are attached with a single brick process and feature
+is not enable brick process increase RSS size unnecessarily.
+
+Solution: Create inode_table only while a feature is enabled.
+The patch reduces 250M RSS size per brick process
+if trash feature is not enabled.
+
+> Change-Id: I11a6fd2b8419fe2988f398be6ec30fb4f3b99a5d
+> Fixes: #1543
+> Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+> (Cherry pick from commit 32f25e7b1b4b080ab2640e178b407c878e629376)
+> (Reviewed on upstream link https://github.com/gluster/glusterfs/issues/1543)
+
+Change-Id: I11a6fd2b8419fe2988f398be6ec30fb4f3b99a5d
+BUG: 1898781
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/221184
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/features/trash/src/trash.c | 47 +++++++++++++++++++++++++++++++++++---
+ 1 file changed, 44 insertions(+), 3 deletions(-)
+
+diff --git a/xlators/features/trash/src/trash.c b/xlators/features/trash/src/trash.c
+index f96ed73..93f020f 100644
+--- a/xlators/features/trash/src/trash.c
++++ b/xlators/features/trash/src/trash.c
+@@ -2235,16 +2235,47 @@ reconfigure(xlator_t *this, dict_t *options)
+     char trash_dir[PATH_MAX] = {
+         0,
+     };
++    gf_boolean_t active_earlier = _gf_false;
++    gf_boolean_t active_now = _gf_false;
+ 
+     priv = this->private;
+ 
+     GF_VALIDATE_OR_GOTO("trash", priv, out);
+ 
++    active_earlier = priv->state;
++    GF_OPTION_RECONF("trash", active_now, options, bool, out);
++
++    /* Disable of trash feature is not allowed at this point until
++       we are not able to find an approach to cleanup resource
++       gracefully. Here to disable the feature need to destroy inode
++       table and currently it is difficult to ensure inode is not
++       being used
++    */
++    if (active_earlier && !active_now) {
++        gf_log(this->name, GF_LOG_INFO,
++               "Disable of trash feature is not allowed "
++               "during graph reconfigure");
++        ret = 0;
++        goto out;
++    }
++
++    if (!active_earlier && active_now) {
++        if (!priv->trash_itable) {
++            priv->trash_itable = inode_table_new(0, this);
++            if (!priv->trash_itable) {
++                ret = -ENOMEM;
++                gf_log(this->name, GF_LOG_ERROR,
++                       "failed to create trash inode_table"
++                       "  during graph reconfigure");
++                goto out;
++            }
++        }
++        priv->state = active_now;
++    }
++
+     GF_OPTION_RECONF("trash-internal-op", priv->internal, options, bool, out);
+     GF_OPTION_RECONF("trash-dir", tmp, options, str, out);
+ 
+-    GF_OPTION_RECONF("trash", priv->state, options, bool, out);
+-
+     if (priv->state) {
+         ret = create_or_rename_trash_directory(this);
+ 
+@@ -2501,7 +2532,17 @@ init(xlator_t *this)
+         goto out;
+     }
+ 
+-    priv->trash_itable = inode_table_new(0, this);
++    if (priv->state) {
++        priv->trash_itable = inode_table_new(0, this);
++        if (!priv->trash_itable) {
++            ret = -ENOMEM;
++            priv->state = _gf_false;
++            gf_log(this->name, GF_LOG_ERROR,
++                   "failed to create trash inode_table disable trash");
++            goto out;
++        }
++    }
++
+     gf_log(this->name, GF_LOG_DEBUG, "brick path is%s", priv->brick_path);
+ 
+     this->private = (void *)priv;
+-- 
+1.8.3.1
+

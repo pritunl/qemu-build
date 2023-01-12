@@ -1,0 +1,255 @@
+From 759c12fc016a6399bb179aa0f930602c87d1e0f8 Mon Sep 17 00:00:00 2001
+From: Barak Sason Rofman <bsasonro@redhat.com>
+Date: Tue, 24 Nov 2020 12:56:10 +0200
+Subject: [PATCH 480/480] DHT/Rebalance - Ensure Rebalance reports status only
+ once upon stopping
+
+Upon issuing rebalance stop command, the status of rebalance is being
+logged twice to the log file, which can sometime result in an
+inconsistent reports (one report states status stopped, while the other
+may report something else).
+
+This fix ensures rebalance reports it's status only once and that the
+correct status is being reported.
+
+Upstream:
+> Reviewed-on: https://github.com/gluster/glusterfs/pull/1783
+> fixes: #1782
+> Change-Id: Id3206edfad33b3db60e9df8e95a519928dc7cb37
+> Signed-off-by: Barak Sason Rofman bsasonro@redhat.com
+
+BUG: 1286171
+Change-Id: Id3206edfad33b3db60e9df8e95a519928dc7cb37
+Signed-off-by: Barak Sason Rofman <bsasonro@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/218953
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Csaba Henk <chenk@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/distribute/bug-1286171.t     | 75 +++++++++++++++++++++++++++++++++
+ xlators/cluster/dht/src/dht-common.c    |  2 +-
+ xlators/cluster/dht/src/dht-common.h    |  2 +-
+ xlators/cluster/dht/src/dht-rebalance.c | 63 ++++++++++++++-------------
+ 4 files changed, 108 insertions(+), 34 deletions(-)
+ create mode 100644 tests/bugs/distribute/bug-1286171.t
+
+diff --git a/tests/bugs/distribute/bug-1286171.t b/tests/bugs/distribute/bug-1286171.t
+new file mode 100644
+index 0000000..a2ca36f
+--- /dev/null
++++ b/tests/bugs/distribute/bug-1286171.t
+@@ -0,0 +1,75 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../cluster.rc
++. $(dirname $0)/../../volume.rc
++
++# Initialize
++#------------------------------------------------------------
++cleanup;
++
++volname=bug-1286171
++
++# Start glusterd
++TEST glusterd;
++TEST pidof glusterd;
++TEST $CLI volume info;
++
++# Create a volume
++TEST $CLI volume create $volname $H0:$B0/${volname}{1,2}
++
++# Verify volume creation
++EXPECT "$volname" volinfo_field $volname 'Volume Name';
++EXPECT 'Created' volinfo_field $volname 'Status';
++
++# Start volume and verify successful start
++TEST $CLI volume start $volname;
++EXPECT 'Started' volinfo_field $volname 'Status';
++TEST glusterfs --volfile-id=$volname --volfile-server=$H0 --entry-timeout=0 $M0;
++#------------------------------------------------------------
++
++# Create a nested dir structure and some file under MP
++cd $M0;
++for i in {1..5}
++do
++	mkdir dir$i
++	cd dir$i
++	for j in {1..5}
++	do
++		mkdir dir$i$j
++		cd dir$i$j
++		for k in {1..5}
++		do
++			mkdir dir$i$j$k
++			cd dir$i$j$k
++			touch {1..300}
++			cd ..
++		done
++		touch {1..300}
++		cd ..
++	done
++	touch {1..300}
++	cd ..
++done
++touch {1..300}
++
++# Add-brick and start rebalance
++TEST $CLI volume add-brick $volname $H0:$B0/${volname}4;
++TEST $CLI volume rebalance $volname start;
++
++# Let rebalance run for a while
++sleep 5
++
++# Stop rebalance
++TEST $CLI volume rebalance $volname stop;
++
++# Allow rebalance to stop
++sleep 5
++
++# Examine the logfile for errors
++cd /var/log/glusterfs;
++failures=`grep "failures:" ${volname}-rebalance.log | tail -1 | sed 's/.*failures: //; s/,.*//'`;
++
++TEST [ $failures == 0 ];
++
++cleanup;
+diff --git a/xlators/cluster/dht/src/dht-common.c b/xlators/cluster/dht/src/dht-common.c
+index 23cc80c..4db89df 100644
+--- a/xlators/cluster/dht/src/dht-common.c
++++ b/xlators/cluster/dht/src/dht-common.c
+@@ -10969,7 +10969,7 @@ dht_notify(xlator_t *this, int event, void *data, ...)
+                 if ((cmd == GF_DEFRAG_CMD_STATUS) ||
+                     (cmd == GF_DEFRAG_CMD_STATUS_TIER) ||
+                     (cmd == GF_DEFRAG_CMD_DETACH_STATUS))
+-                    gf_defrag_status_get(conf, output);
++                	gf_defrag_status_get(conf, output, _gf_false);
+                 else if (cmd == GF_DEFRAG_CMD_START_DETACH_TIER)
+                     gf_defrag_start_detach_tier(defrag);
+                 else if (cmd == GF_DEFRAG_CMD_DETACH_START)
+diff --git a/xlators/cluster/dht/src/dht-common.h b/xlators/cluster/dht/src/dht-common.h
+index 9ec5b51..92f1b89 100644
+--- a/xlators/cluster/dht/src/dht-common.h
++++ b/xlators/cluster/dht/src/dht-common.h
+@@ -1252,7 +1252,7 @@ dht_fxattrop_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+                  int32_t op_ret, int32_t op_errno, dict_t *dict, dict_t *xdata);
+ 
+ int
+-gf_defrag_status_get(dht_conf_t *conf, dict_t *dict);
++gf_defrag_status_get(dht_conf_t *conf, dict_t *dict, gf_boolean_t log_status);
+ 
+ void
+ gf_defrag_set_pause_state(gf_tier_conf_t *tier_conf, tier_pause_state_t state);
+diff --git a/xlators/cluster/dht/src/dht-rebalance.c b/xlators/cluster/dht/src/dht-rebalance.c
+index d49a719..16ac16c 100644
+--- a/xlators/cluster/dht/src/dht-rebalance.c
++++ b/xlators/cluster/dht/src/dht-rebalance.c
+@@ -2720,7 +2720,6 @@ gf_defrag_migrate_single_file(void *opaque)
+     iatt_ptr = &entry->d_stat;
+ 
+     if (defrag->defrag_status != GF_DEFRAG_STATUS_STARTED) {
+-        ret = -1;
+         goto out;
+     }
+ 
+@@ -3833,7 +3832,6 @@ gf_defrag_fix_layout(xlator_t *this, gf_defrag_info_t *defrag, loc_t *loc,
+         list_for_each_entry_safe(entry, tmp, &entries.list, list)
+         {
+             if (defrag->defrag_status != GF_DEFRAG_STATUS_STARTED) {
+-                ret = 1;
+                 goto out;
+             }
+ 
+@@ -4863,7 +4861,7 @@ out:
+     LOCK(&defrag->lock);
+     {
+         status = dict_new();
+-        gf_defrag_status_get(conf, status);
++        gf_defrag_status_get(conf, status, _gf_true);
+         if (ctx && ctx->notify)
+             ctx->notify(GF_EN_DEFRAG_STATUS, status);
+         if (status)
+@@ -4998,7 +4996,7 @@ out:
+ }
+ 
+ int
+-gf_defrag_status_get(dht_conf_t *conf, dict_t *dict)
++gf_defrag_status_get(dht_conf_t *conf, dict_t *dict, gf_boolean_t log_status)
+ {
+     int ret = 0;
+     uint64_t files = 0;
+@@ -5095,34 +5093,35 @@ gf_defrag_status_get(dht_conf_t *conf, dict_t *dict)
+         gf_log(THIS->name, GF_LOG_WARNING, "failed to set time-left");
+ 
+ log:
+-    switch (defrag->defrag_status) {
+-        case GF_DEFRAG_STATUS_NOT_STARTED:
+-            status = "not started";
+-            break;
+-        case GF_DEFRAG_STATUS_STARTED:
+-            status = "in progress";
+-            break;
+-        case GF_DEFRAG_STATUS_STOPPED:
+-            status = "stopped";
+-            break;
+-        case GF_DEFRAG_STATUS_COMPLETE:
+-            status = "completed";
+-            break;
+-        case GF_DEFRAG_STATUS_FAILED:
+-            status = "failed";
+-            break;
+-        default:
+-            break;
+-    }
++    if (log_status) {
++        switch (defrag->defrag_status) {
++            case GF_DEFRAG_STATUS_NOT_STARTED:
++                status = "not started";
++                break;
++            case GF_DEFRAG_STATUS_STARTED:
++                status = "in progress";
++                break;
++            case GF_DEFRAG_STATUS_STOPPED:
++                status = "stopped";
++                break;
++            case GF_DEFRAG_STATUS_COMPLETE:
++                status = "completed";
++                break;
++            case GF_DEFRAG_STATUS_FAILED:
++                status = "failed";
++                break;
++            default:
++                break;
++        }
+ 
+-    gf_msg(THIS->name, GF_LOG_INFO, 0, DHT_MSG_REBALANCE_STATUS,
+-           "Rebalance is %s. Time taken is %.2f secs", status, elapsed);
+-    gf_msg(THIS->name, GF_LOG_INFO, 0, DHT_MSG_REBALANCE_STATUS,
+-           "Files migrated: %" PRIu64 ", size: %" PRIu64 ", lookups: %" PRIu64
+-           ", failures: %" PRIu64
+-           ", skipped: "
+-           "%" PRIu64,
+-           files, size, lookup, failures, skipped);
++        gf_msg("DHT", GF_LOG_INFO, 0, DHT_MSG_REBALANCE_STATUS,
++               "Rebalance is %s. Time taken is %.2f secs "
++               "Files migrated: %" PRIu64 ", size: %" PRIu64
++               ", lookups: %" PRIu64 ", failures: %" PRIu64
++               ", skipped: "
++               "%" PRIu64,
++               status, elapsed, files, size, lookup, failures, skipped);
++    }
+ out:
+     return 0;
+ }
+@@ -5299,7 +5298,7 @@ gf_defrag_stop(dht_conf_t *conf, gf_defrag_status_t status, dict_t *output)
+     defrag->defrag_status = status;
+ 
+     if (output)
+-        gf_defrag_status_get(conf, output);
++        gf_defrag_status_get(conf, output, _gf_false);
+     ret = 0;
+ out:
+     gf_msg_debug("", 0, "Returning %d", ret);
+-- 
+1.8.3.1
+

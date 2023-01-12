@@ -1,0 +1,119 @@
+From 9912a432dc3493007462f76c5933d04a160814ae Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Thu, 20 Jun 2019 17:05:49 +0530
+Subject: [PATCH 198/221] cluster/ec: Prevent double pre-op xattrops
+
+Problem:
+Race:
+Thread-1                                    Thread-2
+1) Does ec_get_size_version() to perform
+pre-op fxattrop as part of write-1
+                                           2) Calls ec_set_dirty_flag() in
+                                              ec_get_size_version() for write-2.
+					      This sets dirty[] to 1
+3) Completes executing
+ec_prepare_update_cbk leading to
+ctx->dirty[] = '1'
+					   4) Takes LOCK(inode->lock) to check if there are
+					      any flags and sets dirty-flag because
+				              lock->waiting_flag is 0 now. This leads to
+					      fxattrop to increment on-disk dirty[] to '2'
+
+At the end of the writes the file will be marked for heal even when it doesn't need heal.
+
+Fix:
+Perform ec_set_dirty_flag() and other checks inside LOCK() to prevent dirty[] to be marked
+as '1' in step 2) above
+
+ > Upstream-patch: https://review.gluster.org/c/glusterfs/+/22907
+
+fixes: bz#1600918
+Change-Id: Icac2ab39c0b1e7e154387800fbededc561612865
+Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/174385
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ tests/basic/ec/ec-dirty-flags.t    | 23 +++++++++++++++++++++++
+ xlators/cluster/ec/src/ec-common.c | 13 +++++++------
+ 2 files changed, 30 insertions(+), 6 deletions(-)
+ create mode 100644 tests/basic/ec/ec-dirty-flags.t
+
+diff --git a/tests/basic/ec/ec-dirty-flags.t b/tests/basic/ec/ec-dirty-flags.t
+new file mode 100644
+index 0000000..68e6610
+--- /dev/null
++++ b/tests/basic/ec/ec-dirty-flags.t
+@@ -0,0 +1,23 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++
++# This checks if the fop keeps the dirty flags settings correctly after
++# finishing the fop.
++
++cleanup
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 disperse 3 redundancy 1 $H0:$B0/${V0}{0..2}
++TEST $CLI volume heal $V0 disable
++TEST $CLI volume start $V0
++
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0;
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "3" ec_child_up_count $V0 0
++cd $M0
++for i in {1..1000}; do dd if=/dev/zero of=file-${i} bs=512k count=2; done
++cd -
++EXPECT "^0$" get_pending_heal_count $V0
++
++cleanup
+diff --git a/xlators/cluster/ec/src/ec-common.c b/xlators/cluster/ec/src/ec-common.c
+index 9cc6395..35c2256 100644
+--- a/xlators/cluster/ec/src/ec-common.c
++++ b/xlators/cluster/ec/src/ec-common.c
+@@ -1405,6 +1405,10 @@ ec_get_size_version(ec_lock_link_t *link)
+         !ec_is_data_fop(fop->id))
+         link->optimistic_changelog = _gf_true;
+ 
++    memset(&loc, 0, sizeof(loc));
++
++    LOCK(&lock->loc.inode->lock);
++
+     set_dirty = ec_set_dirty_flag(link, ctx, dirty);
+ 
+     /* If ec metadata has already been retrieved, do not try again. */
+@@ -1412,20 +1416,16 @@ ec_get_size_version(ec_lock_link_t *link)
+         if (ec_is_data_fop(fop->id)) {
+             fop->healing |= lock->healing;
+         }
+-        return;
++        goto unlock;
+     }
+ 
+     /* Determine if there's something we need to retrieve for the current
+      * operation. */
+     if (!set_dirty && !lock->query && (lock->loc.inode->ia_type != IA_IFREG) &&
+         (lock->loc.inode->ia_type != IA_INVAL)) {
+-        return;
++        goto unlock;
+     }
+ 
+-    memset(&loc, 0, sizeof(loc));
+-
+-    LOCK(&lock->loc.inode->lock);
+-
+     changed_flags = ec_set_xattrop_flags_and_params(lock, link, dirty);
+     if (link->waiting_flags) {
+         /* This fop needs to wait until all its flags are cleared which
+@@ -1436,6 +1436,7 @@ ec_get_size_version(ec_lock_link_t *link)
+         GF_ASSERT(!changed_flags);
+     }
+ 
++unlock:
+     UNLOCK(&lock->loc.inode->lock);
+ 
+     if (!changed_flags)
+-- 
+1.8.3.1
+

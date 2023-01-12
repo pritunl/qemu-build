@@ -1,0 +1,187 @@
+From 2c582ea6c76031463501b31d9250e739d5aeda79 Mon Sep 17 00:00:00 2001
+From: Ravishankar N <ravishankar@redhat.com>
+Date: Fri, 5 Jun 2020 14:28:11 +0530
+Subject: [PATCH 425/449] tests: Fix spurious self-heald.t failure
+
+Problem:
+heal-info code assumes that all indices in xattrop directory
+definitely need heal. There is one corner case.
+The very first xattrop on the file will lead to adding the
+gfid to 'xattrop' index in fop path and in _cbk path it is
+removed because the fop is zero-xattr xattrop in success case.
+These gfids could be read by heal-info and shown as needing heal.
+
+Fix:
+Check the pending flag to see if the file definitely needs or
+not instead of which index is being crawled at the moment.
+
+> Upstream patch: https://review.gluster.org/#/c/glusterfs/+/24110/
+> fixes: bz#1801623
+> Change-Id: I79f00dc7366fedbbb25ec4bec838dba3b34c7ad5
+> Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+
+BUG: 1721355
+Change-Id: I7efdf45a5158fadfdbdd21c91837f193d80fa6c7
+Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202491
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Pranith Kumar Karampuri <pkarampu@redhat.com>
+---
+ heal/src/glfs-heal.c                 | 17 ++++++----------
+ xlators/cluster/afr/src/afr-common.c | 38 ++++++++++++++----------------------
+ 2 files changed, 21 insertions(+), 34 deletions(-)
+
+diff --git a/heal/src/glfs-heal.c b/heal/src/glfs-heal.c
+index 5af9e31..125b12c 100644
+--- a/heal/src/glfs-heal.c
++++ b/heal/src/glfs-heal.c
+@@ -775,8 +775,7 @@ static int
+ glfsh_process_entries(xlator_t *xl, fd_t *fd, gf_dirent_t *entries,
+                       uint64_t *offset, num_entries_t *num_entries,
+                       print_status glfsh_print_status,
+-                      gf_boolean_t ignore_dirty, glfsh_fail_mode_t mode,
+-                      dict_t *xattr_req)
++                      gf_boolean_t ignore_dirty, glfsh_fail_mode_t mode)
+ {
+     gf_dirent_t *entry = NULL;
+     gf_dirent_t *tmp = NULL;
+@@ -808,7 +807,7 @@ glfsh_process_entries(xlator_t *xl, fd_t *fd, gf_dirent_t *entries,
+ 
+         gf_uuid_parse(entry->d_name, gfid);
+         gf_uuid_copy(loc.gfid, gfid);
+-        ret = syncop_getxattr(this, &loc, &dict, GF_HEAL_INFO, xattr_req, NULL);
++        ret = syncop_getxattr(this, &loc, &dict, GF_HEAL_INFO, NULL, NULL);
+         if (ret) {
+             if ((mode != GLFSH_MODE_CONTINUE_ON_ERROR) && (ret == -ENOTCONN))
+                 goto out;
+@@ -877,19 +876,19 @@ glfsh_crawl_directory(glfs_t *fs, xlator_t *top_subvol, loc_t *rootloc,
+         if (heal_op == GF_SHD_OP_INDEX_SUMMARY) {
+             ret = glfsh_process_entries(readdir_xl, fd, &entries, &offset,
+                                         num_entries, glfsh_print_heal_status,
+-                                        ignore, mode, xattr_req);
++                                        ignore, mode);
+             if (ret < 0)
+                 goto out;
+         } else if (heal_op == GF_SHD_OP_SPLIT_BRAIN_FILES) {
+             ret = glfsh_process_entries(readdir_xl, fd, &entries, &offset,
+                                         num_entries, glfsh_print_spb_status,
+-                                        ignore, mode, xattr_req);
++                                        ignore, mode);
+             if (ret < 0)
+                 goto out;
+         } else if (heal_op == GF_SHD_OP_HEAL_SUMMARY) {
+             ret = glfsh_process_entries(readdir_xl, fd, &entries, &offset,
+                                         num_entries, glfsh_print_summary_status,
+-                                        ignore, mode, xattr_req);
++                                        ignore, mode);
+             if (ret < 0)
+                 goto out;
+         } else if (heal_op == GF_SHD_OP_SBRAIN_HEAL_FROM_BRICK) {
+@@ -898,7 +897,7 @@ glfsh_crawl_directory(glfs_t *fs, xlator_t *top_subvol, loc_t *rootloc,
+         } else if (heal_op == GF_SHD_OP_GRANULAR_ENTRY_HEAL_ENABLE) {
+             ret = glfsh_process_entries(readdir_xl, fd, &entries, &offset,
+                                         num_entries, glfsh_heal_status_boolean,
+-                                        ignore, mode, xattr_req);
++                                        ignore, mode);
+             if (ret < 0)
+                 goto out;
+         }
+@@ -952,10 +951,6 @@ glfsh_print_pending_heals_type(glfs_t *fs, xlator_t *top_subvol, loc_t *rootloc,
+     int32_t op_errno = 0;
+     gf_boolean_t ignore = _gf_false;
+ 
+-    ret = dict_set_str(xattr_req, "index-vgfid", vgfid);
+-    if (ret)
+-        return ret;
+-
+     if (!strcmp(vgfid, GF_XATTROP_DIRTY_GFID))
+         ignore = _gf_true;
+ 
+diff --git a/xlators/cluster/afr/src/afr-common.c b/xlators/cluster/afr/src/afr-common.c
+index c355ec5..89e2483 100644
+--- a/xlators/cluster/afr/src/afr-common.c
++++ b/xlators/cluster/afr/src/afr-common.c
+@@ -5995,8 +5995,8 @@ afr_is_dirty_count_non_unary(xlator_t *this, struct afr_reply *replies,
+ 
+ static int
+ afr_update_heal_status(xlator_t *this, struct afr_reply *replies,
+-                       char *index_vgfid, ia_type_t ia_type, gf_boolean_t *esh,
+-                       gf_boolean_t *dsh, gf_boolean_t *msh)
++                       ia_type_t ia_type, gf_boolean_t *esh, gf_boolean_t *dsh,
++                       gf_boolean_t *msh, unsigned char pending)
+ {
+     int ret = -1;
+     GF_UNUSED int ret1 = 0;
+@@ -6026,14 +6026,7 @@ afr_update_heal_status(xlator_t *this, struct afr_reply *replies,
+         }
+     }
+ 
+-    if (!strcmp(index_vgfid, GF_XATTROP_INDEX_GFID)) {
+-        if (shd_domain_lk_count) {
+-            ret = -EAGAIN; /*For 'possibly-healing'. */
+-        } else {
+-            ret = 0; /*needs heal. Just set a non -ve value so that it is
+-                       assumed as the source index.*/
+-        }
+-    } else if (!strcmp(index_vgfid, GF_XATTROP_DIRTY_GFID)) {
++    if (!pending) {
+         if ((afr_is_dirty_count_non_unary(this, replies, ia_type)) ||
+             (!io_domain_lk_count)) {
+             /* Needs heal. */
+@@ -6042,6 +6035,13 @@ afr_update_heal_status(xlator_t *this, struct afr_reply *replies,
+             /* No heal needed. */
+             *dsh = *esh = *msh = 0;
+         }
++    } else {
++        if (shd_domain_lk_count) {
++            ret = -EAGAIN; /*For 'possibly-healing'. */
++        } else {
++            ret = 0; /*needs heal. Just set a non -ve value so that it is
++                       assumed as the source index.*/
++        }
+     }
+     return ret;
+ }
+@@ -6049,8 +6049,8 @@ afr_update_heal_status(xlator_t *this, struct afr_reply *replies,
+ /*return EIO, EAGAIN or pending*/
+ int
+ afr_lockless_inspect(call_frame_t *frame, xlator_t *this, uuid_t gfid,
+-                     inode_t **inode, char *index_vgfid,
+-                     gf_boolean_t *entry_selfheal, gf_boolean_t *data_selfheal,
++                     inode_t **inode, gf_boolean_t *entry_selfheal,
++                     gf_boolean_t *data_selfheal,
+                      gf_boolean_t *metadata_selfheal, unsigned char *pending)
+ {
+     int ret = -1;
+@@ -6109,8 +6109,8 @@ afr_lockless_inspect(call_frame_t *frame, xlator_t *this, uuid_t gfid,
+             goto out;
+     }
+ 
+-    ret = afr_update_heal_status(this, replies, index_vgfid, (*inode)->ia_type,
+-                                 &esh, &dsh, &msh);
++    ret = afr_update_heal_status(this, replies, (*inode)->ia_type, &esh, &dsh,
++                                 &msh, *pending);
+ out:
+     *data_selfheal = dsh;
+     *entry_selfheal = esh;
+@@ -6133,16 +6133,8 @@ afr_get_heal_info(call_frame_t *frame, xlator_t *this, loc_t *loc)
+     inode_t *inode = NULL;
+     char *substr = NULL;
+     char *status = NULL;
+-    afr_local_t *local = NULL;
+-    char *index_vgfid = NULL;
+-
+-    local = frame->local;
+-    if (dict_get_str(local->xdata_req, "index-vgfid", &index_vgfid)) {
+-        ret = -1;
+-        goto out;
+-    }
+ 
+-    ret = afr_lockless_inspect(frame, this, loc->gfid, &inode, index_vgfid,
++    ret = afr_lockless_inspect(frame, this, loc->gfid, &inode,
+                                &entry_selfheal, &data_selfheal,
+                                &metadata_selfheal, &pending);
+ 
+-- 
+1.8.3.1
+

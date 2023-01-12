@@ -1,0 +1,56 @@
+From 1354a492cbc758f9801568153380ca896fab7765 Mon Sep 17 00:00:00 2001
+From: Sunny Kumar <sunkumar@redhat.com>
+Date: Fri, 10 Jan 2020 14:28:35 +0000
+Subject: [PATCH 349/349] glusterfind: python3 compatibility
+
+Problem:
+While we delete gluster volume the hook script 'S57glusterfind-delete-post.py'
+is failed to execute and error message can be observed in glusterd log.
+
+Traceback:
+  File "/var/lib/glusterd/hooks/1/delete/post/S57glusterfind-delete-post", line 69, in <module>
+    main()
+  File "/var/lib/glusterd/hooks/1/delete/post/S57glusterfind-delete-post", line 39, in main
+    glusterfind_dir = os.path.join(get_glusterd_workdir(), "glusterfind")
+  File "/usr/lib64/python3.7/posixpath.py", line 94, in join
+    genericpath._check_arg_types('join', a, *p)
+  File "/usr/lib64/python3.7/genericpath.py", line 155, in _check_arg_types
+    raise TypeError("Can't mix strings and bytes in path components") from None
+TypeError: Can't mix strings and bytes in path components
+
+Solution:
+
+Added the 'universal_newlines' flag to Popen to support backward compatibility.
+
+Backport of:
+ > Patch: https://review.gluster.org/23994
+ > Change-Id: Ie5655b11b55535c5ad2338108d0448e6fdaacf4f
+ > Fixes: bz#1789478
+ > Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+
+Change-Id: Ie5655b11b55535c5ad2338108d0448e6fdaacf4f
+BUG: 1789447
+Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/189216
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ tools/glusterfind/S57glusterfind-delete-post.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/glusterfind/S57glusterfind-delete-post.py b/tools/glusterfind/S57glusterfind-delete-post.py
+index 5b5142d..5beece2 100755
+--- a/tools/glusterfind/S57glusterfind-delete-post.py
++++ b/tools/glusterfind/S57glusterfind-delete-post.py
+@@ -18,7 +18,7 @@ def handle_rm_error(func, path, exc_info):
+ 
+ def get_glusterd_workdir():
+     p = Popen(["gluster", "system::", "getwd"],
+-              stdout=PIPE, stderr=PIPE)
++              stdout=PIPE, stderr=PIPE, universal_newlines=True)
+ 
+     out, _ = p.communicate()
+ 
+-- 
+1.8.3.1
+

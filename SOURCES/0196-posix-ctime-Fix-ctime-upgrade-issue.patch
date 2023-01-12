@@ -1,0 +1,384 @@
+From 584ee2dbb8158ee3d3c3f055f1b06ff3d9177192 Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Thu, 13 Jun 2019 16:23:21 +0530
+Subject: [PATCH 196/221] posix/ctime: Fix ctime upgrade issue
+
+Problem:
+On a EC volume, during upgrade from the older version where
+ctime feature is not enabled(or not present) to the newer
+version where the ctime feature is available (enabled default),
+the self heal hangs and doesn't complete.
+
+Cause:
+The ctime feature has both client side code (utime) and
+server side code (posix). The feature is driven from client.
+Only if the client side sets the time in the frame, should
+the server side sets the time attributes in xattr. But posix
+setattr/fseattr was not doing that. When one of the server
+nodes is updated, since ctime is enabled by default, it
+starts setting xattr on setattr/fseattr on the updated node/brick.
+
+On a EC volume the first two updated nodes(bricks) are not a
+problem because there are 4 other bricks with consistent data.
+However once the third brick is updated, the new attribute(mdata xattr)
+will cause an inconsistency on metadata on 3 bricks, which
+prevents the file to be repaired.
+
+Fix:
+Don't create mdata xattr with utimes/utimensat system call.
+Only update if already present.
+
+Backport of:
+ > Patch: https://review.gluster.org/22858
+ > Change-Id: Ieacedecb8a738bb437283ef3e0f042fd49dc4c8c
+ > fixes: bz#1720201
+ > Signed-off-by: Kotresh HR <khiremat@redhat.com>
+
+Change-Id: Ieacedecb8a738bb437283ef3e0f042fd49dc4c8c
+BUG: 1713664
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/174238
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ tests/basic/afr/split-brain-healing.t      |  36 ++++---
+ tests/utils/get-mdata-xattr.c              | 152 +++++++++++++++++++++++++++++
+ tests/volume.rc                            |  30 ++++++
+ xlators/storage/posix/src/posix-metadata.c |  21 ++++
+ 4 files changed, 223 insertions(+), 16 deletions(-)
+ create mode 100644 tests/utils/get-mdata-xattr.c
+
+diff --git a/tests/basic/afr/split-brain-healing.t b/tests/basic/afr/split-brain-healing.t
+index c80f900..78553e6 100644
+--- a/tests/basic/afr/split-brain-healing.t
++++ b/tests/basic/afr/split-brain-healing.t
+@@ -20,11 +20,14 @@ function get_replicate_subvol_number {
+ cleanup;
+ 
+ AREQUAL_PATH=$(dirname $0)/../../utils
++GET_MDATA_PATH=$(dirname $0)/../../utils
+ CFLAGS=""
+ test "`uname -s`" != "Linux" && {
+     CFLAGS="$CFLAGS -lintl";
+ }
+ build_tester $AREQUAL_PATH/arequal-checksum.c $CFLAGS
++build_tester $GET_MDATA_PATH/get-mdata-xattr.c
++
+ TEST glusterd
+ TEST pidof glusterd
+ TEST $CLI volume create $V0 replica 2 $H0:$B0/${V0}{1,2,3,4}
+@@ -152,13 +155,13 @@ EXPECT $SMALLER_FILE_SIZE stat -c %s file4
+ subvolume=$(get_replicate_subvol_number file5)
+ if [ $subvolume == 0 ]
+ then
+-        mtime1=$(stat -c %Y $B0/${V0}1/file5)
+-        mtime2=$(stat -c %Y $B0/${V0}2/file5)
++        mtime1=$(get_mtime $B0/${V0}1/file5)
++        mtime2=$(get_mtime $B0/${V0}2/file5)
+         LATEST_MTIME=$(($mtime1 > $mtime2 ? $mtime1:$mtime2))
+ elif [ $subvolume == 1 ]
+ then
+-        mtime1=$(stat -c %Y $B0/${V0}3/file5)
+-        mtime2=$(stat -c %Y $B0/${V0}4/file5)
++        mtime1=$(get_mtime $B0/${V0}3/file5)
++        mtime2=$(get_mtime $B0/${V0}4/file5)
+         LATEST_MTIME=$(($mtime1 > $mtime2 ? $mtime1:$mtime2))
+ fi
+ $CLI volume heal $V0 split-brain latest-mtime /file5
+@@ -166,12 +169,12 @@ EXPECT "0" echo $?
+ 
+ if [ $subvolume == 0 ]
+ then
+-        mtime1_after_heal=$(stat -c %Y $B0/${V0}1/file5)
+-        mtime2_after_heal=$(stat -c %Y $B0/${V0}2/file5)
++        mtime1_after_heal=$(get_mtime $B0/${V0}1/file5)
++        mtime2_after_heal=$(get_mtime $B0/${V0}2/file5)
+ elif [ $subvolume == 1 ]
+ then
+-        mtime1_after_heal=$(stat -c %Y $B0/${V0}3/file5)
+-        mtime2_after_heal=$(stat -c %Y $B0/${V0}4/file5)
++        mtime1_after_heal=$(get_mtime $B0/${V0}3/file5)
++        mtime2_after_heal=$(get_mtime $B0/${V0}4/file5)
+ fi
+ 
+ #TODO: To below comparisons on full sub-second resolution
+@@ -188,14 +191,14 @@ subvolume=$(get_replicate_subvol_number file6)
+ if [ $subvolume == 0 ]
+ then
+         GFID=$(gf_get_gfid_xattr $B0/${V0}1/file6)
+-        mtime1=$(stat -c %Y $B0/${V0}1/file6)
+-        mtime2=$(stat -c %Y $B0/${V0}2/file6)
++        mtime1=$(get_mtime $B0/${V0}1/file6)
++        mtime2=$(get_mtime $B0/${V0}2/file6)
+         LATEST_MTIME=$(($mtime1 > $mtime2 ? $mtime1:$mtime2))
+ elif [ $subvolume == 1 ]
+ then
+         GFID=$(gf_get_gfid_xattr $B0/${V0}3/file6)
+-        mtime1=$(stat -c %Y $B0/${V0}3/file6)
+-        mtime2=$(stat -c %Y $B0/${V0}4/file6)
++        mtime1=$(get_mtime $B0/${V0}3/file6)
++        mtime2=$(get_mtime $B0/${V0}4/file6)
+         LATEST_MTIME=$(($mtime1 > $mtime2 ? $mtime1:$mtime2))
+ fi
+ GFIDSTR="gfid:$(gf_gfid_xattr_to_str $GFID)"
+@@ -204,12 +207,12 @@ EXPECT "0" echo $?
+ 
+ if [ $subvolume == 0 ]
+ then
+-        mtime1_after_heal=$(stat -c %Y $B0/${V0}1/file6)
+-        mtime2_after_heal=$(stat -c %Y $B0/${V0}2/file6)
++        mtime1_after_heal=$(get_mtime $B0/${V0}1/file6)
++        mtime2_after_heal=$(get_mtime $B0/${V0}2/file6)
+ elif [ $subvolume == 1 ]
+ then
+-        mtime1_after_heal=$(stat -c %Y $B0/${V0}3/file6)
+-        mtime2_after_heal=$(stat -c %Y $B0/${V0}4/file6)
++        mtime1_after_heal=$(get_mtime $B0/${V0}3/file6)
++        mtime2_after_heal=$(get_mtime $B0/${V0}4/file6)
+ fi
+ 
+ #TODO: To below comparisons on full sub-second resolution
+@@ -253,4 +256,5 @@ EXPECT "1" echo $?
+ 
+ cd -
+ TEST rm $AREQUAL_PATH/arequal-checksum
++TEST rm $GET_MDATA_PATH/get-mdata-xattr
+ cleanup
+diff --git a/tests/utils/get-mdata-xattr.c b/tests/utils/get-mdata-xattr.c
+new file mode 100644
+index 0000000..e9f5471
+--- /dev/null
++++ b/tests/utils/get-mdata-xattr.c
+@@ -0,0 +1,152 @@
++/*
++   Copyright (c) 2019 Red Hat, Inc. <http://www.redhat.com>
++   This file is part of GlusterFS.
++
++   This file is licensed to you under your choice of the GNU Lesser
++   General Public License, version 3 or any later version (LGPLv3 or
++   later), or the GNU General Public License, version 2 (GPLv2), in all
++   cases as published by the Free Software Foundation.
++*/
++
++#include <stdlib.h>
++#include <endian.h>
++#include <stdio.h>
++#include <time.h>
++#include <string.h>
++#include <inttypes.h>
++#include <sys/types.h>
++#include <sys/xattr.h>
++#include <errno.h>
++
++typedef struct gf_timespec_disk {
++    uint64_t tv_sec;
++    uint64_t tv_nsec;
++} gf_timespec_disk_t;
++
++/* posix_mdata_t on disk structure */
++typedef struct __attribute__((__packed__)) posix_mdata_disk {
++    /* version of structure, bumped up if any new member is added */
++    uint8_t version;
++    /* flags indicates valid fields in the structure */
++    uint64_t flags;
++    gf_timespec_disk_t ctime;
++    gf_timespec_disk_t mtime;
++    gf_timespec_disk_t atime;
++} posix_mdata_disk_t;
++
++/* In memory representation posix metadata xattr */
++typedef struct {
++    /* version of structure, bumped up if any new member is added */
++    uint8_t version;
++    /* flags indicates valid fields in the structure */
++    uint64_t flags;
++    struct timespec ctime;
++    struct timespec mtime;
++    struct timespec atime;
++} posix_mdata_t;
++
++#define GF_XATTR_MDATA_KEY "trusted.glusterfs.mdata"
++
++/* posix_mdata_from_disk converts posix_mdata_disk_t into host byte order
++ */
++static inline void
++posix_mdata_from_disk(posix_mdata_t *out, posix_mdata_disk_t *in)
++{
++    out->version = in->version;
++    out->flags = be64toh(in->flags);
++
++    out->ctime.tv_sec = be64toh(in->ctime.tv_sec);
++    out->ctime.tv_nsec = be64toh(in->ctime.tv_nsec);
++
++    out->mtime.tv_sec = be64toh(in->mtime.tv_sec);
++    out->mtime.tv_nsec = be64toh(in->mtime.tv_nsec);
++
++    out->atime.tv_sec = be64toh(in->atime.tv_sec);
++    out->atime.tv_nsec = be64toh(in->atime.tv_nsec);
++}
++
++/* posix_fetch_mdata_xattr fetches the posix_mdata_t from disk */
++static int
++posix_fetch_mdata_xattr(const char *real_path, posix_mdata_t *metadata)
++{
++    size_t size = -1;
++    char *value = NULL;
++    char gfid_str[64] = {0};
++
++    char *key = GF_XATTR_MDATA_KEY;
++
++    if (!metadata || !real_path) {
++        goto err;
++    }
++
++    /* Get size */
++    size = lgetxattr(real_path, key, NULL, 0);
++    if (size == -1) {
++        goto err;
++    }
++
++    value = calloc(size + 1, sizeof(char));
++    if (!value) {
++        goto err;
++    }
++
++    /* Get xattr value */
++    size = lgetxattr(real_path, key, value, size);
++    if (size == -1) {
++        goto err;
++    }
++    posix_mdata_from_disk(metadata, (posix_mdata_disk_t *)value);
++
++out:
++    if (value)
++        free(value);
++    return 0;
++err:
++    if (value)
++        free(value);
++    return -1;
++}
++
++int
++main(int argc, char *argv[])
++{
++    posix_mdata_t metadata;
++    uint64_t result;
++
++    if (argc != 3) {
++        /*
++        Usage: get_mdata_xattr -c|-m|-a <file-name>
++                       where -c --> ctime
++                             -m --> mtime
++                             -a --> atime
++        */
++        printf("-1");
++        goto err;
++    }
++
++    if (posix_fetch_mdata_xattr(argv[2], &metadata)) {
++        printf("-1");
++        goto err;
++    }
++
++    switch (argv[1][1]) {
++        case 'c':
++            result = metadata.ctime.tv_sec;
++            break;
++        case 'm':
++            result = metadata.mtime.tv_sec;
++            break;
++        case 'a':
++            result = metadata.atime.tv_sec;
++            break;
++        default:
++            printf("-1");
++            goto err;
++    }
++    printf("%" PRIu64, result);
++    fflush(stdout);
++    return 0;
++err:
++    fflush(stdout);
++    return -1;
++}
+diff --git a/tests/volume.rc b/tests/volume.rc
+index bb400cc..6a78c37 100644
+--- a/tests/volume.rc
++++ b/tests/volume.rc
+@@ -927,3 +927,33 @@ function number_healer_threads_shd {
+    local pid=$(get_shd_mux_pid $1)
+    pstack $pid | grep $2 | wc -l
+ }
++
++function get_mtime {
++    local time=$(get-mdata-xattr -m $1)
++    if [ $time == "-1" ];
++    then
++        echo $(stat -c %Y $1)
++    else
++        echo $time
++    fi
++}
++
++function get_ctime {
++    local time=$(get-mdata-xattr -c $1)
++    if [ $time == "-1" ];
++    then
++        echo $(stat -c %Z $2)
++    else
++        echo $time
++    fi
++}
++
++function get_atime {
++    local time=$(get-mdata-xattr -a $1)
++    if [ $time == "-1" ];
++    then
++        echo $(stat -c %X $1)
++    else
++        echo $time
++    fi
++}
+diff --git a/xlators/storage/posix/src/posix-metadata.c b/xlators/storage/posix/src/posix-metadata.c
+index e96f222..5a5e6cd 100644
+--- a/xlators/storage/posix/src/posix-metadata.c
++++ b/xlators/storage/posix/src/posix-metadata.c
+@@ -416,6 +416,22 @@ posix_set_mdata_xattr(xlator_t *this, const char *real_path, int fd,
+                  * still fine as the times would get eventually
+                  * accurate.
+                  */
++
++                /* Don't create xattr with utimes/utimensat, only update if
++                 * present. This otherwise causes issues during inservice
++                 * upgrade. It causes inconsistent xattr values with in replica
++                 * set. The scenario happens during upgrade where clients are
++                 * older versions (without the ctime feature) and the server is
++                 * upgraded to the new version (with the ctime feature which
++                 * is enabled by default).
++                 */
++
++                if (update_utime) {
++                    UNLOCK(&inode->lock);
++                    GF_FREE(mdata);
++                    return 0;
++                }
++
+                 mdata->version = 1;
+                 mdata->flags = 0;
+                 mdata->ctime.tv_sec = time->tv_sec;
+@@ -527,6 +543,11 @@ posix_update_utime_in_mdata(xlator_t *this, const char *real_path, int fd,
+ 
+     priv = this->private;
+ 
++    /* NOTE:
++     * This routine (utimes) is intentionally allowed for all internal and
++     * external clients even if ctime is not set. This is because AFR and
++     * WORM uses time attributes for it's internal operations
++     */
+     if (inode && priv->ctime) {
+         if ((valid & GF_SET_ATTR_ATIME) == GF_SET_ATTR_ATIME) {
+             tv.tv_sec = stbuf->ia_atime;
+-- 
+1.8.3.1
+

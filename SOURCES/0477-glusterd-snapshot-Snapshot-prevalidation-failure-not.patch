@@ -1,0 +1,51 @@
+From 3d50207b346cb5d95af94aa010ebd1ec3e795554 Mon Sep 17 00:00:00 2001
+From: srijan-sivakumar <ssivakum@redhat.com>
+Date: Wed, 4 Nov 2020 11:44:51 +0530
+Subject: [PATCH 477/478] glusterd/snapshot: Snapshot prevalidation failure not
+ failing.
+
+The value of `ret` is to be set to `-1` to indicate failure
+or else the prevalidation which is supposed to be a failure
+as the snapshot isn't even activated for cloning will move
+to next stage.
+
+Label: DOWNSTREAM ONLY
+BUG: 1837926
+
+Change-Id: I95122c3a261332630efa00033a1892a8f95fc00b
+Signed-off-by: srijan-sivakumar <ssivakum@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/216920
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Shwetha Acharya <sacharya@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-snapshot.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-snapshot.c b/xlators/mgmt/glusterd/src/glusterd-snapshot.c
+index 5b8ae97..ee3cea0 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-snapshot.c
++++ b/xlators/mgmt/glusterd/src/glusterd-snapshot.c
+@@ -2298,8 +2298,8 @@ glusterd_snapshot_clone_prevalidate(dict_t *dict, char **op_errstr,
+         goto out;
+     }
+ 
+-
+     if (!glusterd_is_volume_started(snap_vol)) {
++        ret = -1;
+         snprintf(err_str, sizeof(err_str),
+                  "Snapshot %s is "
+                  "not activated",
+@@ -9361,7 +9361,8 @@ glusterd_handle_snapshot_fn(rpcsvc_request_t *req)
+                  "for a snapshot");
+         op_errno = EG_OPNOTSUP;
+         gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_UNSUPPORTED_VERSION,
+-               "%s (%d < %d)", err_str, conf->op_version, GD_OP_VERSION_RHS_3_0);
++               "%s (%d < %d)", err_str, conf->op_version,
++               GD_OP_VERSION_RHS_3_0);
+         ret = -1;
+         goto out;
+     }
+-- 
+1.8.3.1
+

@@ -1,0 +1,74 @@
+From 0864f1ad12394a5748d92aa0ed5b455135426bc3 Mon Sep 17 00:00:00 2001
+From: Ashish Pandey <aspandey@redhat.com>
+Date: Tue, 30 Jul 2019 10:32:39 +0530
+Subject: [PATCH 275/276] cluster/ec: Create heal task with heal process id
+
+Problem:
+ec_data_undo_pending calls syncop_fxattrop->SYNCOP without
+a frame. In this case SYNCOP gets the frame of the task.
+However, when we create a synctask for heal we provide
+frame as NULL.
+Now, if the read-only feature is ON, it will receive the
+process ID of the shd as 0 and will consider that it as
+not an internal process. This will prevent healing of a
+file with "Read-only file system" error message log.
+
+Solution:
+While launching heal, create a synctask using frame and set
+process id of the SHD which is -6.
+
+> upstream patch : https://review.gluster.org/#/c/glusterfs/+/23129/
+
+>Change-Id: I37195399c85de322cbcac75633888922c4e3db4a
+>Fixes: bz#1734252
+
+BUG: 1733531
+Change-Id: I37195399c85de322cbcac75633888922c4e3db4a
+Signed-off-by: Ashish Pandey <aspandey@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/178038
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/cluster/ec/src/ec-heal.c | 20 +++++++++++++++++++-
+ 1 file changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/xlators/cluster/ec/src/ec-heal.c b/xlators/cluster/ec/src/ec-heal.c
+index 2fa1f11..0f0f398 100644
+--- a/xlators/cluster/ec/src/ec-heal.c
++++ b/xlators/cluster/ec/src/ec-heal.c
+@@ -2647,13 +2647,31 @@ void
+ ec_launch_heal(ec_t *ec, ec_fop_data_t *fop)
+ {
+     int ret = 0;
++    call_frame_t *frame = NULL;
++
++    frame = create_frame(ec->xl, ec->xl->ctx->pool);
++    if (!frame) {
++        goto out;
++        ret = -1;
++    }
++
++    ec_owner_set(frame, frame->root);
++    /*Do heal as root*/
++    frame->root->uid = 0;
++    frame->root->gid = 0;
++    /*Mark the fops as internal*/
++    frame->root->pid = GF_CLIENT_PID_SELF_HEALD;
+ 
+     ret = synctask_new(ec->xl->ctx->env, ec_synctask_heal_wrap, ec_heal_done,
+-                       NULL, fop);
++                       frame, fop);
++out:
+     if (ret < 0) {
+         ec_fop_set_error(fop, ENOMEM);
+         ec_heal_fail(ec, fop);
+     }
++
++    if (frame)
++        STACK_DESTROY(frame->root);
+ }
+ 
+ void
+-- 
+1.8.3.1
+

@@ -1,0 +1,43 @@
+From 167980565e1ab56989b25fe6aa0203aeb7970c8b Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Sun, 6 Oct 2019 19:05:28 +0530
+Subject: [PATCH 306/307] cli: fix distCount value
+
+gluster volume info --xml id displaying wrong distCount
+value. This patch addresses it.
+
+> fixes: bz#1758878
+> Change-Id: I64081597e06018361e6524587b433b0c4b2a0260
+> Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+
+upstream patch: https://review.gluster.org/#/c/glusterfs/+/23521/
+
+BUG: 1758618
+Change-Id: I64081597e06018361e6524587b433b0c4b2a0260
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/183147
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ cli/src/cli-xml-output.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/cli/src/cli-xml-output.c b/cli/src/cli-xml-output.c
+index b417bb8..006e2fb 100644
+--- a/cli/src/cli-xml-output.c
++++ b/cli/src/cli-xml-output.c
+@@ -2548,8 +2548,9 @@ cli_xml_output_vol_info(cli_local_t *local, dict_t *dict)
+         ret = dict_get_int32(dict, key, &dist_count);
+         if (ret)
+             goto out;
+-        ret = xmlTextWriterWriteFormatElement(
+-            local->writer, (xmlChar *)"distCount", "%d", dist_count);
++        ret = xmlTextWriterWriteFormatElement(local->writer,
++                                              (xmlChar *)"distCount", "%d",
++                                              (brick_count / dist_count));
+         XML_RET_CHECK_AND_GOTO(ret, out);
+ 
+         snprintf(key, sizeof(key), "volume%d.stripe_count", i);
+-- 
+1.8.3.1
+

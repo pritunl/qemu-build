@@ -1,0 +1,40 @@
+From 00db0c44d109e6f3e394487bf76ff28ba2eee7de Mon Sep 17 00:00:00 2001
+From: Ravishankar N <ravishankar@redhat.com>
+Date: Thu, 15 Mar 2018 12:56:02 +0530
+Subject: [PATCH 22/52] cli: Remove upstream doc reference
+
+...that is displayed while creating replica 2 volumes.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I16b45c8ad3a33cdd2a464d84f51d006d8f568b23
+Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/132744
+Reviewed-by: Karthik Subrahmanya <ksubrahm@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ cli/src/cli-cmd-parser.c | 7 ++-----
+ 1 file changed, 2 insertions(+), 5 deletions(-)
+
+diff --git a/cli/src/cli-cmd-parser.c b/cli/src/cli-cmd-parser.c
+index f148c59..760a10c 100644
+--- a/cli/src/cli-cmd-parser.c
++++ b/cli/src/cli-cmd-parser.c
+@@ -606,11 +606,8 @@ cli_cmd_volume_create_parse(struct cli_state *state, const char **words,
+                         "Replica 2 volumes are prone"
+                         " to split-brain. Use "
+                         "Arbiter or Replica 3 to "
+-                        "avoid this. See: "
+-                        "http://docs.gluster.org/en/latest/"
+-                        "Administrator%20Guide/"
+-                        "Split%20brain%20and%20ways%20to%20deal%20with%20it/."
+-                        "\nDo you still want to "
++                        "avoid this.\n"
++                        "Do you still want to "
+                         "continue?\n";
+                     answer = cli_cmd_get_confirmation(state, question);
+                     if (GF_ANSWER_NO == answer) {
+-- 
+1.8.3.1
+

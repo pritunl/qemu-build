@@ -1,0 +1,39 @@
+From 21fe2ef700e76c8b7be40f21d3a4fb6b96eafaf0 Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez <xhernandez@redhat.com>
+Date: Thu, 6 Jun 2019 08:12:34 +0200
+Subject: [PATCH 228/255] locks: enable notify-contention by default
+
+This patch enables the lock contention notification by default.
+
+Upstream patch:
+> Change-Id: I10131b026a7cb09fc7c93e1e6c8549988c1d7751
+> Upstream patch link: https://review.gluster.org/c/glusterfs/+/22828
+> BUG: 1717754
+> Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+
+Change-Id: I10131b026a7cb09fc7c93e1e6c8549988c1d7751
+Fixes: bz#1720488
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/174655
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/features/locks/src/posix.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/features/locks/src/posix.c b/xlators/features/locks/src/posix.c
+index adb0df5..9db5ac6 100644
+--- a/xlators/features/locks/src/posix.c
++++ b/xlators/features/locks/src/posix.c
+@@ -4796,7 +4796,7 @@ struct volume_options options[] = {
+                     "be used in conjunction w/ revocation-clear-all."},
+     {.key = {"notify-contention"},
+      .type = GF_OPTION_TYPE_BOOL,
+-     .default_value = "no",
++     .default_value = "yes",
+      .flags = OPT_FLAG_SETTABLE | OPT_FLAG_DOC,
+      .op_version = {GD_OP_VERSION_4_0_0},
+      .tags = {"locks", "contention"},
+-- 
+1.8.3.1
+

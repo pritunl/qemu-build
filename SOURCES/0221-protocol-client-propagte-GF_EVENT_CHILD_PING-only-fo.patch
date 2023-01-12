@@ -1,0 +1,75 @@
+From ac216eae4775f7d95877b247937e2a4a4828b1b2 Mon Sep 17 00:00:00 2001
+From: Raghavendra G <rgowdapp@redhat.com>
+Date: Tue, 4 Jun 2019 19:22:45 +0530
+Subject: [PATCH 221/221] protocol/client: propagte GF_EVENT_CHILD_PING only
+ for connections to brick
+
+Two reasons:
+* ping responses from glusterd may not be relevant for Halo
+  replication. Instead, it might be interested in only knowing whether
+  the brick itself is responsive.
+* When a brick is killed, propagating GF_EVENT_CHILD_PING of ping
+  response from glusterd results in GF_EVENT_DISCONNECT spuriously
+  propagated to parent xlators. These DISCONNECT events are from the
+  connections client establishes with glusterd as part of its
+  reconnect logic. Without GF_EVENT_CHILD_PING, the last event
+  propagated to parent xlators would be the first DISCONNECT event
+  from brick and hence subsequent DISCONNECTS to glusterd are not
+  propagated as protocol/client prevents same event being propagated
+  to parent xlators consecutively. propagating GF_EVENT_CHILD_PING for
+  ping responses from glusterd would change the last_sent_event to
+  GF_EVENT_CHILD_PING and hence protocol/client cannot prevent
+  subsequent DISCONNECT events
+
+>Signed-off-by: Raghavendra G <rgowdapp@redhat.com>
+>Fixes: bz#1716979
+>Change-Id: I50276680c52f05ca9e12149a3094923622d6eaef
+
+Upstream Patch: https://review.gluster.org/#/c/glusterfs/+/22821/
+
+BUG: 1703423
+Change-Id: I50276680c52f05ca9e12149a3094923622d6eaef
+Signed-off-by: Sunil Kumar Acharya <sheggodu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/174883
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ xlators/protocol/client/src/client.c | 16 ++++++++++++----
+ 1 file changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/xlators/protocol/client/src/client.c b/xlators/protocol/client/src/client.c
+index a372807..95e4be5 100644
+--- a/xlators/protocol/client/src/client.c
++++ b/xlators/protocol/client/src/client.c
+@@ -2276,6 +2276,12 @@ client_mark_fd_bad(xlator_t *this)
+     return 0;
+ }
+ 
++static int
++is_connection_to_brick(struct rpc_clnt *rpc)
++{
++    return (rpc->conn.config.remote_port != 0);
++}
++
+ int
+ client_rpc_notify(struct rpc_clnt *rpc, void *mydata, rpc_clnt_event_t event,
+                   void *data)
+@@ -2297,10 +2303,12 @@ client_rpc_notify(struct rpc_clnt *rpc, void *mydata, rpc_clnt_event_t event,
+ 
+     switch (event) {
+         case RPC_CLNT_PING: {
+-            ret = default_notify(this, GF_EVENT_CHILD_PING, data);
+-            if (ret)
+-                gf_log(this->name, GF_LOG_INFO, "CHILD_PING notify failed");
+-            conf->last_sent_event = GF_EVENT_CHILD_PING;
++            if (is_connection_to_brick(rpc)) {
++                ret = default_notify(this, GF_EVENT_CHILD_PING, data);
++                if (ret)
++                    gf_log(this->name, GF_LOG_INFO, "CHILD_PING notify failed");
++                conf->last_sent_event = GF_EVENT_CHILD_PING;
++            }
+             break;
+         }
+         case RPC_CLNT_CONNECT: {
+-- 
+1.8.3.1
+

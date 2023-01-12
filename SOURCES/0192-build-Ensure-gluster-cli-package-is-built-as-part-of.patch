@@ -1,0 +1,114 @@
+From d2319a4746ba07ada5b3a20462ec2900e1c03c5a Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Thu, 13 Jun 2019 19:56:32 +0530
+Subject: [PATCH 192/192] build: Ensure gluster-cli package is built as part of
+ client build
+
+Till RHGS 3.4.x RHGS client was shipping gluster-cli rpm. With RHGS 3.5
+which is a rebase of glusterfs 6.0 gluster-cli is only built for server.
+gluster cli offers a remote cli execution capability with --remote-host
+option for which you need not to have cli and glusterd co located and
+hence shipping cli as part of the client package is mandatory. With out
+this change the client upgrade for RHEL minor versions are also broken.
+
+>Fixes: bz#1720615
+>Change-Id: I5071f3255ff615113b36b08cd5326be6e37d907d
+>Signed-off-by: Niels de Vos <ndevos@redhat.com>
+
+upstream patch: https://review.gluster.org/#/c/glusterfs/+/22868/
+
+BUG: 1720079
+Change-Id: I11ec3e2b4d98b3e701147c60ca797d54570d598e
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/173388
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ cli/src/Makefile.am | 2 --
+ doc/Makefile.am     | 4 ++--
+ glusterfs.spec.in   | 9 +++------
+ 3 files changed, 5 insertions(+), 10 deletions(-)
+
+diff --git a/cli/src/Makefile.am b/cli/src/Makefile.am
+index 6be070f..3e7511f 100644
+--- a/cli/src/Makefile.am
++++ b/cli/src/Makefile.am
+@@ -1,6 +1,4 @@
+-if WITH_SERVER
+ sbin_PROGRAMS = gluster
+-endif
+ 
+ gluster_SOURCES = cli.c registry.c input.c cli-cmd.c cli-rl.c cli-cmd-global.c \
+ 	 cli-cmd-volume.c cli-cmd-peer.c cli-rpc-ops.c cli-cmd-parser.c\
+diff --git a/doc/Makefile.am b/doc/Makefile.am
+index 7c04d74..9904767 100644
+--- a/doc/Makefile.am
++++ b/doc/Makefile.am
+@@ -1,9 +1,9 @@
+ EXTRA_DIST = glusterfs.8 mount.glusterfs.8 gluster.8 \
+ 			glusterd.8 glusterfsd.8
+ 
+-man8_MANS = glusterfs.8 mount.glusterfs.8
++man8_MANS = gluster.8 glusterfs.8 mount.glusterfs.8
+ if WITH_SERVER
+-man8_MANS += gluster.8 glusterd.8 glusterfsd.8
++man8_MANS += glusterd.8 glusterfsd.8
+ endif
+ 
+ CLEANFILES =
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 29e4a37..c505cd9 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -353,7 +353,6 @@ is in user space and easily manageable.
+ 
+ This package provides the api include files.
+ 
+-%if ( 0%{!?_without_server:1} )
+ %package cli
+ Summary:          GlusterFS CLI
+ Requires:         %{name}-libs%{?_isa} = %{version}-%{release}
+@@ -368,7 +367,6 @@ called Translators from GNU Hurd kernel. Much of the code in GlusterFS
+ is in user space and easily manageable.
+ 
+ This package provides the GlusterFS CLI application and its man page
+-%endif
+ 
+ %package cloudsync-plugins
+ Summary:          Cloudsync Plugins
+@@ -891,10 +889,8 @@ touch %{buildroot}%{_sharedstatedir}/glusterd/nfs/run/nfs.pid
+ find ./tests ./run-tests.sh -type f | cpio -pd %{buildroot}%{_prefix}/share/glusterfs
+ 
+ ## Install bash completion for cli
+-%if ( 0%{!?_without_server:1} )
+ install -p -m 0744 -D extras/command-completion/gluster.bash \
+     %{buildroot}%{_sysconfdir}/bash_completion.d/gluster
+-%endif
+ 
+ %if ( 0%{!?_without_server:1} )
+ echo "RHGS 3.5" > %{buildroot}%{_datadir}/glusterfs/release
+@@ -1193,12 +1189,10 @@ exit 0
+ %dir %{_includedir}/glusterfs/api
+      %{_includedir}/glusterfs/api/*
+ 
+-%if ( 0%{!?_without_server:1} )
+ %files cli
+ %{_sbindir}/gluster
+ %{_mandir}/man8/gluster.8*
+ %{_sysconfdir}/bash_completion.d/gluster
+-%endif
+ 
+ %files cloudsync-plugins
+ %dir %{_libdir}/glusterfs/%{version}%{?prereltag}/cloudsync-plugins
+@@ -1938,6 +1932,9 @@ fi
+ %endif
+ 
+ %changelog
++* Fri Jun 14 2019 Atin Mukherjee <amukherj@redhat.com>
++- Ensure gluster-cli package is part of client build (#1720079)
++
+ * Mon May 27 2019 Jiffin Tony Thottan <jthottan@redhat.com>
+ - Change the dependency to 2.7.3 on nfs-ganesha for glusterfs-ganesha (#1714078)
+ 
+-- 
+1.8.3.1
+

@@ -1,0 +1,194 @@
+From ad233c1b3abdfe2bdfd1eacc83b5f84b7afa6b46 Mon Sep 17 00:00:00 2001
+From: N Balachandran <nbalacha@redhat.com>
+Date: Tue, 1 Oct 2019 17:37:15 +0530
+Subject: [PATCH 304/304] cluster/dht: Correct fd processing loop
+
+The fd processing loops in the
+dht_migration_complete_check_task and the
+dht_rebalance_inprogress_task functions were unsafe
+and could cause an open to be sent on an already freed
+fd. This has been fixed.
+
+> Change-Id: I0a3c7d2fba314089e03dfd704f9dceb134749540
+> Fixes: bz#1757399
+> Signed-off-by: N Balachandran <nbalacha@redhat.com>
+> (Cherry picked from commit 9b15867070b0cc241ab165886292ecffc3bc0aed)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/23506/)
+
+Change-Id: I0a3c7d2fba314089e03dfd704f9dceb134749540
+BUG: 1756325
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/182826
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/dht/src/dht-helper.c | 84 ++++++++++++++++++++++++++----------
+ 1 file changed, 62 insertions(+), 22 deletions(-)
+
+diff --git a/xlators/cluster/dht/src/dht-helper.c b/xlators/cluster/dht/src/dht-helper.c
+index 4c57e0d..1e9fee0 100644
+--- a/xlators/cluster/dht/src/dht-helper.c
++++ b/xlators/cluster/dht/src/dht-helper.c
+@@ -1261,6 +1261,7 @@ dht_migration_complete_check_task(void *data)
+     fd_t *tmp = NULL;
+     uint64_t tmp_miginfo = 0;
+     dht_migrate_info_t *miginfo = NULL;
++    gf_boolean_t skip_open = _gf_false;
+     int open_failed = 0;
+ 
+     this = THIS;
+@@ -1399,24 +1400,34 @@ dht_migration_complete_check_task(void *data)
+      * the loop will cause the destruction of the fd. So we need to
+      * iterate the list safely because iter_fd cannot be trusted.
+      */
+-    list_for_each_entry_safe(iter_fd, tmp, &inode->fd_list, inode_list)
+-    {
+-        if (fd_is_anonymous(iter_fd))
+-            continue;
+-
+-        if (dht_fd_open_on_dst(this, iter_fd, dst_node))
+-            continue;
+-
++    iter_fd = list_entry((&inode->fd_list)->next, typeof(*iter_fd), inode_list);
++    while (&iter_fd->inode_list != (&inode->fd_list)) {
++        if (fd_is_anonymous(iter_fd) ||
++            (dht_fd_open_on_dst(this, iter_fd, dst_node))) {
++            if (!tmp) {
++                iter_fd = list_entry(iter_fd->inode_list.next, typeof(*iter_fd),
++                                     inode_list);
++                continue;
++            }
++            skip_open = _gf_true;
++        }
+         /* We need to release the inode->lock before calling
+          * syncop_open() to avoid possible deadlocks. However this
+          * can cause the iter_fd to be released by other threads.
+          * To avoid this, we take a reference before releasing the
+          * lock.
+          */
+-        __fd_ref(iter_fd);
++        fd_ref(iter_fd);
+ 
+         UNLOCK(&inode->lock);
+ 
++        if (tmp) {
++            fd_unref(tmp);
++            tmp = NULL;
++        }
++        if (skip_open)
++            goto next;
++
+         /* flags for open are stripped down to allow following the
+          * new location of the file, otherwise we can get EEXIST or
+          * truncate the file again as rebalance is moving the data */
+@@ -1438,9 +1449,11 @@ dht_migration_complete_check_task(void *data)
+             dht_fd_ctx_set(this, iter_fd, dst_node);
+         }
+ 
+-        fd_unref(iter_fd);
+-
++    next:
+         LOCK(&inode->lock);
++        skip_open = _gf_false;
++        tmp = iter_fd;
++        iter_fd = list_entry(tmp->inode_list.next, typeof(*tmp), inode_list);
+     }
+ 
+     SYNCTASK_SETID(frame->root->uid, frame->root->gid);
+@@ -1453,6 +1466,10 @@ dht_migration_complete_check_task(void *data)
+ 
+ unlock:
+     UNLOCK(&inode->lock);
++    if (tmp) {
++        fd_unref(tmp);
++        tmp = NULL;
++    }
+ 
+ out:
+     if (dict) {
+@@ -1534,6 +1551,7 @@ dht_rebalance_inprogress_task(void *data)
+     int open_failed = 0;
+     uint64_t tmp_miginfo = 0;
+     dht_migrate_info_t *miginfo = NULL;
++    gf_boolean_t skip_open = _gf_false;
+ 
+     this = THIS;
+     frame = data;
+@@ -1654,24 +1672,40 @@ dht_rebalance_inprogress_task(void *data)
+      * the loop will cause the destruction of the fd. So we need to
+      * iterate the list safely because iter_fd cannot be trusted.
+      */
+-    list_for_each_entry_safe(iter_fd, tmp, &inode->fd_list, inode_list)
+-    {
+-        if (fd_is_anonymous(iter_fd))
+-            continue;
+-
+-        if (dht_fd_open_on_dst(this, iter_fd, dst_node))
+-            continue;
+-
++    iter_fd = list_entry((&inode->fd_list)->next, typeof(*iter_fd), inode_list);
++    while (&iter_fd->inode_list != (&inode->fd_list)) {
+         /* We need to release the inode->lock before calling
+          * syncop_open() to avoid possible deadlocks. However this
+          * can cause the iter_fd to be released by other threads.
+          * To avoid this, we take a reference before releasing the
+          * lock.
+          */
+-        __fd_ref(iter_fd);
+ 
++        if (fd_is_anonymous(iter_fd) ||
++            (dht_fd_open_on_dst(this, iter_fd, dst_node))) {
++            if (!tmp) {
++                iter_fd = list_entry(iter_fd->inode_list.next, typeof(*iter_fd),
++                                     inode_list);
++                continue;
++            }
++            skip_open = _gf_true;
++        }
++
++        /* Yes, this is ugly but there isn't a cleaner way to do this
++         * the fd_ref is an atomic increment so not too bad. We want to
++         * reduce the number of inode locks and unlocks.
++         */
++
++        fd_ref(iter_fd);
+         UNLOCK(&inode->lock);
+ 
++        if (tmp) {
++            fd_unref(tmp);
++            tmp = NULL;
++        }
++        if (skip_open)
++            goto next;
++
+         /* flags for open are stripped down to allow following the
+          * new location of the file, otherwise we can get EEXIST or
+          * truncate the file again as rebalance is moving the data */
+@@ -1692,9 +1726,11 @@ dht_rebalance_inprogress_task(void *data)
+             dht_fd_ctx_set(this, iter_fd, dst_node);
+         }
+ 
+-        fd_unref(iter_fd);
+-
++    next:
+         LOCK(&inode->lock);
++        skip_open = _gf_false;
++        tmp = iter_fd;
++        iter_fd = list_entry(tmp->inode_list.next, typeof(*tmp), inode_list);
+     }
+ 
+     SYNCTASK_SETID(frame->root->uid, frame->root->gid);
+@@ -1702,6 +1738,10 @@ dht_rebalance_inprogress_task(void *data)
+ unlock:
+     UNLOCK(&inode->lock);
+ 
++    if (tmp) {
++        fd_unref(tmp);
++        tmp = NULL;
++    }
+     if (open_failed) {
+         ret = -1;
+         goto out;
+-- 
+1.8.3.1
+

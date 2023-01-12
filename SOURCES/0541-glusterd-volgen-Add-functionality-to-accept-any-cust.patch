@@ -1,0 +1,545 @@
+From 23ab7175e64ab4d75fbcb6874008843cc78b65b8 Mon Sep 17 00:00:00 2001
+From: Ashish Pandey <aspandey@redhat.com>
+Date: Fri, 16 Apr 2021 18:48:56 +0530
+Subject: [PATCH 541/542] glusterd-volgen: Add functionality to accept any
+ custom xlator
+
+Add new function which allow users to insert any custom xlators.
+It makes to provide a way to add any processing into file operations.
+
+Users can deploy the plugin(xlator shared object) and integrate it to glusterfsd.
+
+If users want to enable a custom xlator, do the follows:
+
+1. put xlator object(.so file) into "XLATOR_DIR/user/"
+2. set the option user.xlator.<xlator> to the existing xlator-name to specify of the position in graph
+3. restart gluster volume
+
+Options for custom xlator are able to set in "user.xlator.<xlator>.<optkey>".
+
+Backport of :
+>https://github.com/gluster/glusterfs/commit/ea86b664f3b1f54901ce1b7d7fba7d80456f2089
+>Fixes: https://github.com/gluster/glusterfs/issues/1943
+>Change-Id: Ife3ae1514ea474f5dae2897223012f9d04b64674
+>Signed-off-by:Ryo Furuhashi <ryo.furuhashi.nh@hitachi.com>
+>Co-authored-by: Yaniv Kaul <ykaul@redhat.com>
+>Co-authored-by: Xavi Hernandez <xhernandez@users.noreply.github.com>
+
+Change-Id: Ic8f28bfcfde67213eb1092b0ebf4822c874d37bb
+BUG: 1927235
+Signed-off-by: Ashish Pandey <aspandey@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/236830
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Ravishankar Narayanankutty <ravishankar@redhat.com>
+Reviewed-by: Xavi Hernandez Juan <xhernandez@redhat.com>
+---
+ cli/src/cli-rpc-ops.c                       | 148 ++++++++++++++++++++------
+ cli/src/cli.h                               |   2 -
+ tests/basic/user-xlator.t                   |  65 ++++++++++++
+ tests/env.rc.in                             |   3 +
+ xlators/mgmt/glusterd/src/glusterd-volgen.c | 155 ++++++++++++++++++++++++++++
+ 5 files changed, 342 insertions(+), 31 deletions(-)
+ create mode 100755 tests/basic/user-xlator.t
+
+diff --git a/cli/src/cli-rpc-ops.c b/cli/src/cli-rpc-ops.c
+index 4e91265..51b5447 100644
+--- a/cli/src/cli-rpc-ops.c
++++ b/cli/src/cli-rpc-ops.c
+@@ -2269,49 +2269,131 @@ out:
+     return ret;
+ }
+ 
+-char *
+-is_server_debug_xlator(void *myframe)
++/*
++ * returns
++ *   1 : is server debug xlator
++ *   0 : is not server debug xlator
++ *  <0 : error
++ */
++static int
++is_server_debug_xlator(char *key, char *value)
++{
++    if (!key || !value)
++        return -1;
++
++    if (strcmp("debug.trace", key) == 0 ||
++        strcmp("debug.error-gen", key) == 0) {
++        if (strcmp("client", value) == 0)
++            return 0;
++        else
++            return 1;
++    }
++
++    return 0;
++}
++
++/*
++ * returns
++ *   1 : is user xlator
++ *   0 : is not user xlator
++ *  <0 : error
++ */
++static int
++is_server_user_xlator(char *key, char *value)
++{
++    int ret = 0;
++
++    if (!key || !value)
++        return -1;
++
++    ret = fnmatch("user.xlator.*", key, 0);
++    if (ret < 0) {
++        ret = -1;
++        goto out;
++    } else if (ret == FNM_NOMATCH) {
++        ret = 0;
++        goto out;
++    }
++
++    ret = fnmatch("user.xlator.*.*", key, 0);
++    if (ret < 0) {
++        ret = -1;
++        goto out;
++    } else if (ret != FNM_NOMATCH) {  // this is user xlator's option key
++        ret = 0;
++        goto out;
++    }
++
++    ret = 1;
++
++out:
++    return ret;
++}
++
++static int
++added_server_xlator(void *myframe, char **added_xlator)
+ {
+     call_frame_t *frame = NULL;
+     cli_local_t *local = NULL;
+     char **words = NULL;
+     char *key = NULL;
+     char *value = NULL;
+-    char *debug_xlator = NULL;
++    int ret = 0;
+ 
+     frame = myframe;
+     local = frame->local;
+     words = (char **)local->words;
+ 
+     while (*words != NULL) {
+-        if (strstr(*words, "trace") == NULL &&
+-            strstr(*words, "error-gen") == NULL) {
+-            words++;
+-            continue;
+-        }
+-
+         key = *words;
+         words++;
+         value = *words;
+-        if (value == NULL)
++
++        if (!value) {
+             break;
+-        if (strstr(value, "client")) {
+-            words++;
+-            continue;
+-        } else {
+-            if (!(strstr(value, "posix") || strstr(value, "acl") ||
+-                  strstr(value, "locks") || strstr(value, "io-threads") ||
+-                  strstr(value, "marker") || strstr(value, "index"))) {
+-                words++;
+-                continue;
+-            } else {
+-                debug_xlator = gf_strdup(key);
+-                break;
++        }
++
++        ret = is_server_debug_xlator(key, value);
++        if (ret < 0) {
++            gf_log(((call_frame_t *)myframe)->this->name, GF_LOG_ERROR,
++                   "failed to check that debug xlator was added");
++            ret = -1;
++            goto out;
++        }
++
++        if (ret) {
++            *added_xlator = gf_strdup(key);
++            if (!*added_xlator) {
++                gf_log(((call_frame_t *)myframe)->this->name, GF_LOG_ERROR,
++                       "Out of memory");
++                ret = -1;
++                goto out;
++            }
++            break;
++        }
++
++        ret = is_server_user_xlator(key, value);
++        if (ret < 0) {
++            gf_log(((call_frame_t *)myframe)->this->name, GF_LOG_ERROR,
++                   "failed to check that user xlator was added");
++            ret = -1;
++            goto out;
++        }
++
++        if (ret) {
++            *added_xlator = gf_strdup(key);
++            if (!*added_xlator) {
++                gf_log(((call_frame_t *)myframe)->this->name, GF_LOG_ERROR,
++                       "Out of memory");
++                ret = -1;
++                goto out;
+             }
++            break;
+         }
+     }
+ 
+-    return debug_xlator;
++out:
++    return ret;
+ }
+ 
+ int
+@@ -2327,7 +2409,7 @@ gf_cli_set_volume_cbk(struct rpc_req *req, struct iovec *iov, int count,
+     char msg[1024] = {
+         0,
+     };
+-    char *debug_xlator = NULL;
++    char *added_xlator = NULL;
+     char tmp_str[512] = {
+         0,
+     };
+@@ -2365,18 +2447,26 @@ gf_cli_set_volume_cbk(struct rpc_req *req, struct iovec *iov, int count,
+      * The process has to be restarted. So this is a check from the
+      * volume set option such that if debug xlators such as trace/errorgen
+      * are provided in the set command, warn the user.
++     * volume set option such that if user custom xlators or debug
++     * xlators such as trace/errorgen are provided in the set command,
++     * warn the user.
+      */
+-    debug_xlator = is_server_debug_xlator(myframe);
++    ret = added_server_xlator(myframe, &added_xlator);
++    if (ret < 0) {
++        gf_log("cli", GF_LOG_ERROR,
++               "failed to check that server graph has been changed");
++        goto out;
++    }
+ 
+     if (dict_get_str(dict, "help-str", &help_str) && !msg[0])
+         snprintf(msg, sizeof(msg), "Set volume %s",
+                  (rsp.op_ret) ? "unsuccessful" : "successful");
+-    if (rsp.op_ret == 0 && debug_xlator) {
++    if (rsp.op_ret == 0 && added_xlator) {
+         snprintf(tmp_str, sizeof(tmp_str),
+                  "\n%s translator has been "
+                  "added to the server volume file. Please restart the"
+                  " volume for enabling the translator",
+-                 debug_xlator);
++                 added_xlator);
+     }
+ 
+     if ((global_state->mode & GLUSTER_MODE_XML) && (help_str == NULL)) {
+@@ -2394,7 +2484,7 @@ gf_cli_set_volume_cbk(struct rpc_req *req, struct iovec *iov, int count,
+             cli_err("volume set: failed");
+     } else {
+         if (help_str == NULL) {
+-            if (debug_xlator == NULL)
++            if (added_xlator == NULL)
+                 cli_out("volume set: success");
+             else
+                 cli_out("volume set: success%s", tmp_str);
+@@ -2408,7 +2498,7 @@ gf_cli_set_volume_cbk(struct rpc_req *req, struct iovec *iov, int count,
+ out:
+     if (dict)
+         dict_unref(dict);
+-    GF_FREE(debug_xlator);
++    GF_FREE(added_xlator);
+     cli_cmd_broadcast_response(ret);
+     gf_free_xdr_cli_rsp(rsp);
+     return ret;
+diff --git a/cli/src/cli.h b/cli/src/cli.h
+index 7b4f446..b5b69ea 100644
+--- a/cli/src/cli.h
++++ b/cli/src/cli.h
+@@ -502,8 +502,6 @@ cli_xml_output_snapshot(int cmd_type, dict_t *dict, int op_ret, int op_errno,
+ int
+ cli_xml_snapshot_status_single_snap(cli_local_t *local, dict_t *dict,
+                                     char *key);
+-char *
+-is_server_debug_xlator(void *myframe);
+ 
+ int32_t
+ cli_cmd_snapshot_parse(const char **words, int wordcount, dict_t **options,
+diff --git a/tests/basic/user-xlator.t b/tests/basic/user-xlator.t
+new file mode 100755
+index 0000000..a711f9f
+--- /dev/null
++++ b/tests/basic/user-xlator.t
+@@ -0,0 +1,65 @@
++#!/bin/bash
++
++. $(dirname $0)/../include.rc
++. $(dirname $0)/../volume.rc
++
++#### patchy.dev.d-backends-patchy1.vol
++brick=${B0//\//-}
++SERVER_VOLFILE="/var/lib/glusterd/vols/${V0}/${V0}.${H0}.${brick:1}-${V0}1.vol"
++
++cleanup;
++
++TEST mkdir -p $B0/single-brick
++TEST mkdir -p ${GLUSTER_XLATOR_DIR}/user
++
++## deploy dummy user xlator
++TEST cp ${GLUSTER_XLATOR_DIR}/playground/template.so ${GLUSTER_XLATOR_DIR}/user/hoge.so
++
++TEST glusterd
++TEST $CLI volume create $V0 replica 3  $H0:$B0/${V0}{1,2,3,4,5,6};
++TEST $CLI volume set $V0 user.xlator.hoge posix
++TEST grep -q 'user/hoge' ${SERVER_VOLFILE}
++
++TEST $CLI volume set $V0 user.xlator.hoge.opt1 10
++TEST grep -q '"option opt1 10"' ${SERVER_VOLFILE}
++TEST $CLI volume set $V0 user.xlator.hoge.opt2 hogehoge
++TEST grep -q '"option opt2 hogehoge"' ${SERVER_VOLFILE}
++TEST $CLI volume set $V0 user.xlator.hoge.opt3 true
++TEST grep -q '"option opt3 true"' ${SERVER_VOLFILE}
++
++TEST $CLI volume start $V0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}2
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}3
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}4
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}5
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}6
++
++TEST $CLI volume set $V0 user.xlator.hoge trash
++TEST grep -q 'user/hoge' ${SERVER_VOLFILE}
++
++TEST $CLI volume stop $V0
++TEST $CLI volume start $V0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}2
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}3
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}4
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}5
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}6
++
++TEST ! $CLI volume set $V0 user.xlator.hoge unknown
++TEST grep -q 'user/hoge' ${SERVER_VOLFILE} # When the CLI fails, the volfile is not modified.
++
++TEST $CLI volume stop $V0
++TEST $CLI volume start $V0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}2
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}3
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}4
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}5
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}6
++
++#### teardown
++
++TEST rm -f ${GLUSTER_XLATOR_DIR}/user/hoge.so
++cleanup;
+diff --git a/tests/env.rc.in b/tests/env.rc.in
+index c7472a7..1f0ca88 100644
+--- a/tests/env.rc.in
++++ b/tests/env.rc.in
+@@ -40,3 +40,6 @@ export GLUSTER_LIBEXECDIR
+ 
+ RUN_NFS_TESTS=@BUILD_GNFS@
+ export RUN_NFS_TESTS
++
++GLUSTER_XLATOR_DIR=@libdir@/glusterfs/@PACKAGE_VERSION@/xlator
++export GLUSTER_XLATOR_DIR
+\ No newline at end of file
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volgen.c b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+index 1920284..a242b5c 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volgen.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+@@ -45,6 +45,11 @@ struct gd_validate_reconf_opts {
+ 
+ extern struct volopt_map_entry glusterd_volopt_map[];
+ 
++struct check_and_add_user_xlator_t {
++    volgen_graph_t *graph;
++    char *volname;
++};
++
+ #define RPC_SET_OPT(XL, CLI_OPT, XLATOR_OPT, ERROR_CMD)                        \
+     do {                                                                       \
+         char *_value = NULL;                                                   \
+@@ -2822,6 +2827,145 @@ out:
+     return ret;
+ }
+ 
++static gf_boolean_t
++check_user_xlator_position(dict_t *dict, char *key, data_t *value,
++                           void *prev_xlname)
++{
++    if (strncmp(key, "user.xlator.", SLEN("user.xlator.")) != 0) {
++        return false;
++    }
++
++    if (fnmatch("user.xlator.*.*", key, 0) == 0) {
++        return false;
++    }
++
++    char *value_str = data_to_str(value);
++    if (!value_str) {
++        return false;
++    }
++
++    if (strcmp(value_str, prev_xlname) == 0) {
++        gf_log("glusterd", GF_LOG_INFO,
++               "found insert position of user-xlator(%s)", key);
++        return true;
++    }
++
++    return false;
++}
++
++static int
++set_user_xlator_option(dict_t *set_dict, char *key, data_t *value, void *data)
++{
++    xlator_t *xl = data;
++    char *optname = strrchr(key, '.') + 1;
++
++    gf_log("glusterd", GF_LOG_DEBUG, "set user xlator option %s = %s", key,
++           value->data);
++
++    return xlator_set_option(xl, optname, strlen(optname), data_to_str(value));
++}
++
++static int
++insert_user_xlator_to_graph(dict_t *set_dict, char *key, data_t *value,
++                            void *action_data)
++{
++    int ret = -1;
++
++    struct check_and_add_user_xlator_t *data = action_data;
++
++    char *xlator_name = strrchr(key, '.') + 1;  // user.xlator.<xlator_name>
++    char *xlator_option_matcher = NULL;
++    char *type = NULL;
++    xlator_t *xl = NULL;
++
++    // convert optkey to xlator type
++    if (gf_asprintf(&type, "user/%s", xlator_name) < 0) {
++        gf_log("glusterd", GF_LOG_ERROR, "failed to generate user-xlator type");
++        goto out;
++    }
++
++    gf_log("glusterd", GF_LOG_INFO, "add user xlator=%s to graph", type);
++
++    xl = volgen_graph_add(data->graph, type, data->volname);
++    if (!xl) {
++        goto out;
++    }
++
++    ret = gf_asprintf(&xlator_option_matcher, "user.xlator.%s.*", xlator_name);
++    if (ret < 0) {
++        gf_log("glusterd", GF_LOG_ERROR,
++               "failed to generate user-xlator option matcher");
++        goto out;
++    }
++
++    dict_foreach_fnmatch(set_dict, xlator_option_matcher,
++                         set_user_xlator_option, xl);
++
++out:
++    if (type)
++        GF_FREE(type);
++    if (xlator_option_matcher)
++        GF_FREE(xlator_option_matcher);
++
++    return ret;
++}
++
++static int
++validate_user_xlator_position(dict_t *this, char *key, data_t *value,
++                              void *unused)
++{
++    int ret = -1;
++    int i = 0;
++
++    if (!value)
++        goto out;
++
++    if (fnmatch("user.xlator.*.*", key, 0) == 0) {
++        ret = 0;
++        goto out;
++    }
++
++    char *value_str = data_to_str(value);
++    if (!value_str)
++        goto out;
++
++    int num_xlators = sizeof(server_graph_table) /
++                      sizeof(server_graph_table[0]);
++    for (i = 0; i < num_xlators; i++) {
++        if (server_graph_table[i].dbg_key &&
++            strcmp(value_str, server_graph_table[i].dbg_key) == 0) {
++            ret = 0;
++            goto out;
++        }
++    }
++
++out:
++    if (ret == -1)
++        gf_log("glusterd", GF_LOG_ERROR, "invalid user xlator position %s = %s",
++               key, value->data);
++
++    return ret;
++}
++
++static int
++check_and_add_user_xl(volgen_graph_t *graph, dict_t *set_dict, char *volname,
++                      char *prev_xlname)
++{
++    if (!prev_xlname)
++        goto out;
++
++    struct check_and_add_user_xlator_t data = {.graph = graph,
++                                               .volname = volname};
++
++    if (dict_foreach_match(set_dict, check_user_xlator_position, prev_xlname,
++                           insert_user_xlator_to_graph, &data) < 0) {
++        return -1;
++    }
++
++out:
++    return 0;
++}
++
+ static int
+ server_graph_builder(volgen_graph_t *graph, glusterd_volinfo_t *volinfo,
+                      dict_t *set_dict, void *param)
+@@ -2831,6 +2975,12 @@ server_graph_builder(volgen_graph_t *graph, glusterd_volinfo_t *volinfo,
+     char *loglevel = NULL;
+     int i = 0;
+ 
++    if (dict_foreach_fnmatch(set_dict, "user.xlator.*",
++                             validate_user_xlator_position, NULL) < 0) {
++        ret = -EINVAL;
++        goto out;
++    }
++
+     i = sizeof(server_graph_table) / sizeof(server_graph_table[0]) - 1;
+ 
+     while (i >= 0) {
+@@ -2848,6 +2998,11 @@ server_graph_builder(volgen_graph_t *graph, glusterd_volinfo_t *volinfo,
+         if (ret)
+             goto out;
+ 
++        ret = check_and_add_user_xl(graph, set_dict, volinfo->volname,
++                                    server_graph_table[i].dbg_key);
++        if (ret)
++            goto out;
++
+         i--;
+     }
+ 
+-- 
+1.8.3.1
+

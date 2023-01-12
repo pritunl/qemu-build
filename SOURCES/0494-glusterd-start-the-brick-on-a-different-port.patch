@@ -1,0 +1,54 @@
+From 1b24bc4319203128a9ff7f97fe14f4b3622c4eec Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Wed, 26 Aug 2020 20:05:35 +0530
+Subject: [PATCH 494/511] glusterd: start the brick on a different port
+
+Problem: brick fails to start when the port provided by
+glusterd is in use by any other process
+
+Solution: glusterd should check errno set by runner_run()
+and if it is set to EADDRINUSE, it should allocate a new
+port to the brick and try to start it again.
+
+Previously ret value is checked instead of errno, so the
+retry part never executed. Now, we initialize errno to 0
+before calling runner framework. and afterwards store the
+errno into ret to avoid modification of errno in subsequent
+function calls.
+
+>fixes: #1101
+
+>Change-Id: I1aa048a77c5f8b035dece36976d60602d9753b1a
+>Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+>Signed-off-by: nik-redhat <nladha@redhat.com>
+
+Upstream patch: https://review.gluster.org/c/glusterfs/+/24923/
+
+BUG: 1865796
+Change-Id: I1aa048a77c5f8b035dece36976d60602d9753b1a
+Signed-off-by: nik-redhat <nladha@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/220541
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-utils.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index b343eee..f7030fb 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -2289,7 +2289,10 @@ retry:
+ 
+     if (wait) {
+         synclock_unlock(&priv->big_lock);
++        errno = 0;
+         ret = runner_run(&runner);
++        if (errno != 0)
++            ret = errno;
+         synclock_lock(&priv->big_lock);
+ 
+         if (ret == EADDRINUSE) {
+-- 
+1.8.3.1
+

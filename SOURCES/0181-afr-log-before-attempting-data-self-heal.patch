@@ -1,0 +1,59 @@
+From 99f86ae7d45667d86b1b6f9f9540ec2889c6c4ce Mon Sep 17 00:00:00 2001
+From: Ravishankar N <ravishankar@redhat.com>
+Date: Wed, 8 May 2019 04:51:27 -0400
+Subject: [PATCH 181/192] afr: log before attempting data self-heal.
+
+Upstream patch: https://review.gluster.org/#/c/glusterfs/+/22685/
+
+I was working on a blog about troubleshooting AFR issues and I wanted to copy
+the messages logged by self-heal for my blog. I then realized that AFR-v2 is not
+logging *before* attempting data heal while it logs it for metadata and entry
+heals.
+
+I [MSGID: 108026] [afr-self-heal-entry.c:883:afr_selfheal_entry_do]
+0-testvol-replicate-0: performing entry selfheal on
+d120c0cf-6e87-454b-965b-0d83a4c752bb
+I [MSGID: 108026] [afr-self-heal-common.c:1741:afr_log_selfheal]
+0-testvol-replicate-0: Completed entry selfheal on
+d120c0cf-6e87-454b-965b-0d83a4c752bb. sources=[0] 2  sinks=1
+I [MSGID: 108026] [afr-self-heal-common.c:1741:afr_log_selfheal]
+0-testvol-replicate-0: Completed data selfheal on
+a9b5f183-21eb-4fb3-a342-287d3a7dddc5. sources=[0] 2  sinks=1
+I [MSGID: 108026] [afr-self-heal-metadata.c:52:__afr_selfheal_metadata_do]
+0-testvol-replicate-0: performing metadata selfheal on
+a9b5f183-21eb-4fb3-a342-287d3a7dddc5
+I [MSGID: 108026] [afr-self-heal-common.c:1741:afr_log_selfheal]
+0-testvol-replicate-0: Completed metadata selfheal on
+a9b5f183-21eb-4fb3-a342-287d3a7dddc5. sources=[0] 2  sinks=1
+
+Adding it in this patch. Now there is a 'performing' and a corresponding
+'Completed' message for every type of heal.
+
+BUG: 1710701
+Change-Id: I91e29dd05af1c78dbc447d1a02dda32b03d64aef
+fixes: bz#1710701
+Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/173108
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/afr/src/afr-self-heal-data.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/xlators/cluster/afr/src/afr-self-heal-data.c b/xlators/cluster/afr/src/afr-self-heal-data.c
+index 18a0334..cdff4a5 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-data.c
++++ b/xlators/cluster/afr/src/afr-self-heal-data.c
+@@ -324,6 +324,9 @@ afr_selfheal_data_do(call_frame_t *frame, xlator_t *this, fd_t *fd, int source,
+     call_frame_t *iter_frame = NULL;
+     unsigned char arbiter_sink_status = 0;
+ 
++    gf_msg(this->name, GF_LOG_INFO, 0, AFR_MSG_SELF_HEAL_INFO,
++           "performing data selfheal on %s", uuid_utoa(fd->inode->gfid));
++
+     priv = this->private;
+     if (priv->arbiter_count) {
+         arbiter_sink_status = healed_sinks[ARBITER_BRICK_INDEX];
+-- 
+1.8.3.1
+

@@ -1,0 +1,236 @@
+From 8b11ac1575ef167af2a47a96f7b7ed0f32bb5897 Mon Sep 17 00:00:00 2001
+From: karthik-us <ksubrahm@redhat.com>
+Date: Fri, 5 Jun 2020 17:20:04 +0530
+Subject: [PATCH 422/449] cluster/afr: Prioritize ENOSPC over other errors
+
+Backport of: https://review.gluster.org/#/c/glusterfs/+/24477/
+
+Problem:
+In a replicate/arbiter volume if file creations or writes fails on
+quorum number of bricks and on one brick it is due to ENOSPC and
+on other brick it fails for a different reason, it may fail with
+errors other than ENOSPC in some cases.
+
+Fix:
+Prioritize ENOSPC over other lesser priority errors and do not set
+op_errno in posix_gfid_set if op_ret is 0 to avoid receiving any
+error_no which can be misinterpreted by __afr_dir_write_finalize().
+
+Also removing the function afr_has_arbiter_fop_cbk_quorum() which
+might consider a successful reply form a single brick as quorum
+success in some cases, whereas we always need fop to be successful
+on quorum number of bricks in arbiter configuration.
+
+Change-Id: I4dd2bff17e6812bc7c8372130976e365e2407d88
+Signed-off-by: karthik-us <ksubrahm@redhat.com>
+BUG: 1837467
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202526
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ .../bugs/replicate/issue-1254-prioritize-enospc.t  | 80 ++++++++++++++++++++++
+ xlators/cluster/afr/src/afr-common.c               |  4 +-
+ xlators/cluster/afr/src/afr-transaction.c          | 48 +------------
+ xlators/storage/posix/src/posix-helpers.c          |  2 +-
+ 4 files changed, 86 insertions(+), 48 deletions(-)
+ create mode 100644 tests/bugs/replicate/issue-1254-prioritize-enospc.t
+
+diff --git a/tests/bugs/replicate/issue-1254-prioritize-enospc.t b/tests/bugs/replicate/issue-1254-prioritize-enospc.t
+new file mode 100644
+index 0000000..fab94b7
+--- /dev/null
++++ b/tests/bugs/replicate/issue-1254-prioritize-enospc.t
+@@ -0,0 +1,80 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++
++cleanup
++
++function create_bricks {
++    TEST truncate -s 100M $B0/brick0
++    TEST truncate -s 100M $B0/brick1
++    TEST truncate -s 20M $B0/brick2
++    LO1=`SETUP_LOOP $B0/brick0`
++    TEST [ $? -eq 0 ]
++    TEST MKFS_LOOP $LO1
++    LO2=`SETUP_LOOP $B0/brick1`
++    TEST [ $? -eq 0 ]
++    TEST MKFS_LOOP $LO2
++    LO3=`SETUP_LOOP $B0/brick2`
++    TEST [ $? -eq 0 ]
++    TEST MKFS_LOOP $LO3
++    TEST mkdir -p $B0/${V0}0 $B0/${V0}1 $B0/${V0}2
++    TEST MOUNT_LOOP $LO1 $B0/${V0}0
++    TEST MOUNT_LOOP $LO2 $B0/${V0}1
++    TEST MOUNT_LOOP $LO3 $B0/${V0}2
++}
++
++function create_files {
++        local i=1
++        while (true)
++        do
++                touch $M0/file$i
++                if [ -e $B0/${V0}2/file$i ];
++                then
++                        ((i++))
++                else
++                        break
++                fi
++        done
++}
++
++TESTS_EXPECTED_IN_LOOP=13
++
++#Arbiter volume: Check for ENOSPC when arbiter brick becomes full#
++TEST glusterd
++create_bricks
++TEST $CLI volume create $V0 replica 3 arbiter 1 $H0:$B0/${V0}{0,1,2}
++TEST $CLI volume start $V0
++TEST $CLI volume set $V0 performance.write-behind off
++TEST $GFS --volfile-server=$H0 --volfile-id=$V0 $M0
++
++create_files
++TEST kill_brick $V0 $H0 $B0/${V0}1
++error1=$(touch $M0/file-1 2>&1)
++EXPECT "No space left on device" echo $error1
++error2=$(mkdir $M0/dir-1 2>&1)
++EXPECT "No space left on device" echo $error2
++error3=$((echo "Test" > $M0/file-3) 2>&1)
++EXPECT "No space left on device" echo $error3
++
++cleanup
++
++#Replica-3 volume: Check for ENOSPC when one of the brick becomes full#
++#Keeping the third brick of lower size to simulate disk full scenario#
++TEST glusterd
++create_bricks
++TEST $CLI volume create $V0 replica 3 $H0:$B0/${V0}{0,1,2}
++TEST $CLI volume start $V0
++TEST $CLI volume set $V0 performance.write-behind off
++TEST $GFS --volfile-server=$H0 --volfile-id=$V0 $M0
++
++create_files
++TEST kill_brick $V0 $H0 $B0/${V0}1
++error1=$(touch $M0/file-1 2>&1)
++EXPECT "No space left on device" echo $error1
++error2=$(mkdir $M0/dir-1 2>&1)
++EXPECT "No space left on device" echo $error2
++error3=$((cat /dev/zero > $M0/file1) 2>&1)
++EXPECT "No space left on device" echo $error3
++
++cleanup
+diff --git a/xlators/cluster/afr/src/afr-common.c b/xlators/cluster/afr/src/afr-common.c
+index 5806556..59710aa 100644
+--- a/xlators/cluster/afr/src/afr-common.c
++++ b/xlators/cluster/afr/src/afr-common.c
+@@ -2464,7 +2464,7 @@ error:
+  * others in that they must be given higher priority while
+  * returning to the user.
+  *
+- * The hierarchy is ENODATA > ENOENT > ESTALE > others
++ * The hierarchy is ENODATA > ENOENT > ESTALE > ENOSPC others
+  */
+ 
+ int
+@@ -2476,6 +2476,8 @@ afr_higher_errno(int32_t old_errno, int32_t new_errno)
+         return ENOENT;
+     if (old_errno == ESTALE || new_errno == ESTALE)
+         return ESTALE;
++    if (old_errno == ENOSPC || new_errno == ENOSPC)
++        return ENOSPC;
+ 
+     return new_errno;
+ }
+diff --git a/xlators/cluster/afr/src/afr-transaction.c b/xlators/cluster/afr/src/afr-transaction.c
+index 15f3a7e..8e65ae2 100644
+--- a/xlators/cluster/afr/src/afr-transaction.c
++++ b/xlators/cluster/afr/src/afr-transaction.c
+@@ -514,42 +514,6 @@ afr_compute_pre_op_sources(call_frame_t *frame, xlator_t *this)
+                 local->transaction.pre_op_sources[j] = 0;
+ }
+ 
+-gf_boolean_t
+-afr_has_arbiter_fop_cbk_quorum(call_frame_t *frame)
+-{
+-    afr_local_t *local = NULL;
+-    afr_private_t *priv = NULL;
+-    xlator_t *this = NULL;
+-    gf_boolean_t fop_failed = _gf_false;
+-    unsigned char *pre_op_sources = NULL;
+-    int i = 0;
+-
+-    local = frame->local;
+-    this = frame->this;
+-    priv = this->private;
+-    pre_op_sources = local->transaction.pre_op_sources;
+-
+-    /* If the fop failed on the brick, it is not a source. */
+-    for (i = 0; i < priv->child_count; i++)
+-        if (local->transaction.failed_subvols[i])
+-            pre_op_sources[i] = 0;
+-
+-    switch (AFR_COUNT(pre_op_sources, priv->child_count)) {
+-        case 1:
+-            if (pre_op_sources[ARBITER_BRICK_INDEX])
+-                fop_failed = _gf_true;
+-            break;
+-        case 0:
+-            fop_failed = _gf_true;
+-            break;
+-    }
+-
+-    if (fop_failed)
+-        return _gf_false;
+-
+-    return _gf_true;
+-}
+-
+ void
+ afr_txn_arbitrate_fop(call_frame_t *frame, xlator_t *this)
+ {
+@@ -968,12 +932,8 @@ afr_need_dirty_marking(call_frame_t *frame, xlator_t *this)
+         priv->child_count)
+         return _gf_false;
+ 
+-    if (priv->arbiter_count) {
+-        if (!afr_has_arbiter_fop_cbk_quorum(frame))
+-            need_dirty = _gf_true;
+-    } else if (!afr_has_fop_cbk_quorum(frame)) {
++    if (!afr_has_fop_cbk_quorum(frame))
+         need_dirty = _gf_true;
+-    }
+ 
+     return need_dirty;
+ }
+@@ -1023,12 +983,8 @@ afr_handle_quorum(call_frame_t *frame, xlator_t *this)
+      * no split-brain with the fix. The problem is eliminated completely.
+      */
+ 
+-    if (priv->arbiter_count) {
+-        if (afr_has_arbiter_fop_cbk_quorum(frame))
+-            return;
+-    } else if (afr_has_fop_cbk_quorum(frame)) {
++    if (afr_has_fop_cbk_quorum(frame))
+         return;
+-    }
+ 
+     if (afr_need_dirty_marking(frame, this))
+         goto set_response;
+diff --git a/xlators/storage/posix/src/posix-helpers.c b/xlators/storage/posix/src/posix-helpers.c
+index 2c27d22..949c799 100644
+--- a/xlators/storage/posix/src/posix-helpers.c
++++ b/xlators/storage/posix/src/posix-helpers.c
+@@ -1059,7 +1059,7 @@ verify_handle:
+         ret = posix_handle_soft(this, path, loc, uuid_curr, &stat);
+ 
+ out:
+-    if (!(*op_errno))
++    if (ret && !(*op_errno))
+         *op_errno = errno;
+     return ret;
+ }
+-- 
+1.8.3.1
+

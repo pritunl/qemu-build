@@ -1,0 +1,49 @@
+From c7aae487213e464b2ee7a785d752bd8264ceb371 Mon Sep 17 00:00:00 2001
+From: Hari Gowtham <hgowtham@redhat.com>
+Date: Thu, 13 Jun 2019 20:12:14 +0530
+Subject: [PATCH 190/192] Build: removing the hardcoded usage of python3
+
+Label : DOWNSTREAM ONLY
+
+Problem: RHEL8 needed python3 so python3 was hardcoded to be used
+in gluster build. python2 was still being used by RHEL7 machines and
+when the shebang was redirected to use python3 glusterfind failed.
+It was not working from 6.0-5 downstream build.
+
+Fix: revert back to the old mechanism where we check the python version
+and redirect the python script according to the usage.
+
+Change-Id: I8dc6c9185b2740e20e4c4d734cc1a9e335e9c449
+fixes: bz#1719640
+Signed-off-by: Hari Gowtham <hgowtham@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/173392
+Reviewed-by: Kaleb Keithley <kkeithle@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Aravinda Vishwanathapura Krishna Murthy <avishwan@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ glusterfs.spec.in | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 9c7d7a7..0127e8e 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -722,10 +722,12 @@ GlusterFS Events
+ 
+ %prep
+ %setup -q -n %{name}-%{version}%{?prereltag}
++%if ( ! %{_usepython3} )
+ echo "fixing python shebangs..."
+-for i in `find . -type f -exec bash -c "if file {} | grep 'Python script, ASCII text executable' >/dev/null; then echo {}; fi" ';'`; do
+-    sed -i -e 's|^#!/usr/bin/python.*|#!%{__python3}|' -e 's|^#!/usr/bin/env python.*|#!%{__python3}|' $i
++for f in api events extras geo-replication libglusterfs tools xlators; do
++find $f -type f -exec sed -i 's|/usr/bin/python3|/usr/bin/python2|' {} \;
+ done
++%endif
+ 
+ %build
+ 
+-- 
+1.8.3.1
+

@@ -1,0 +1,241 @@
+From 9fd966aa6879ac9867381629f82eca24b950d731 Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Sun, 2 Jun 2019 01:36:33 +0530
+Subject: [PATCH 175/178] ec/fini: Fix race between xlator cleanup and on going
+ async fop
+
+Problem:
+While we process a cleanup, there is a chance for a race between
+async operations, for example ec_launch_replace_heal. So this can
+lead to invalid mem access.
+
+Solution:
+Just like we track on going heal fops, we can also track fops like
+ec_launch_replace_heal, so that we can decide when to send a
+PARENT_DOWN request.
+
+> upstream patch : https://review.gluster.org/#/c/glusterfs/+/22798/
+
+>Change-Id: I055391c5c6c34d58aef7336847f3b570cb831298
+>fixes: bz#1703948
+>Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+
+Change-Id: I055391c5c6c34d58aef7336847f3b570cb831298
+BUG: 1714588
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172801
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/cluster/ec/src/ec-common.c | 10 ++++++++++
+ xlators/cluster/ec/src/ec-common.h |  2 ++
+ xlators/cluster/ec/src/ec-data.c   |  4 +++-
+ xlators/cluster/ec/src/ec-heal.c   | 17 +++++++++++++++--
+ xlators/cluster/ec/src/ec-types.h  |  1 +
+ xlators/cluster/ec/src/ec.c        | 37 +++++++++++++++++++++++++------------
+ 6 files changed, 56 insertions(+), 15 deletions(-)
+
+diff --git a/xlators/cluster/ec/src/ec-common.c b/xlators/cluster/ec/src/ec-common.c
+index e85aa8b..9cc6395 100644
+--- a/xlators/cluster/ec/src/ec-common.c
++++ b/xlators/cluster/ec/src/ec-common.c
+@@ -2955,3 +2955,13 @@ ec_manager(ec_fop_data_t *fop, int32_t error)
+ 
+     __ec_manager(fop, error);
+ }
++
++gf_boolean_t
++__ec_is_last_fop(ec_t *ec)
++{
++    if ((list_empty(&ec->pending_fops)) &&
++        (GF_ATOMIC_GET(ec->async_fop_count) == 0)) {
++        return _gf_true;
++    }
++    return _gf_false;
++}
+diff --git a/xlators/cluster/ec/src/ec-common.h b/xlators/cluster/ec/src/ec-common.h
+index e948342..bf6c97d 100644
+--- a/xlators/cluster/ec/src/ec-common.h
++++ b/xlators/cluster/ec/src/ec-common.h
+@@ -204,4 +204,6 @@ void
+ ec_reset_entry_healing(ec_fop_data_t *fop);
+ char *
+ ec_msg_str(ec_fop_data_t *fop);
++gf_boolean_t
++__ec_is_last_fop(ec_t *ec);
+ #endif /* __EC_COMMON_H__ */
+diff --git a/xlators/cluster/ec/src/ec-data.c b/xlators/cluster/ec/src/ec-data.c
+index 6ef9340..8d2d9a1 100644
+--- a/xlators/cluster/ec/src/ec-data.c
++++ b/xlators/cluster/ec/src/ec-data.c
+@@ -202,11 +202,13 @@ ec_handle_last_pending_fop_completion(ec_fop_data_t *fop, gf_boolean_t *notify)
+ {
+     ec_t *ec = fop->xl->private;
+ 
++    *notify = _gf_false;
++
+     if (!list_empty(&fop->pending_list)) {
+         LOCK(&ec->lock);
+         {
+             list_del_init(&fop->pending_list);
+-            *notify = list_empty(&ec->pending_fops);
++            *notify = __ec_is_last_fop(ec);
+         }
+         UNLOCK(&ec->lock);
+     }
+diff --git a/xlators/cluster/ec/src/ec-heal.c b/xlators/cluster/ec/src/ec-heal.c
+index 8844c29..237fea2 100644
+--- a/xlators/cluster/ec/src/ec-heal.c
++++ b/xlators/cluster/ec/src/ec-heal.c
+@@ -2814,8 +2814,20 @@ int
+ ec_replace_heal_done(int ret, call_frame_t *heal, void *opaque)
+ {
+     ec_t *ec = opaque;
++    gf_boolean_t last_fop = _gf_false;
+ 
++    if (GF_ATOMIC_DEC(ec->async_fop_count) == 0) {
++        LOCK(&ec->lock);
++        {
++            last_fop = __ec_is_last_fop(ec);
++        }
++        UNLOCK(&ec->lock);
++    }
+     gf_msg_debug(ec->xl->name, 0, "getxattr on bricks is done ret %d", ret);
++
++    if (last_fop)
++        ec_pending_fops_completed(ec);
++
+     return 0;
+ }
+ 
+@@ -2869,14 +2881,15 @@ ec_launch_replace_heal(ec_t *ec)
+ {
+     int ret = -1;
+ 
+-    if (!ec)
+-        return ret;
+     ret = synctask_new(ec->xl->ctx->env, ec_replace_brick_heal_wrap,
+                        ec_replace_heal_done, NULL, ec);
++
+     if (ret < 0) {
+         gf_msg_debug(ec->xl->name, 0, "Heal failed for replace brick ret = %d",
+                      ret);
++        ec_replace_heal_done(-1, NULL, ec);
+     }
++
+     return ret;
+ }
+ 
+diff --git a/xlators/cluster/ec/src/ec-types.h b/xlators/cluster/ec/src/ec-types.h
+index 1c295c0..4dbf4a3 100644
+--- a/xlators/cluster/ec/src/ec-types.h
++++ b/xlators/cluster/ec/src/ec-types.h
+@@ -643,6 +643,7 @@ struct _ec {
+     uintptr_t xl_notify;      /* Bit flag representing
+                                  notification for bricks. */
+     uintptr_t node_mask;
++    gf_atomic_t async_fop_count; /* Number of on going asynchronous fops. */
+     xlator_t **xl_list;
+     gf_lock_t lock;
+     gf_timer_t *timer;
+diff --git a/xlators/cluster/ec/src/ec.c b/xlators/cluster/ec/src/ec.c
+index df5912c..f0d58c0 100644
+--- a/xlators/cluster/ec/src/ec.c
++++ b/xlators/cluster/ec/src/ec.c
+@@ -355,6 +355,7 @@ ec_notify_cbk(void *data)
+     ec_t *ec = data;
+     glusterfs_event_t event = GF_EVENT_MAXVAL;
+     gf_boolean_t propagate = _gf_false;
++    gf_boolean_t launch_heal = _gf_false;
+ 
+     LOCK(&ec->lock);
+     {
+@@ -384,6 +385,11 @@ ec_notify_cbk(void *data)
+              * still bricks DOWN, they will be healed when they
+              * come up. */
+             ec_up(ec->xl, ec);
++
++            if (ec->shd.iamshd && !ec->shutdown) {
++                launch_heal = _gf_true;
++                GF_ATOMIC_INC(ec->async_fop_count);
++            }
+         }
+ 
+         propagate = _gf_true;
+@@ -391,13 +397,12 @@ ec_notify_cbk(void *data)
+ unlock:
+     UNLOCK(&ec->lock);
+ 
++    if (launch_heal) {
++        /* We have just brought the volume UP, so we trigger
++         * a self-heal check on the root directory. */
++        ec_launch_replace_heal(ec);
++    }
+     if (propagate) {
+-        if ((event == GF_EVENT_CHILD_UP) && ec->shd.iamshd) {
+-            /* We have just brought the volume UP, so we trigger
+-             * a self-heal check on the root directory. */
+-            ec_launch_replace_heal(ec);
+-        }
+-
+         default_notify(ec->xl, event, NULL);
+     }
+ }
+@@ -425,7 +430,7 @@ ec_disable_delays(ec_t *ec)
+ {
+     ec->shutdown = _gf_true;
+ 
+-    return list_empty(&ec->pending_fops);
++    return __ec_is_last_fop(ec);
+ }
+ 
+ void
+@@ -603,7 +608,10 @@ ec_notify(xlator_t *this, int32_t event, void *data, void *data2)
+         if (event == GF_EVENT_CHILD_UP) {
+             /* We need to trigger a selfheal if a brick changes
+              * to UP state. */
+-            needs_shd_check = ec_set_up_state(ec, mask, mask);
++            if (ec_set_up_state(ec, mask, mask) && ec->shd.iamshd &&
++                !ec->shutdown) {
++                needs_shd_check = _gf_true;
++            }
+         } else if (event == GF_EVENT_CHILD_DOWN) {
+             ec_set_up_state(ec, mask, 0);
+         }
+@@ -633,17 +641,21 @@ ec_notify(xlator_t *this, int32_t event, void *data, void *data2)
+             }
+         } else {
+             propagate = _gf_false;
++            needs_shd_check = _gf_false;
++        }
++
++        if (needs_shd_check) {
++            GF_ATOMIC_INC(ec->async_fop_count);
+         }
+     }
+ unlock:
+     UNLOCK(&ec->lock);
+ 
+ done:
++    if (needs_shd_check) {
++        ec_launch_replace_heal(ec);
++    }
+     if (propagate) {
+-        if (needs_shd_check && ec->shd.iamshd) {
+-            ec_launch_replace_heal(ec);
+-        }
+-
+         error = default_notify(this, event, data);
+     }
+ 
+@@ -705,6 +717,7 @@ init(xlator_t *this)
+     ec->xl = this;
+     LOCK_INIT(&ec->lock);
+ 
++    GF_ATOMIC_INIT(ec->async_fop_count, 0);
+     INIT_LIST_HEAD(&ec->pending_fops);
+     INIT_LIST_HEAD(&ec->heal_waiting);
+     INIT_LIST_HEAD(&ec->healing);
+-- 
+1.8.3.1
+

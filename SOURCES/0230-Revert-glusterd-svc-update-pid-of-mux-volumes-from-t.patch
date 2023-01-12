@@ -1,0 +1,893 @@
+From 308fe0d81dbef9f84bb1ad8e7309e3ffc28d6394 Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Thu, 11 Jul 2019 12:37:29 +0530
+Subject: [PATCH 230/255] Revert "glusterd/svc: update pid of mux volumes from
+ the shd process"
+
+This reverts commit b0815b8a84a07d17a1215c55afc38888ee9fc37c.
+Label : DOWNSTREAM ONLY
+
+BUG: 1471742
+Change-Id: Iab11c686565e9a9c852f2b7c2d236fa1a348f96a
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/175940
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfsd/src/gf_attach.c                         |   2 -
+ glusterfsd/src/glusterfsd-mgmt.c                   |  66 ++-------
+ libglusterfs/src/glusterfs/glusterfs.h             |   2 +-
+ libglusterfs/src/glusterfs/libglusterfs-messages.h |   3 +-
+ libglusterfs/src/graph.c                           | 154 +--------------------
+ rpc/xdr/src/glusterd1-xdr.x                        |   1 -
+ xlators/mgmt/glusterd/src/glusterd-handler.c       |   2 -
+ xlators/mgmt/glusterd/src/glusterd-handshake.c     |  42 +-----
+ xlators/mgmt/glusterd/src/glusterd-op-sm.c         |   4 -
+ .../mgmt/glusterd/src/glusterd-shd-svc-helper.c    |  25 ----
+ .../mgmt/glusterd/src/glusterd-shd-svc-helper.h    |   3 -
+ xlators/mgmt/glusterd/src/glusterd-shd-svc.c       |   8 +-
+ xlators/mgmt/glusterd/src/glusterd-svc-helper.c    |  57 ++++----
+ xlators/mgmt/glusterd/src/glusterd-syncop.c        |   2 -
+ xlators/mgmt/glusterd/src/glusterd-utils.c         |   6 +-
+ 15 files changed, 52 insertions(+), 325 deletions(-)
+
+diff --git a/glusterfsd/src/gf_attach.c b/glusterfsd/src/gf_attach.c
+index 1bff854..6293b9b 100644
+--- a/glusterfsd/src/gf_attach.c
++++ b/glusterfsd/src/gf_attach.c
+@@ -65,8 +65,6 @@ send_brick_req(xlator_t *this, struct rpc_clnt *rpc, char *path, int op)
+     brick_req.name = path;
+     brick_req.input.input_val = NULL;
+     brick_req.input.input_len = 0;
+-    brick_req.dict.dict_val = NULL;
+-    brick_req.dict.dict_len = 0;
+ 
+     req_size = xdr_sizeof((xdrproc_t)xdr_gd1_mgmt_brick_op_req, req);
+     iobuf = iobuf_get2(rpc->ctx->iobuf_pool, req_size);
+diff --git a/glusterfsd/src/glusterfsd-mgmt.c b/glusterfsd/src/glusterfsd-mgmt.c
+index f930e0a..1d2cd1a 100644
+--- a/glusterfsd/src/glusterfsd-mgmt.c
++++ b/glusterfsd/src/glusterfsd-mgmt.c
+@@ -50,16 +50,13 @@ int
+ emancipate(glusterfs_ctx_t *ctx, int ret);
+ int
+ glusterfs_process_svc_attach_volfp(glusterfs_ctx_t *ctx, FILE *fp,
+-                                   char *volfile_id, char *checksum,
+-                                   dict_t *dict);
++                                   char *volfile_id, char *checksum);
+ int
+ glusterfs_mux_volfile_reconfigure(FILE *newvolfile_fp, glusterfs_ctx_t *ctx,
+-                                  gf_volfile_t *volfile_obj, char *checksum,
+-                                  dict_t *dict);
++                                  gf_volfile_t *volfile_obj, char *checksum);
+ int
+ glusterfs_process_svc_attach_volfp(glusterfs_ctx_t *ctx, FILE *fp,
+-                                   char *volfile_id, char *checksum,
+-                                   dict_t *dict);
++                                   char *volfile_id, char *checksum);
+ int
+ glusterfs_process_svc_detach(glusterfs_ctx_t *ctx, gf_volfile_t *volfile_obj);
+ 
+@@ -78,8 +75,7 @@ mgmt_cbk_spec(struct rpc_clnt *rpc, void *mydata, void *data)
+ }
+ 
+ int
+-mgmt_process_volfile(const char *volfile, ssize_t size, char *volfile_id,
+-                     dict_t *dict)
++mgmt_process_volfile(const char *volfile, ssize_t size, char *volfile_id)
+ {
+     glusterfs_ctx_t *ctx = NULL;
+     int ret = 0;
+@@ -149,11 +145,11 @@ mgmt_process_volfile(const char *volfile, ssize_t size, char *volfile_id,
+              * the volfile
+              */
+             ret = glusterfs_process_svc_attach_volfp(ctx, tmpfp, volfile_id,
+-                                                     sha256_hash, dict);
++                                                     sha256_hash);
+             goto unlock;
+         }
+         ret = glusterfs_mux_volfile_reconfigure(tmpfp, ctx, volfile_obj,
+-                                                sha256_hash, dict);
++                                                sha256_hash);
+         if (ret < 0) {
+             gf_msg_debug("glusterfsd-mgmt", EINVAL, "Reconfigure failed !!");
+         }
+@@ -391,8 +387,6 @@ err:
+         UNLOCK(&ctx->volfile_lock);
+     if (xlator_req.input.input_val)
+         free(xlator_req.input.input_val);
+-    if (xlator_req.dict.dict_val)
+-        free(xlator_req.dict.dict_val);
+     free(xlator_req.name);
+     xlator_req.name = NULL;
+     return 0;
+@@ -567,8 +561,6 @@ out:
+ 
+     free(xlator_req.name);
+     free(xlator_req.input.input_val);
+-    if (xlator_req.dict.dict_val)
+-        free(xlator_req.dict.dict_val);
+     if (output)
+         dict_unref(output);
+     if (dict)
+@@ -990,8 +982,6 @@ out:
+     if (input)
+         dict_unref(input);
+     free(xlator_req.input.input_val); /*malloced by xdr*/
+-    if (xlator_req.dict.dict_val)
+-        free(xlator_req.dict.dict_val);
+     if (output)
+         dict_unref(output);
+     free(xlator_req.name);
+@@ -1072,8 +1062,6 @@ glusterfs_handle_attach(rpcsvc_request_t *req)
+     out:
+         UNLOCK(&ctx->volfile_lock);
+     }
+-    if (xlator_req.dict.dict_val)
+-        free(xlator_req.dict.dict_val);
+     free(xlator_req.input.input_val);
+     free(xlator_req.name);
+ 
+@@ -1089,7 +1077,6 @@ glusterfs_handle_svc_attach(rpcsvc_request_t *req)
+     };
+     xlator_t *this = NULL;
+     glusterfs_ctx_t *ctx = NULL;
+-    dict_t *dict = NULL;
+ 
+     GF_ASSERT(req);
+     this = THIS;
+@@ -1104,41 +1091,20 @@ glusterfs_handle_svc_attach(rpcsvc_request_t *req)
+         req->rpc_err = GARBAGE_ARGS;
+         goto out;
+     }
+-
+     gf_msg(THIS->name, GF_LOG_INFO, 0, glusterfsd_msg_41,
+            "received attach "
+            "request for volfile-id=%s",
+            xlator_req.name);
+-
+-    dict = dict_new();
+-    if (!dict) {
+-        ret = -1;
+-        errno = ENOMEM;
+-        goto out;
+-    }
+-
+-    ret = dict_unserialize(xlator_req.dict.dict_val, xlator_req.dict.dict_len,
+-                           &dict);
+-    if (ret) {
+-        gf_msg(this->name, GF_LOG_WARNING, EINVAL, glusterfsd_msg_42,
+-               "failed to unserialize xdata to dictionary");
+-        goto out;
+-    }
+-    dict->extra_stdfree = xlator_req.dict.dict_val;
+-
+     ret = 0;
+ 
+     if (ctx->active) {
+         ret = mgmt_process_volfile(xlator_req.input.input_val,
+-                                   xlator_req.input.input_len, xlator_req.name,
+-                                   dict);
++                                   xlator_req.input.input_len, xlator_req.name);
+     } else {
+         gf_msg(this->name, GF_LOG_WARNING, EINVAL, glusterfsd_msg_42,
+                "got attach for %s but no active graph", xlator_req.name);
+     }
+ out:
+-    if (dict)
+-        dict_unref(dict);
+     if (xlator_req.input.input_val)
+         free(xlator_req.input.input_val);
+     if (xlator_req.name)
+@@ -1275,8 +1241,6 @@ out:
+     GF_FREE(filepath);
+     if (xlator_req.input.input_val)
+         free(xlator_req.input.input_val);
+-    if (xlator_req.dict.dict_val)
+-        free(xlator_req.dict.dict_val);
+ 
+     return ret;
+ }
+@@ -1349,8 +1313,6 @@ out:
+     if (dict)
+         dict_unref(dict);
+     free(xlator_req.input.input_val);  // malloced by xdr
+-    if (xlator_req.dict.dict_val)
+-        free(xlator_req.dict.dict_val);
+     if (output)
+         dict_unref(output);
+     free(xlator_req.name);  // malloced by xdr
+@@ -1499,8 +1461,6 @@ out:
+     if (output)
+         dict_unref(output);
+     free(brick_req.input.input_val);
+-    if (brick_req.dict.dict_val)
+-        free(brick_req.dict.dict_val);
+     free(brick_req.name);
+     GF_FREE(xname);
+     GF_FREE(msg);
+@@ -1694,8 +1654,6 @@ out:
+     if (dict)
+         dict_unref(dict);
+     free(node_req.input.input_val);
+-    if (node_req.dict.dict_val)
+-        free(node_req.dict.dict_val);
+     GF_FREE(msg);
+     GF_FREE(rsp.output.output_val);
+     GF_FREE(node_name);
+@@ -1799,8 +1757,6 @@ glusterfs_handle_nfs_profile(rpcsvc_request_t *req)
+ 
+ out:
+     free(nfs_req.input.input_val);
+-    if (nfs_req.dict.dict_val)
+-        free(nfs_req.dict.dict_val);
+     if (dict)
+         dict_unref(dict);
+     if (output)
+@@ -1879,8 +1835,6 @@ out:
+     if (dict)
+         dict_unref(dict);
+     free(xlator_req.input.input_val);  // malloced by xdr
+-    if (xlator_req.dict.dict_val)
+-        free(xlator_req.dict.dict_val);
+     if (output)
+         dict_unref(output);
+     free(xlator_req.name);  // malloced by xdr
+@@ -2009,8 +1963,7 @@ out:
+     if (dict)
+         dict_unref(dict);
+     free(brick_req.input.input_val);
+-    if (brick_req.dict.dict_val)
+-        free(brick_req.dict.dict_val);
++
+     gf_log(THIS->name, GF_LOG_DEBUG, "Returning %d", ret);
+     return ret;
+ }
+@@ -2260,8 +2213,7 @@ volfile:
+     size = rsp.op_ret;
+     volfile_id = frame->local;
+     if (mgmt_is_multiplexed_daemon(ctx->cmd_args.process_name)) {
+-        ret = mgmt_process_volfile((const char *)rsp.spec, size, volfile_id,
+-                                   dict);
++        ret = mgmt_process_volfile((const char *)rsp.spec, size, volfile_id);
+         goto post_graph_mgmt;
+     }
+ 
+diff --git a/libglusterfs/src/glusterfs/glusterfs.h b/libglusterfs/src/glusterfs/glusterfs.h
+index b6327b8..9ec2365 100644
+--- a/libglusterfs/src/glusterfs/glusterfs.h
++++ b/libglusterfs/src/glusterfs/glusterfs.h
+@@ -744,7 +744,7 @@ typedef struct {
+     char vol_id[NAME_MAX + 1];
+     struct list_head volfile_list;
+     glusterfs_graph_t *graph;
+-    FILE *pidfp;
++
+ } gf_volfile_t;
+ 
+ glusterfs_ctx_t *
+diff --git a/libglusterfs/src/glusterfs/libglusterfs-messages.h b/libglusterfs/src/glusterfs/libglusterfs-messages.h
+index 7e0eebb..ea2aa60 100644
+--- a/libglusterfs/src/glusterfs/libglusterfs-messages.h
++++ b/libglusterfs/src/glusterfs/libglusterfs-messages.h
+@@ -111,7 +111,6 @@ GLFS_MSGID(
+     LG_MSG_PTHREAD_NAMING_FAILED, LG_MSG_SYSCALL_RETURNS_WRONG,
+     LG_MSG_XXH64_TO_GFID_FAILED, LG_MSG_ASYNC_WARNING, LG_MSG_ASYNC_FAILURE,
+     LG_MSG_GRAPH_CLEANUP_FAILED, LG_MSG_GRAPH_SETUP_FAILED,
+-    LG_MSG_GRAPH_DETACH_STARTED, LG_MSG_GRAPH_ATTACH_FAILED,
+-    LG_MSG_GRAPH_ATTACH_PID_FILE_UPDATED);
++    LG_MSG_GRAPH_DETACH_STARTED, LG_MSG_GRAPH_ATTACH_FAILED);
+ 
+ #endif /* !_LG_MESSAGES_H_ */
+diff --git a/libglusterfs/src/graph.c b/libglusterfs/src/graph.c
+index 05f76bf..172dc61 100644
+--- a/libglusterfs/src/graph.c
++++ b/libglusterfs/src/graph.c
+@@ -1467,21 +1467,6 @@ out:
+ }
+ 
+ int
+-glusterfs_svc_mux_pidfile_cleanup(gf_volfile_t *volfile_obj)
+-{
+-    if (!volfile_obj || !volfile_obj->pidfp)
+-        return 0;
+-
+-    gf_msg_trace("glusterfsd", 0, "pidfile %s cleanup", volfile_obj->vol_id);
+-
+-    lockf(fileno(volfile_obj->pidfp), F_ULOCK, 0);
+-    fclose(volfile_obj->pidfp);
+-    volfile_obj->pidfp = NULL;
+-
+-    return 0;
+-}
+-
+-int
+ glusterfs_process_svc_detach(glusterfs_ctx_t *ctx, gf_volfile_t *volfile_obj)
+ {
+     xlator_t *last_xl = NULL;
+@@ -1517,7 +1502,6 @@ glusterfs_process_svc_detach(glusterfs_ctx_t *ctx, gf_volfile_t *volfile_obj)
+ 
+         list_del_init(&volfile_obj->volfile_list);
+         glusterfs_mux_xlator_unlink(parent_graph->top, xl);
+-        glusterfs_svc_mux_pidfile_cleanup(volfile_obj);
+         parent_graph->last_xl = glusterfs_get_last_xlator(parent_graph);
+         parent_graph->xl_count -= graph->xl_count;
+         parent_graph->leaf_count -= graph->leaf_count;
+@@ -1547,126 +1531,8 @@ out:
+ }
+ 
+ int
+-glusterfs_svc_mux_pidfile_setup(gf_volfile_t *volfile_obj, const char *pid_file)
+-{
+-    int ret = -1;
+-    FILE *pidfp = NULL;
+-
+-    if (!pid_file || !volfile_obj)
+-        goto out;
+-
+-    if (volfile_obj->pidfp) {
+-        ret = 0;
+-        goto out;
+-    }
+-    pidfp = fopen(pid_file, "a+");
+-    if (!pidfp) {
+-        goto out;
+-    }
+-    volfile_obj->pidfp = pidfp;
+-
+-    ret = lockf(fileno(pidfp), F_TLOCK, 0);
+-    if (ret) {
+-        ret = 0;
+-        goto out;
+-    }
+-out:
+-    return ret;
+-}
+-
+-int
+-glusterfs_svc_mux_pidfile_update(gf_volfile_t *volfile_obj,
+-                                 const char *pid_file, pid_t pid)
+-{
+-    int ret = 0;
+-    FILE *pidfp = NULL;
+-    int old_pid;
+-
+-    if (!volfile_obj->pidfp) {
+-        ret = glusterfs_svc_mux_pidfile_setup(volfile_obj, pid_file);
+-        if (ret == -1)
+-            goto out;
+-    }
+-    pidfp = volfile_obj->pidfp;
+-    ret = fscanf(pidfp, "%d", &old_pid);
+-    if (ret <= 0) {
+-        goto update;
+-    }
+-    if (old_pid == pid) {
+-        ret = 0;
+-        goto out;
+-    } else {
+-        gf_msg("mgmt", GF_LOG_INFO, 0, LG_MSG_GRAPH_ATTACH_PID_FILE_UPDATED,
+-               "Old pid=%d found in pidfile %s. Cleaning the old pid and "
+-               "Updating new pid=%d",
+-               old_pid, pid_file, pid);
+-    }
+-update:
+-    ret = sys_ftruncate(fileno(pidfp), 0);
+-    if (ret) {
+-        gf_msg("glusterfsd", GF_LOG_ERROR, errno,
+-               LG_MSG_GRAPH_ATTACH_PID_FILE_UPDATED,
+-               "pidfile %s truncation failed", pid_file);
+-        goto out;
+-    }
+-
+-    ret = fprintf(pidfp, "%d\n", pid);
+-    if (ret <= 0) {
+-        gf_msg("glusterfsd", GF_LOG_ERROR, errno,
+-               LG_MSG_GRAPH_ATTACH_PID_FILE_UPDATED, "pidfile %s write failed",
+-               pid_file);
+-        goto out;
+-    }
+-
+-    ret = fflush(pidfp);
+-    if (ret) {
+-        gf_msg("glusterfsd", GF_LOG_ERROR, errno,
+-               LG_MSG_GRAPH_ATTACH_PID_FILE_UPDATED, "pidfile %s write failed",
+-               pid_file);
+-        goto out;
+-    }
+-out:
+-    return ret;
+-}
+-
+-int
+-glusterfs_update_mux_pid(dict_t *dict, gf_volfile_t *volfile_obj)
+-{
+-    char *file = NULL;
+-    int ret = -1;
+-
+-    GF_VALIDATE_OR_GOTO("graph", dict, out);
+-    GF_VALIDATE_OR_GOTO("graph", volfile_obj, out);
+-
+-    ret = dict_get_str(dict, "pidfile", &file);
+-    if (ret < 0) {
+-        gf_msg("mgmt", GF_LOG_ERROR, EINVAL, LG_MSG_GRAPH_SETUP_FAILED,
+-               "Failed to get pidfile from dict for  volfile_id=%s",
+-               volfile_obj->vol_id);
+-    }
+-
+-    ret = glusterfs_svc_mux_pidfile_update(volfile_obj, file, getpid());
+-    if (ret < 0) {
+-        ret = -1;
+-        gf_msg("mgmt", GF_LOG_ERROR, EINVAL, LG_MSG_GRAPH_SETUP_FAILED,
+-               "Failed to update "
+-               "the pidfile for volfile_id=%s",
+-               volfile_obj->vol_id);
+-
+-        goto out;
+-    }
+-
+-    if (ret == 1)
+-        gf_msg("mgmt", GF_LOG_INFO, 0, LG_MSG_GRAPH_ATTACH_PID_FILE_UPDATED,
+-               "PID %d updated in pidfile=%s", getpid(), file);
+-    ret = 0;
+-out:
+-    return ret;
+-}
+-int
+ glusterfs_process_svc_attach_volfp(glusterfs_ctx_t *ctx, FILE *fp,
+-                                   char *volfile_id, char *checksum,
+-                                   dict_t *dict)
++                                   char *volfile_id, char *checksum)
+ {
+     glusterfs_graph_t *graph = NULL;
+     glusterfs_graph_t *parent_graph = NULL;
+@@ -1749,25 +1615,18 @@ glusterfs_process_svc_attach_volfp(glusterfs_ctx_t *ctx, FILE *fp,
+         ret = -1;
+         goto out;
+     }
+-    volfile_obj->pidfp = NULL;
+-    snprintf(volfile_obj->vol_id, sizeof(volfile_obj->vol_id), "%s",
+-             volfile_id);
+-
+-    if (strcmp(ctx->cmd_args.process_name, "glustershd") == 0) {
+-        ret = glusterfs_update_mux_pid(dict, volfile_obj);
+-        if (ret == -1) {
+-            goto out;
+-        }
+-    }
+ 
+     graph->used = 1;
+     parent_graph->id++;
+     list_add(&graph->list, &ctx->graphs);
+     INIT_LIST_HEAD(&volfile_obj->volfile_list);
+     volfile_obj->graph = graph;
++    snprintf(volfile_obj->vol_id, sizeof(volfile_obj->vol_id), "%s",
++             volfile_id);
+     memcpy(volfile_obj->volfile_checksum, checksum,
+            sizeof(volfile_obj->volfile_checksum));
+     list_add_tail(&volfile_obj->volfile_list, &ctx->volfile_list);
++
+     gf_log_dump_graph(fp, graph);
+     graph = NULL;
+ 
+@@ -1795,8 +1654,7 @@ out:
+ 
+ int
+ glusterfs_mux_volfile_reconfigure(FILE *newvolfile_fp, glusterfs_ctx_t *ctx,
+-                                  gf_volfile_t *volfile_obj, char *checksum,
+-                                  dict_t *dict)
++                                  gf_volfile_t *volfile_obj, char *checksum)
+ {
+     glusterfs_graph_t *oldvolfile_graph = NULL;
+     glusterfs_graph_t *newvolfile_graph = NULL;
+@@ -1845,7 +1703,7 @@ glusterfs_mux_volfile_reconfigure(FILE *newvolfile_fp, glusterfs_ctx_t *ctx,
+         }
+         volfile_obj = NULL;
+         ret = glusterfs_process_svc_attach_volfp(ctx, newvolfile_fp, vol_id,
+-                                                 checksum, dict);
++                                                 checksum);
+         goto out;
+     }
+ 
+diff --git a/rpc/xdr/src/glusterd1-xdr.x b/rpc/xdr/src/glusterd1-xdr.x
+index 02ebec2..9b36d34 100644
+--- a/rpc/xdr/src/glusterd1-xdr.x
++++ b/rpc/xdr/src/glusterd1-xdr.x
+@@ -132,7 +132,6 @@ struct gd1_mgmt_brick_op_req {
+         string  name<>;
+         int     op;
+         opaque  input<>;
+-        opaque  dict<>;
+ } ;
+ 
+ struct gd1_mgmt_brick_op_rsp {
+diff --git a/xlators/mgmt/glusterd/src/glusterd-handler.c b/xlators/mgmt/glusterd/src/glusterd-handler.c
+index 94e1be5..ac788a0 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-handler.c
++++ b/xlators/mgmt/glusterd/src/glusterd-handler.c
+@@ -5423,8 +5423,6 @@ glusterd_print_client_details(FILE *fp, dict_t *dict,
+ 
+     brick_req->op = GLUSTERD_BRICK_STATUS;
+     brick_req->name = "";
+-    brick_req->dict.dict_val = NULL;
+-    brick_req->dict.dict_len = 0;
+ 
+     ret = dict_set_strn(dict, "brick-name", SLEN("brick-name"),
+                         brickinfo->path);
+diff --git a/xlators/mgmt/glusterd/src/glusterd-handshake.c b/xlators/mgmt/glusterd/src/glusterd-handshake.c
+index 86dec82..1ba58c3 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-handshake.c
++++ b/xlators/mgmt/glusterd/src/glusterd-handshake.c
+@@ -203,7 +203,7 @@ out:
+ 
+ size_t
+ build_volfile_path(char *volume_id, char *path, size_t path_len,
+-                   char *trusted_str, dict_t *dict)
++                   char *trusted_str)
+ {
+     struct stat stbuf = {
+         0,
+@@ -340,19 +340,11 @@ build_volfile_path(char *volume_id, char *path, size_t path_len,
+ 
+         ret = glusterd_volinfo_find(volid_ptr, &volinfo);
+         if (ret == -1) {
+-            gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_VOLINFO_GET_FAIL,
+-                   "Couldn't find volinfo for volid=%s", volid_ptr);
++            gf_log(this->name, GF_LOG_ERROR, "Couldn't find volinfo");
+             goto out;
+         }
+ 
+         glusterd_svc_build_shd_volfile_path(volinfo, path, path_len);
+-
+-        ret = glusterd_svc_set_shd_pidfile(volinfo, dict);
+-        if (ret == -1) {
+-            gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_DICT_SET_FAILED,
+-                   "Couldn't set pidfile in dict for volid=%s", volid_ptr);
+-            goto out;
+-        }
+         ret = 0;
+         goto out;
+     }
+@@ -927,7 +919,6 @@ __server_getspec(rpcsvc_request_t *req)
+     char addrstr[RPCSVC_PEER_STRLEN] = {0};
+     peer_info_t *peerinfo = NULL;
+     xlator_t *this = NULL;
+-    dict_t *dict = NULL;
+ 
+     this = THIS;
+     GF_ASSERT(this);
+@@ -980,12 +971,6 @@ __server_getspec(rpcsvc_request_t *req)
+         goto fail;
+     }
+ 
+-    dict = dict_new();
+-    if (!dict) {
+-        ret = -ENOMEM;
+-        goto fail;
+-    }
+-
+     trans = req->trans;
+     /* addrstr will be empty for cli socket connections */
+     ret = rpcsvc_transport_peername(trans, (char *)&addrstr, sizeof(addrstr));
+@@ -1004,26 +989,12 @@ __server_getspec(rpcsvc_request_t *req)
+      */
+     if (strlen(addrstr) == 0 || gf_is_local_addr(addrstr)) {
+         ret = build_volfile_path(volume, filename, sizeof(filename),
+-                                 TRUSTED_PREFIX, dict);
++                                 TRUSTED_PREFIX);
+     } else {
+-        ret = build_volfile_path(volume, filename, sizeof(filename), NULL,
+-                                 dict);
++        ret = build_volfile_path(volume, filename, sizeof(filename), NULL);
+     }
+ 
+     if (ret == 0) {
+-        if (dict->count > 0) {
+-            ret = dict_allocate_and_serialize(dict, &rsp.xdata.xdata_val,
+-                                              &rsp.xdata.xdata_len);
+-            if (ret) {
+-                gf_msg(this->name, GF_LOG_ERROR, 0,
+-                       GD_MSG_DICT_SERL_LENGTH_GET_FAIL,
+-                       "Failed to serialize dict "
+-                       "to request buffer");
+-                goto fail;
+-            }
+-            dict->extra_free = rsp.xdata.xdata_val;
+-        }
+-
+         /* to allocate the proper buffer to hold the file data */
+         ret = sys_stat(filename, &stbuf);
+         if (ret < 0) {
+@@ -1065,6 +1036,7 @@ __server_getspec(rpcsvc_request_t *req)
+             goto fail;
+         }
+     }
++
+     /* convert to XDR */
+ fail:
+     if (spec_fd >= 0)
+@@ -1084,10 +1056,6 @@ fail:
+                           (xdrproc_t)xdr_gf_getspec_rsp);
+     free(args.key);  // malloced by xdr
+     free(rsp.spec);
+-
+-    if (dict)
+-        dict_unref(dict);
+-
+     if (args.xdata.xdata_val)
+         free(args.xdata.xdata_val);
+ 
+diff --git a/xlators/mgmt/glusterd/src/glusterd-op-sm.c b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+index 454877b..9ea695e 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-op-sm.c
++++ b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+@@ -655,8 +655,6 @@ glusterd_brick_op_build_payload(glusterd_op_t op,
+             break;
+     }
+ 
+-    brick_req->dict.dict_len = 0;
+-    brick_req->dict.dict_val = NULL;
+     ret = dict_allocate_and_serialize(dict, &brick_req->input.input_val,
+                                       &brick_req->input.input_len);
+     if (ret)
+@@ -725,8 +723,6 @@ glusterd_node_op_build_payload(glusterd_op_t op, gd1_mgmt_brick_op_req **req,
+             goto out;
+     }
+ 
+-    brick_req->dict.dict_len = 0;
+-    brick_req->dict.dict_val = NULL;
+     ret = dict_allocate_and_serialize(dict, &brick_req->input.input_val,
+                                       &brick_req->input.input_len);
+ 
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.c b/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.c
+index 5661e39..57ceda9 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.c
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.c
+@@ -126,28 +126,3 @@ glusterd_shd_svcproc_cleanup(glusterd_shdsvc_t *shd)
+ out:
+     return;
+ }
+-
+-int
+-glusterd_svc_set_shd_pidfile(glusterd_volinfo_t *volinfo, dict_t *dict)
+-{
+-    int ret = -1;
+-    glusterd_svc_t *svc = NULL;
+-    xlator_t *this = NULL;
+-
+-    this = THIS;
+-    GF_VALIDATE_OR_GOTO("glusterd", this, out);
+-    GF_VALIDATE_OR_GOTO(this->name, volinfo, out);
+-    GF_VALIDATE_OR_GOTO(this->name, dict, out);
+-
+-    svc = &(volinfo->shd.svc);
+-
+-    ret = dict_set_dynstr_with_alloc(dict, "pidfile", svc->proc.pidfile);
+-    if (ret) {
+-        gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_DICT_SET_FAILED,
+-               "Failed to set pidfile %s in dict", svc->proc.pidfile);
+-        goto out;
+-    }
+-    ret = 0;
+-out:
+-    return ret;
+-}
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.h b/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.h
+index 1f0984b..59466ec 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.h
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc-helper.h
+@@ -36,7 +36,4 @@ glusterd_recover_shd_attach_failure(glusterd_volinfo_t *volinfo,
+ int
+ glusterd_shdsvc_create_volfile(glusterd_volinfo_t *volinfo);
+ 
+-int
+-glusterd_svc_set_shd_pidfile(glusterd_volinfo_t *volinfo, dict_t *dict);
+-
+ #endif
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+index 590169f..8ad90a9 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+@@ -258,20 +258,14 @@ glusterd_shdsvc_manager(glusterd_svc_t *svc, void *data, int flags)
+     gf_boolean_t shd_restart = _gf_false;
+ 
+     conf = THIS->private;
++    volinfo = data;
+     GF_VALIDATE_OR_GOTO("glusterd", conf, out);
+     GF_VALIDATE_OR_GOTO("glusterd", svc, out);
+-    volinfo = data;
+     GF_VALIDATE_OR_GOTO("glusterd", volinfo, out);
+ 
+     if (volinfo)
+         glusterd_volinfo_ref(volinfo);
+ 
+-    if (volinfo->is_snap_volume) {
+-        /* healing of a snap volume is not supported yet*/
+-        ret = 0;
+-        goto out;
+-    }
+-
+     while (conf->restart_shd) {
+         synclock_unlock(&conf->big_lock);
+         sleep(2);
+diff --git a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+index e106111..400826f 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
++++ b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+@@ -519,7 +519,7 @@ glusterd_shd_svc_mux_init(glusterd_volinfo_t *volinfo, glusterd_svc_t *svc)
+                 /* Take first entry from the process */
+                 parent_svc = cds_list_entry(mux_proc->svcs.next, glusterd_svc_t,
+                                             mux_svc);
+-                glusterd_copy_file(parent_svc->proc.pidfile, svc->proc.pidfile);
++                sys_link(parent_svc->proc.pidfile, svc->proc.pidfile);
+                 mux_conn = &parent_svc->conn;
+                 if (volinfo)
+                     volinfo->shd.attached = _gf_true;
+@@ -623,9 +623,12 @@ glusterd_svc_attach_cbk(struct rpc_req *req, struct iovec *iov, int count,
+     glusterd_volinfo_t *volinfo = NULL;
+     glusterd_shdsvc_t *shd = NULL;
+     glusterd_svc_t *svc = frame->cookie;
++    glusterd_svc_t *parent_svc = NULL;
++    glusterd_svc_proc_t *mux_proc = NULL;
+     glusterd_conf_t *conf = NULL;
+     int *flag = (int *)frame->local;
+     xlator_t *this = THIS;
++    int pid = -1;
+     int ret = -1;
+     gf_getspec_rsp rsp = {
+         0,
+@@ -676,7 +679,27 @@ glusterd_svc_attach_cbk(struct rpc_req *req, struct iovec *iov, int count,
+     }
+ 
+     if (rsp.op_ret == 0) {
+-        svc->online = _gf_true;
++        pthread_mutex_lock(&conf->attach_lock);
++        {
++            if (!strcmp(svc->name, "glustershd")) {
++                mux_proc = svc->svc_proc;
++                if (mux_proc &&
++                    !gf_is_service_running(svc->proc.pidfile, &pid)) {
++                    /*
++                     * When svc's are restarting, there is a chance that the
++                     * attached svc might not have updated it's pid. Because
++                     * it was at connection stage. So in that case, we need
++                     * to retry the pid file copy.
++                     */
++                    parent_svc = cds_list_entry(mux_proc->svcs.next,
++                                                glusterd_svc_t, mux_svc);
++                    if (parent_svc)
++                        sys_link(parent_svc->proc.pidfile, svc->proc.pidfile);
++                }
++            }
++            svc->online = _gf_true;
++        }
++        pthread_mutex_unlock(&conf->attach_lock);
+         gf_msg(this->name, GF_LOG_INFO, 0, GD_MSG_SVC_ATTACH_FAIL,
+                "svc %s of volume %s attached successfully to pid %d", svc->name,
+                volinfo->volname, glusterd_proc_get_pid(&svc->proc));
+@@ -703,7 +726,7 @@ out:
+ 
+ extern size_t
+ build_volfile_path(char *volume_id, char *path, size_t path_len,
+-                   char *trusted_str, dict_t *dict);
++                   char *trusted_str);
+ 
+ int
+ __glusterd_send_svc_configure_req(glusterd_svc_t *svc, int flags,
+@@ -728,7 +751,6 @@ __glusterd_send_svc_configure_req(glusterd_svc_t *svc, int flags,
+     ssize_t req_size = 0;
+     call_frame_t *frame = NULL;
+     gd1_mgmt_brick_op_req brick_req;
+-    dict_t *dict = NULL;
+     void *req = &brick_req;
+     void *errlbl = &&err;
+     struct rpc_clnt_connection *conn;
+@@ -754,8 +776,6 @@ __glusterd_send_svc_configure_req(glusterd_svc_t *svc, int flags,
+     brick_req.name = volfile_id;
+     brick_req.input.input_val = NULL;
+     brick_req.input.input_len = 0;
+-    brick_req.dict.dict_val = NULL;
+-    brick_req.dict.dict_len = 0;
+ 
+     frame = create_frame(this, this->ctx->pool);
+     if (!frame) {
+@@ -763,13 +783,7 @@ __glusterd_send_svc_configure_req(glusterd_svc_t *svc, int flags,
+     }
+ 
+     if (op == GLUSTERD_SVC_ATTACH) {
+-        dict = dict_new();
+-        if (!dict) {
+-            ret = -ENOMEM;
+-            goto *errlbl;
+-        }
+-
+-        (void)build_volfile_path(volfile_id, path, sizeof(path), NULL, dict);
++        (void)build_volfile_path(volfile_id, path, sizeof(path), NULL);
+ 
+         ret = sys_stat(path, &stbuf);
+         if (ret < 0) {
+@@ -804,18 +818,6 @@ __glusterd_send_svc_configure_req(glusterd_svc_t *svc, int flags,
+             ret = -EIO;
+             goto *errlbl;
+         }
+-        if (dict->count > 0) {
+-            ret = dict_allocate_and_serialize(dict, &brick_req.dict.dict_val,
+-                                              &brick_req.dict.dict_len);
+-            if (ret) {
+-                gf_msg(this->name, GF_LOG_ERROR, 0,
+-                       GD_MSG_DICT_SERL_LENGTH_GET_FAIL,
+-                       "Failed to serialize dict "
+-                       "to request buffer");
+-                goto *errlbl;
+-            }
+-            dict->extra_free = brick_req.dict.dict_val;
+-        }
+ 
+         frame->cookie = svc;
+         frame->local = GF_CALLOC(1, sizeof(int), gf_gld_mt_int);
+@@ -860,8 +862,6 @@ __glusterd_send_svc_configure_req(glusterd_svc_t *svc, int flags,
+     GF_ATOMIC_INC(conf->blockers);
+     ret = rpc_clnt_submit(rpc, &gd_brick_prog, op, cbkfn, &iov, 1, NULL, 0,
+                           iobref, frame, NULL, 0, NULL, 0, NULL);
+-    if (dict)
+-        dict_unref(dict);
+     GF_FREE(volfile_content);
+     if (spec_fd >= 0)
+         sys_close(spec_fd);
+@@ -874,9 +874,6 @@ maybe_free_iobuf:
+         iobuf_unref(iobuf);
+     }
+ err:
+-    if (dict)
+-        dict_unref(dict);
+-
+     GF_FREE(volfile_content);
+     if (spec_fd >= 0)
+         sys_close(spec_fd);
+diff --git a/xlators/mgmt/glusterd/src/glusterd-syncop.c b/xlators/mgmt/glusterd/src/glusterd-syncop.c
+index a8098df..618d8bc 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-syncop.c
++++ b/xlators/mgmt/glusterd/src/glusterd-syncop.c
+@@ -143,8 +143,6 @@ gd_brick_op_req_free(gd1_mgmt_brick_op_req *req)
+     if (!req)
+         return;
+ 
+-    if (req->dict.dict_val)
+-        GF_FREE(req->dict.dict_val);
+     GF_FREE(req->input.input_val);
+     GF_FREE(req);
+ }
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index 3bdfd49..4525ec7 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -5914,8 +5914,6 @@ send_attach_req(xlator_t *this, struct rpc_clnt *rpc, char *path,
+     brick_req.name = path;
+     brick_req.input.input_val = NULL;
+     brick_req.input.input_len = 0;
+-    brick_req.dict.dict_val = NULL;
+-    brick_req.dict.dict_len = 0;
+ 
+     req_size = xdr_sizeof((xdrproc_t)xdr_gd1_mgmt_brick_op_req, req);
+     iobuf = iobuf_get2(rpc->ctx->iobuf_pool, req_size);
+@@ -5979,7 +5977,7 @@ err:
+ 
+ extern size_t
+ build_volfile_path(char *volume_id, char *path, size_t path_len,
+-                   char *trusted_str, dict_t *dict);
++                   char *trusted_str);
+ 
+ static int
+ attach_brick(xlator_t *this, glusterd_brickinfo_t *brickinfo,
+@@ -6024,7 +6022,7 @@ attach_brick(xlator_t *this, glusterd_brickinfo_t *brickinfo,
+         goto out;
+     }
+ 
+-    (void)build_volfile_path(full_id, path, sizeof(path), NULL, NULL);
++    (void)build_volfile_path(full_id, path, sizeof(path), NULL);
+ 
+     for (tries = 15; tries > 0; --tries) {
+         rpc = rpc_clnt_ref(other_brick->rpc);
+-- 
+1.8.3.1
+

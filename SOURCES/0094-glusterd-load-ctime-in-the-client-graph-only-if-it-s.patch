@@ -1,0 +1,45 @@
+From dab37dc78d21762ac3379ad505f8fc4ec996d0f7 Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Tue, 9 Apr 2019 14:58:29 +0530
+Subject: [PATCH 094/124] glusterd: load ctime in the client graph only if it's
+ not turned off
+
+Considering ctime is a client side feature, we can't blindly load ctime
+xlator into the client graph if it's explicitly turned off, that'd
+result into backward compatibility issue where an old client can't mount
+a volume configured on a server which is having ctime feature.
+
+> Upstream patch : https://review.gluster.org/#/c/glusterfs/+/22536/
+>Fixes: bz#1697907
+>Change-Id: I6ae7b96d056073aa6746de9a449cf319786d45cc
+>Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+
+BUG: 1697820
+Change-Id: I6ae7b96d056073aa6746de9a449cf319786d45cc
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167815
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-by: Amar Tumballi Suryanarayan <amarts@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-volgen.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volgen.c b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+index ed24858..012f38e 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volgen.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+@@ -4358,7 +4358,8 @@ client_graph_builder(volgen_graph_t *graph, glusterd_volinfo_t *volinfo,
+         }
+     }
+ 
+-    if (conf->op_version >= GD_OP_VERSION_5_0) {
++    if (conf->op_version >= GD_OP_VERSION_5_0 &&
++        !dict_get_str_boolean(set_dict, "features.ctime", _gf_false)) {
+         xl = volgen_graph_add(graph, "features/utime", volname);
+         if (!xl) {
+             ret = -1;
+-- 
+1.8.3.1
+

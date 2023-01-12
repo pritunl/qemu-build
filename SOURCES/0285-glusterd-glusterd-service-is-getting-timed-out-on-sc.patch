@@ -1,0 +1,43 @@
+From 49cd9ef7487ba88796315b897823837a9cbd535e Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Wed, 28 Aug 2019 09:05:20 +0530
+Subject: [PATCH 285/297] glusterd: glusterd service is getting timed out on
+ scaled setup
+
+Problem: On a three node cluster with 2000 replica volumes systemctl is getting
+         timed out for glusted service.
+
+Solution: Configure TimeoutSec 300 to wait for glusterd startup.
+
+> Change-Id: Idb3f3f3e56e6216a0ebd754cbb9e8e37ce9e636d
+> Fixes: bz#1746228
+> Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+> (Cherry picked from commit c90dc63ec9eee0f43ba8e489876fdf8b8810bbdc)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/23316/)
+
+Change-Id: Idb3f3f3e56e6216a0ebd754cbb9e8e37ce9e636d
+BUG: 1746027
+Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/179806
+Tested-by: Mohit Agrawal <moagrawa@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/systemd/glusterd.service.in | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/extras/systemd/glusterd.service.in b/extras/systemd/glusterd.service.in
+index c33351c..f604160 100644
+--- a/extras/systemd/glusterd.service.in
++++ b/extras/systemd/glusterd.service.in
+@@ -13,6 +13,7 @@ Environment="LOG_LEVEL=INFO"
+ EnvironmentFile=-@sysconfdir@/sysconfig/glusterd
+ ExecStart=@prefix@/sbin/glusterd -p @localstatedir@/run/glusterd.pid  --log-level $LOG_LEVEL $GLUSTERD_OPTIONS
+ KillMode=process
++TimeoutSec=300
+ SuccessExitStatus=15
+ 
+ [Install]
+-- 
+1.8.3.1
+

@@ -1,0 +1,57 @@
+From 5a110946b41619577b365cdceddc4da551ff49f0 Mon Sep 17 00:00:00 2001
+From: kinsu <vpolakis@gmail.com>
+Date: Thu, 19 Sep 2019 08:34:32 +0000
+Subject: [PATCH 490/511] Segmentation fault occurs during truncate
+
+Problem:
+Segmentation fault occurs when bricks are nearly full 100% and in
+parallel truncate of a file is attempted (No space left on device).
+Prerequicite is that performance xlators are activated
+(read-ahead, write-behind etc)
+while stack unwind of the frames following an error responce
+from brick (No space left on device) frame->local includes a memory
+location that is not allocated via mem_get but via calloc.
+The destroyed frame is always ra_truncate_cbk winded from ra_ftruncate
+and the inode ptr is copied to the frame local in the wb_ftruncate.
+
+Fix:
+extra check is added for the pool ptr
+
+>Change-Id: Ic5d3bd0ab7011e40b2811c6dece063b256e4d9d1
+>Fixes: bz#1797882
+>Signed-off-by: kinsu <vpolakis@gmail.com>
+
+Upstream-patch: https://review.gluster.org/c/glusterfs/+/23445
+
+BUG: 1842449
+Change-Id: Ic5d3bd0ab7011e40b2811c6dece063b256e4d9d1
+Signed-off-by: nik-redhat <nladha@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/220540
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/mem-pool.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/libglusterfs/src/mem-pool.c b/libglusterfs/src/mem-pool.c
+index 73503e0..1390747 100644
+--- a/libglusterfs/src/mem-pool.c
++++ b/libglusterfs/src/mem-pool.c
+@@ -857,6 +857,14 @@ mem_put(void *ptr)
+         /* Not one of ours; don't touch it. */
+         return;
+     }
++
++    if (!hdr->pool_list) {
++        gf_msg_callingfn("mem-pool", GF_LOG_CRITICAL, EINVAL,
++                         LG_MSG_INVALID_ARG,
++                         "invalid argument hdr->pool_list NULL");
++        return;
++    }
++
+     pool_list = hdr->pool_list;
+     pt_pool = &pool_list->pools[hdr->power_of_two - POOL_SMALLEST];
+ 
+-- 
+1.8.3.1
+

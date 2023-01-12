@@ -1,0 +1,47 @@
+From aa73240892a7072be68772370fd95173e6e77d10 Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Mon, 21 Mar 2016 17:07:00 +0530
+Subject: [PATCH 04/52] glusterd/spec: fixing autogen issue
+
+Backport of https://code.engineering.redhat.com/gerrit/#/c/59463/
+
+Because of the incorrect build section, autogen.sh wasn't re-run during the rpm
+build process. The `extras/Makefile.in` was not regenerated with the changes
+made to `extras/Makefile.am` in the firewalld patch. This meant that
+`extras/Makefile` was generated without the firewalld changes. So the firewalld
+config wasn't installed during `make install` and rpmbuild later failed when it
+failed to find `/usr/lib/firewalld/glusterfs.xml`
+
+Label: DOWNSTREAM ONLY
+
+>Reviewed-on: https://code.engineering.redhat.com/gerrit/59463
+
+Change-Id: I498bcceeacbd839640282eb6467c9f1464505697
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/70343
+Reviewed-by: Milind Changire <mchangir@redhat.com>
+---
+ glusterfs.spec.in | 7 +------
+ 1 file changed, 1 insertion(+), 6 deletions(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index c655f16..f5c1f79 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -700,12 +700,7 @@ done
+ 
+ %build
+ 
+-# RHEL6 and earlier need to manually replace config.guess and config.sub
+-%if ( 0%{?rhel} && 0%{?rhel} <= 6 )
+-./autogen.sh
+-%endif
+-
+-%configure \
++./autogen.sh && %configure \
+         %{?_with_asan} \
+         %{?_with_cmocka} \
+         %{?_with_debug} \
+-- 
+1.8.3.1
+

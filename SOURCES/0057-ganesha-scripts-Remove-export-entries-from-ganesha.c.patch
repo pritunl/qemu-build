@@ -1,0 +1,40 @@
+From 16d298584c70138fd639281bc900838d7938aec9 Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Wed, 22 Feb 2017 14:37:04 +0530
+Subject: [PATCH 057/124] ganesha/scripts : Remove export entries from
+ ganesha.conf during cleanup
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I288f7c9ced23d258a7ce1242d8efe03a4bf6f746
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://review.gluster.org/16708
+Smoke: Gluster Build System <jenkins@build.gluster.org>
+NetBSD-regression: NetBSD Build System <jenkins@build.gluster.org>
+CentOS-regression: Gluster Build System <jenkins@build.gluster.org>
+Reviewed-by: soumya k <skoduri@redhat.com>
+Reviewed-by: Kaleb KEITHLEY <kkeithle@redhat.com>
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167142
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/ganesha/scripts/ganesha-ha.sh | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/extras/ganesha/scripts/ganesha-ha.sh b/extras/ganesha/scripts/ganesha-ha.sh
+index 4b93f95..7ba80b5 100644
+--- a/extras/ganesha/scripts/ganesha-ha.sh
++++ b/extras/ganesha/scripts/ganesha-ha.sh
+@@ -342,6 +342,7 @@ cleanup_ganesha_config ()
+     rm -f /etc/corosync/corosync.conf
+     rm -rf /etc/cluster/cluster.conf*
+     rm -rf /var/lib/pacemaker/cib/*
++    sed -r -i -e '/^%include[[:space:]]+".+\.conf"$/d'  $HA_CONFDIR/ganesha.conf
+ }
+ 
+ do_create_virt_ip_constraints()
+-- 
+1.8.3.1
+

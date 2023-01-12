@@ -1,0 +1,56 @@
+From f65f4739914cf317da7e5eaa3b5a06fe64f338c2 Mon Sep 17 00:00:00 2001
+From: Sunny Kumar <sunkumar@redhat.com>
+Date: Sat, 21 Sep 2019 01:07:30 +0530
+Subject: [PATCH 298/302] geo-rep : fix sub-command during worker connection
+
+Problem:
+
+Geo-rep session for non-root going faulty.
+
+Solution:
+
+During worker start we do not construct slave url and use 'args.resource_remote'
+which is basically just slave-hostname.
+This works better for root session but fails in non-root session during
+ssh command.
+Using slave url solves this issue.
+
+Backport of:
+    >fixes: bz#1753928
+    >Change-Id: Ib83552fde77f81c208896494b323514ab37ebf22
+    >Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+
+Upstream patch:
+    https://review.gluster.org/#/c/glusterfs/+/23465/
+
+BUG: 1754407
+Change-Id: Ib83552fde77f81c208896494b323514ab37ebf22
+Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/181895
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ geo-replication/syncdaemon/subcmds.py | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/geo-replication/syncdaemon/subcmds.py b/geo-replication/syncdaemon/subcmds.py
+index 8de7db2..f8515f2 100644
+--- a/geo-replication/syncdaemon/subcmds.py
++++ b/geo-replication/syncdaemon/subcmds.py
+@@ -73,8 +73,11 @@ def subcmd_worker(args):
+     Popen.init_errhandler()
+     fcntl.fcntl(args.feedback_fd, fcntl.F_SETFD, fcntl.FD_CLOEXEC)
+     local = GLUSTER("localhost", args.master)
+-    slavevol = args.slave.split("::")[-1]
+-    slavehost = args.resource_remote
++    slave_url, slavevol = args.slave.split("::")
++    if "@" not in slave_url:
++        slavehost = args.resource_remote
++    else:
++        slavehost = "%s@%s" % (slave_url.split("@")[0], args.resource_remote)
+     remote = SSH(slavehost, slavevol)
+     remote.connect_remote()
+     local.connect()
+-- 
+1.8.3.1
+

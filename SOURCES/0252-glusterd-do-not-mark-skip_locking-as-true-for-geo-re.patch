@@ -1,0 +1,63 @@
+From 5a35a996257d6aaa7fa55ff1e1aac407dd4824fe Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Fri, 12 Jul 2019 16:28:04 +0530
+Subject: [PATCH 252/255] glusterd: do not mark skip_locking as true for
+ geo-rep operations
+
+We need to send the commit req to peers in case of geo-rep
+operations even though it is a no volname operation. In commit
+phase peers try to set the txn_opinfo which will fail because
+it is a no volname operation where we don't require a commit
+phase. We mark skip_locking as true for no volname operations,
+but we have to give an exception to geo-rep operations, so that
+they can set txn_opinfo in commit phase.
+
+Please refer to detailed RCA at the bug: 1729463
+
+> upstream patch : https://review.gluster.org/#/c/glusterfs/+/23034/
+
+>fixes: bz#1729463
+>Change-Id: I9f2478b12a281f6e052035c0563c40543493a3fc
+>Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+
+Change-Id: I9f2478b12a281f6e052035c0563c40543493a3fc
+BUG: 1727785
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/176032
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Shwetha Acharya <sacharya@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-handler.c | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-handler.c b/xlators/mgmt/glusterd/src/glusterd-handler.c
+index cb2666b..2e73c98 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-handler.c
++++ b/xlators/mgmt/glusterd/src/glusterd-handler.c
+@@ -1078,7 +1078,11 @@ __glusterd_handle_stage_op(rpcsvc_request_t *req)
+ 
+     /* In cases where there is no volname, the receivers won't have a
+      * transaction opinfo created, as for those operations, the locking
+-     * phase where the transaction opinfos are created, won't be called. */
++     * phase where the transaction opinfos are created, won't be called.
++     * skip_locking will be true for all such transaction and we clear
++     * the txn_opinfo after the staging phase, except for geo-replication
++     * operations where we need to access txn_opinfo in the later phases also.
++     */
+     ret = glusterd_get_txn_opinfo(txn_id, &txn_op_info);
+     if (ret) {
+         gf_msg_debug(this->name, 0, "No transaction's opinfo set");
+@@ -1087,7 +1091,8 @@ __glusterd_handle_stage_op(rpcsvc_request_t *req)
+         glusterd_txn_opinfo_init(&txn_op_info, &state, &op_req.op,
+                                  req_ctx->dict, req);
+ 
+-        txn_op_info.skip_locking = _gf_true;
++        if (req_ctx->op != GD_OP_GSYNC_SET)
++            txn_op_info.skip_locking = _gf_true;
+         ret = glusterd_set_txn_opinfo(txn_id, &txn_op_info);
+         if (ret) {
+             gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_TRANS_OPINFO_SET_FAIL,
+-- 
+1.8.3.1
+

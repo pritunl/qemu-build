@@ -1,0 +1,53 @@
+From bc5e3967864d6f6ea22deb22ba72aedca8367797 Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Thu, 11 Jul 2019 12:49:41 +0530
+Subject: [PATCH 246/255] Revert "glusterd/shd: Keep a ref on volinfo until
+ attach rpc execute cbk"
+
+This reverts commit c429d3c63601e6ea15af76aa684c30bbeb746467.
+
+BUG: 1471742
+Change-Id: I614e8bdbcc5111dbf407aba047e7d2284bef8ac8
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/175955
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-shd-svc.c    | 3 ---
+ xlators/mgmt/glusterd/src/glusterd-svc-helper.c | 4 ----
+ 2 files changed, 7 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+index a9eab42..19eca9f 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+@@ -452,11 +452,8 @@ glusterd_shdsvc_start(glusterd_svc_t *svc, int flags)
+     }
+ 
+     if (shd->attached) {
+-        glusterd_volinfo_ref(volinfo);
+-        /* Unref will happen from glusterd_svc_attach_cbk */
+         ret = glusterd_attach_svc(svc, volinfo, flags);
+         if (ret) {
+-            glusterd_volinfo_unref(volinfo);
+             gf_msg("glusterd", GF_LOG_ERROR, 0, GD_MSG_VOLINFO_GET_FAIL,
+                    "Failed to attach shd svc(volume=%s) to pid=%d. Starting"
+                    "a new process",
+diff --git a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+index f7be394..02945b1 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
++++ b/xlators/mgmt/glusterd/src/glusterd-svc-helper.c
+@@ -695,10 +695,6 @@ out:
+     if (flag) {
+         GF_FREE(flag);
+     }
+-
+-    if (volinfo)
+-        glusterd_volinfo_unref(volinfo);
+-
+     GF_ATOMIC_DEC(conf->blockers);
+     STACK_DESTROY(frame->root);
+     return 0;
+-- 
+1.8.3.1
+

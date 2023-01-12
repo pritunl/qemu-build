@@ -1,0 +1,46 @@
+From da53d9027d9426c0023176a42e0550d6ccccc941 Mon Sep 17 00:00:00 2001
+From: Susant Palai <spalai@redhat.com>
+Date: Mon, 22 Apr 2019 21:18:30 +0530
+Subject: [PATCH 114/124] core: fix hang issue in __gf_free
+
+Currently GF_ASSERT is done under mem_accounting lock at some places.
+On a GF_ASSERT failure, gf_msg_callingfn is called which calls gf_malloc
+internally and it takes the same mem_accounting lock leading to deadlock.
+
+This is a temporary fix to avoid any hang issue in master.
+https://review.gluster.org/#/c/glusterfs/+/22589/ is being worked on
+in the mean while so that GF_ASSERT can be used under mem_accounting
+lock.
+
+> upstream patch : https://review.gluster.org/#/c/glusterfs/+/22600/
+
+>Change-Id: I6d67f23979e7edd2695bdc6aab2997dae4a4060a
+>updates: bz#1700865
+>Signed-off-by: Susant Palai <spalai@redhat.com>
+
+Change-Id: I6d67f23979e7edd2695bdc6aab2997dae4a4060a
+BUG: 1698728
+Signed-off-by: Susant Palai <spalai@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/168474
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Nithya Balachandran <nbalacha@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ libglusterfs/src/mem-pool.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/libglusterfs/src/mem-pool.c b/libglusterfs/src/mem-pool.c
+index 81badc0..34cb87a 100644
+--- a/libglusterfs/src/mem-pool.c
++++ b/libglusterfs/src/mem-pool.c
+@@ -348,7 +348,6 @@ __gf_free(void *free_ptr)
+ 
+     LOCK(&mem_acct->rec[header->type].lock);
+     {
+-        GF_ASSERT(mem_acct->rec[header->type].size >= header->size);
+         mem_acct->rec[header->type].size -= header->size;
+         mem_acct->rec[header->type].num_allocs--;
+         /* If all the instances are freed up then ensure typestr is set
+-- 
+1.8.3.1
+

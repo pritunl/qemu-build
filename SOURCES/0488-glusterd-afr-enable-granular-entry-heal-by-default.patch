@@ -1,0 +1,864 @@
+From 0502383024cbf7e4776816e0a992dccc484a3cf2 Mon Sep 17 00:00:00 2001
+From: Ravishankar N <ravishankar@redhat.com>
+Date: Tue, 8 Dec 2020 17:23:22 +0530
+Subject: [PATCH 488/511] glusterd/afr: enable granular-entry-heal by default
+
+XXXXXXXXXXXXXXXXXXX
+    IMPORTANT:
+XXXXXXXXXXXXXXXXXXXX
+I see that for rhgs-3.5.3, GD_OP_VERSION_MAX is GD_OP_VERSION_7_0. Since
+this patch should only act on new volumes in rhgs-3.5.4, I am bumping
+the op-version to GD_OP_VERSION_7_1. In glusterfs upstream, the patch
+acts only if op-version >= GD_OP_VERSION_9_0 as seen in the commit
+messae below.
+
+Upstream patch details:
+/------------------------------------------------------------------------------/
+1. The option has been enabled and tested for quite some time now in RHHI-V
+downstream and I think it is safe to make it 'on' by default. Since it
+is not possible to simply change it from 'off' to 'on' without breaking
+rolling upgrades, old clients etc., I have made it default only for new volumes
+starting from op-verison GD_OP_VERSION_9_0.
+
+Note: If you do a volume reset, the option will be turned back off.
+This is okay as the dir's gfid will be captured in 'xattrop' folder  and heals
+will proceed. There might be stale entries inside entry-changes' folder,
+which will be removed when we enable the option again.
+
+2. I encountered a cust. issue where entry heal was pending on a dir. with
+236436 files in it and the glustershd.log output was just stuck at
+"performing entry selfheal", so I have added logs to give us
+more info in DEBUG level about whether entry heal and data heal are
+progressing (metadata heal doesn't take much time). That way, we have a
+quick visual indication to say things are not 'stuck' if we briefly
+enable debug logs, instead of taking statedumps or checking profile info
+etc.
+
+>Fixes: #1483
+>Change-Id: I4f116f8c92f8cd33f209b758ff14f3c7e1981422
+>Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+Upstream Patch: https://github.com/gluster/glusterfs/pull/1621
+/------------------------------------------------------------------------------/
+
+BUG: 1890506
+Change-Id: If449a1e873633616cfc508d74b5c22eb434b55ae
+Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/220555
+Tested-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/glusterfs/globals.h               |   4 +-
+ libglusterfs/src/syncop-utils.c                    |   4 +-
+ tests/basic/afr/add-brick-self-heal-non-granular.t |  75 +++++++++++++
+ tests/basic/afr/add-brick-self-heal.t              |   4 +-
+ tests/basic/afr/bug-1130892-non-granular.t         |  77 ++++++++++++++
+ .../basic/afr/bug-1493415-gfid-heal-non-granular.t |  79 ++++++++++++++
+ ...507-type-mismatch-error-handling-non-granular.t | 117 +++++++++++++++++++++
+ ...1749322-entry-heal-not-happening-non-granular.t |  90 ++++++++++++++++
+ .../afr/replace-brick-self-heal-non-granular.t     |  65 ++++++++++++
+ tests/basic/afr/replace-brick-self-heal.t          |   2 +-
+ tests/bugs/replicate/bug-1130892.t                 |   2 +-
+ tests/bugs/replicate/bug-1493415-gfid-heal.t       |   2 +-
+ .../bug-1722507-type-mismatch-error-handling.t     |  26 +++--
+ .../bug-1749322-entry-heal-not-happening.t         |   7 +-
+ xlators/cluster/afr/src/afr-self-heal-common.c     |   5 +
+ xlators/cluster/afr/src/afr-self-heal-data.c       |   3 +
+ xlators/cluster/afr/src/afr-self-heal-entry.c      |   7 +-
+ xlators/mgmt/glusterd/src/glusterd-utils.c         |  13 +++
+ 18 files changed, 558 insertions(+), 24 deletions(-)
+ create mode 100644 tests/basic/afr/add-brick-self-heal-non-granular.t
+ create mode 100644 tests/basic/afr/bug-1130892-non-granular.t
+ create mode 100644 tests/basic/afr/bug-1493415-gfid-heal-non-granular.t
+ create mode 100644 tests/basic/afr/bug-1722507-type-mismatch-error-handling-non-granular.t
+ create mode 100644 tests/basic/afr/bug-1749322-entry-heal-not-happening-non-granular.t
+ create mode 100644 tests/basic/afr/replace-brick-self-heal-non-granular.t
+
+diff --git a/libglusterfs/src/glusterfs/globals.h b/libglusterfs/src/glusterfs/globals.h
+index 31717ed..cc145cd 100644
+--- a/libglusterfs/src/glusterfs/globals.h
++++ b/libglusterfs/src/glusterfs/globals.h
+@@ -50,7 +50,7 @@
+     1 /* MIN is the fresh start op-version, mostly                             \
+          should not change */
+ #define GD_OP_VERSION_MAX                                                      \
+-    GD_OP_VERSION_7_0 /* MAX VERSION is the maximum                            \
++    GD_OP_VERSION_7_1 /* MAX VERSION is the maximum                            \
+                          count in VME table, should                            \
+                          keep changing with                                    \
+                          introduction of newer                                 \
+@@ -138,6 +138,8 @@
+ 
+ #define GD_OP_VERSION_7_0 70000 /* Op-version for GlusterFS 7.0 */
+ 
++#define GD_OP_VERSION_7_1 70100 /* Op-version for GlusterFS 7.1 */
++
+ #include "glusterfs/xlator.h"
+ #include "glusterfs/options.h"
+ 
+diff --git a/libglusterfs/src/syncop-utils.c b/libglusterfs/src/syncop-utils.c
+index be03527..2269c76 100644
+--- a/libglusterfs/src/syncop-utils.c
++++ b/libglusterfs/src/syncop-utils.c
+@@ -495,9 +495,7 @@ syncop_dir_scan(xlator_t *subvol, loc_t *loc, int pid, void *data,
+             if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+                 continue;
+ 
+-            ret = fn(subvol, entry, loc, data);
+-            if (ret)
+-                break;
++            ret |= fn(subvol, entry, loc, data);
+         }
+         gf_dirent_free(&entries);
+         if (ret)
+diff --git a/tests/basic/afr/add-brick-self-heal-non-granular.t b/tests/basic/afr/add-brick-self-heal-non-granular.t
+new file mode 100644
+index 0000000..19caf24
+--- /dev/null
++++ b/tests/basic/afr/add-brick-self-heal-non-granular.t
+@@ -0,0 +1,75 @@
++#!/bin/bash
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++cleanup;
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 replica 2 $H0:$B0/${V0}{0,1}
++EXPECT 'Created' volinfo_field $V0 'Status';
++TEST $CLI volume set $V0 cluster.granular-entry-heal off
++TEST $CLI volume start $V0
++EXPECT 'Started' volinfo_field $V0 'Status';
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}1
++
++TEST $CLI volume set $V0 cluster.data-self-heal off
++TEST $CLI volume set $V0 cluster.metadata-self-heal off
++TEST $CLI volume set $V0 cluster.entry-self-heal off
++TEST $CLI volume set $V0 cluster.heal-timeout 5
++
++TEST $CLI volume set $V0 self-heal-daemon off
++TEST $GFS --volfile-id=$V0 --volfile-server=$H0 $M0;
++
++# Create files
++for i in {1..5}
++do
++        echo $i > $M0/file$i.txt
++done
++
++# Metadata changes
++TEST setfattr -n user.test -v qwerty $M0/file5.txt
++
++# Add brick1
++TEST $CLI volume add-brick $V0 replica 3 $H0:$B0/${V0}2
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/${V0}2
++
++# New-brick should accuse the old-bricks (Simulating case for data-loss)
++TEST setfattr -n trusted.afr.$V0-client-0 -v 0x000000000000000000000001 $B0/${V0}2/
++TEST setfattr -n trusted.afr.$V0-client-1 -v 0x000000000000000000000001 $B0/${V0}2/
++
++# Check if pending xattr and dirty-xattr are set for newly-added-brick
++EXPECT "000000000000000100000001" get_hex_xattr trusted.afr.$V0-client-2 $B0/${V0}0
++EXPECT "000000000000000100000001" get_hex_xattr trusted.afr.$V0-client-2 $B0/${V0}1
++EXPECT "000000000000000000000001" get_hex_xattr trusted.afr.dirty $B0/${V0}2
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 2
++
++TEST $CLI volume set $V0 self-heal-daemon on
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "Y" glustershd_up_status
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 1
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 2
++TEST $CLI volume heal $V0
++
++# Wait for heal to complete
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" get_pending_heal_count $V0
++
++# Check if entry-heal has happened
++TEST diff <(ls $B0/${V0}0 | sort) <(ls $B0/${V0}2 | sort)
++TEST diff <(ls $B0/${V0}1 | sort) <(ls $B0/${V0}2 | sort)
++
++# Test if data was healed
++TEST diff $B0/${V0}0/file1.txt $B0/${V0}2/file1.txt
++
++# Test if metadata was healed and exists on both the bricks
++EXPECT "qwerty" get_text_xattr user.test $B0/${V0}2/file5.txt
++EXPECT "qwerty" get_text_xattr user.test $B0/${V0}0/file5.txt
++
++EXPECT "000000000000000000000000" get_hex_xattr trusted.afr.$V0-client-2 $B0/${V0}0
++EXPECT "000000000000000000000000" get_hex_xattr trusted.afr.$V0-client-2 $B0/${V0}1
++EXPECT "000000000000000000000000" get_hex_xattr trusted.afr.dirty $B0/${V0}2
++
++cleanup;
+diff --git a/tests/basic/afr/add-brick-self-heal.t b/tests/basic/afr/add-brick-self-heal.t
+index c847e22..7ebf4f6 100644
+--- a/tests/basic/afr/add-brick-self-heal.t
++++ b/tests/basic/afr/add-brick-self-heal.t
+@@ -38,8 +38,8 @@ TEST setfattr -n trusted.afr.$V0-client-0 -v 0x000000000000000000000001 $B0/${V0
+ TEST setfattr -n trusted.afr.$V0-client-1 -v 0x000000000000000000000001 $B0/${V0}2/
+ 
+ # Check if pending xattr and dirty-xattr are set for newly-added-brick
+-EXPECT "000000000000000100000001" get_hex_xattr trusted.afr.$V0-client-2 $B0/${V0}0
+-EXPECT "000000000000000100000001" get_hex_xattr trusted.afr.$V0-client-2 $B0/${V0}1
++EXPECT "000000010000000100000001" get_hex_xattr trusted.afr.$V0-client-2 $B0/${V0}0
++EXPECT "000000010000000100000001" get_hex_xattr trusted.afr.$V0-client-2 $B0/${V0}1
+ EXPECT "000000000000000000000001" get_hex_xattr trusted.afr.dirty $B0/${V0}2
+ 
+ EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 0
+diff --git a/tests/basic/afr/bug-1130892-non-granular.t b/tests/basic/afr/bug-1130892-non-granular.t
+new file mode 100644
+index 0000000..3cdbc7d
+--- /dev/null
++++ b/tests/basic/afr/bug-1130892-non-granular.t
+@@ -0,0 +1,77 @@
++#!/bin/bash
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../afr.rc
++
++cleanup;
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume info;
++
++# Create a 1X2 replica
++TEST $CLI volume create $V0 replica 2 $H0:$B0/${V0}-{0,1}
++EXPECT 'Created' volinfo_field $V0 'Status';
++TEST $CLI volume set $V0 cluster.granular-entry-heal off
++
++# Disable self-heal daemon
++TEST gluster volume set $V0 self-heal-daemon off
++
++# Enable Client side heal
++TEST $CLI volume set $V0 cluster.data-self-heal off
++TEST $CLI volume set $V0 cluster.metadata-self-heal off
++TEST $CLI volume set $V0 cluster.entry-self-heal off
++
++# Disable all perf-xlators
++TEST $CLI volume set $V0 performance.quick-read off
++TEST $CLI volume set $V0 performance.io-cache off
++TEST $CLI volume set $V0 performance.write-behind off
++TEST $CLI volume set $V0 performance.stat-prefetch off
++TEST $CLI volume set $V0 performance.read-ahead off
++
++# Volume start
++TEST $CLI volume start $V0;
++EXPECT 'Started' volinfo_field $V0 'Status';
++
++# FUSE Mount
++TEST ${GFS} -s $H0 --volfile-id $V0 $M0
++
++# Create files and dirs
++TEST mkdir -p $M0/one/two/
++TEST `echo "Carpe diem" > $M0/one/two/three`
++
++# Simulate disk-replacement
++TEST kill_brick $V0 $H0 $B0/${V0}-1
++EXPECT_WITHIN ${PROCESS_DOWN_TIMEOUT} "^0$" afr_child_up_status $V0 1
++TEST rm -rf $B0/${V0}-1/one
++TEST rm -rf $B0/${V0}-1/.glusterfs
++
++#Ideally, disk replacement is done using reset-brick or replace-brick gluster CLI
++#which will create .glusterfs folder.
++mkdir $B0/${V0}-1/.glusterfs && chmod 600 $B0/${V0}-1/.glusterfs
++
++# Start force
++TEST $CLI volume start $V0 force
++
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 1
++
++TEST stat $M0/one
++
++sleep 1
++
++# Check pending xattrs
++EXPECT "00000000" afr_get_specific_changelog_xattr $B0/${V0}-0/one trusted.afr.$V0-client-1 data
++EXPECT_NOT "00000000" afr_get_specific_changelog_xattr $B0/${V0}-0/one trusted.afr.$V0-client-1 entry
++EXPECT_NOT "00000000" afr_get_specific_changelog_xattr $B0/${V0}-0/one trusted.afr.$V0-client-1 metadata
++
++TEST gluster volume set $V0 self-heal-daemon on
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "Y" glustershd_up_status
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 1
++TEST $CLI volume heal $V0
++EXPECT_WITHIN $HEAL_TIMEOUT "Y" is_dir_heal_done $B0/${V0}-0 $B0/${V0}-1 one
++EXPECT_WITHIN $HEAL_TIMEOUT "Y" is_dir_heal_done $B0/${V0}-0 $B0/${V0}-1 one/two
++EXPECT_WITHIN $HEAL_TIMEOUT "Y" is_file_heal_done $B0/${V0}-0 $B0/${V0}-1 one/two/three
++
++cleanup;
+diff --git a/tests/basic/afr/bug-1493415-gfid-heal-non-granular.t b/tests/basic/afr/bug-1493415-gfid-heal-non-granular.t
+new file mode 100644
+index 0000000..aff001c
+--- /dev/null
++++ b/tests/basic/afr/bug-1493415-gfid-heal-non-granular.t
+@@ -0,0 +1,79 @@
++#!/bin/bash
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../afr.rc
++cleanup;
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 replica 2 $H0:$B0/${V0}{0,1}
++TEST $CLI volume set $V0 cluster.granular-entry-heal off
++TEST $CLI volume start $V0
++
++TEST $GFS --volfile-id=$V0 --volfile-server=$H0 --attribute-timeout=0 --entry-timeout=0 $M0;
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 1
++TEST $CLI volume set $V0 self-heal-daemon off
++
++# Create base entry in indices/xattrop
++echo "Data" > $M0/FILE
++
++#------------------------------------------------------------------------------#
++TEST touch $M0/f1
++gfid_f1=$(gf_get_gfid_xattr $B0/${V0}0/f1)
++gfid_str_f1=$(gf_gfid_xattr_to_str $gfid_f1)
++
++# Remove gfid xattr and .glusterfs hard link from 2nd brick. This simulates a
++# brick crash at the point where file got created but no xattrs were set.
++TEST setfattr -x trusted.gfid $B0/${V0}1/f1
++TEST rm $B0/${V0}1/.glusterfs/${gfid_str_f1:0:2}/${gfid_str_f1:2:2}/$gfid_str_f1
++
++# storage/posix considers that a file without gfid changed less than a second
++# before doesn't exist, so we need to wait for a second to force posix to
++# consider that this is a valid file but without gfid.
++sleep 2
++
++# Assume there were no pending xattrs on parent dir due to 1st brick crashing
++# too. Then name heal from client must heal the gfid.
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
++TEST $GFS --volfile-id=$V0 --volfile-server=$H0 --attribute-timeout=0 --entry-timeout=0 $M0;
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 1
++TEST stat $M0/f1
++EXPECT "$gfid_f1" gf_get_gfid_xattr $B0/${V0}1/f1
++TEST stat $B0/${V0}1/.glusterfs/${gfid_str_f1:0:2}/${gfid_str_f1:2:2}/$gfid_str_f1
++
++#------------------------------------------------------------------------------#
++TEST mkdir $M0/dir
++TEST touch $M0/dir/f2
++gfid_f2=$(gf_get_gfid_xattr $B0/${V0}0/dir/f2)
++gfid_str_f2=$(gf_gfid_xattr_to_str $gfid_f2)
++
++# Remove gfid xattr and .glusterfs hard link from 2nd brick. This simulates a
++# brick crash at the point where file got created but no xattrs were set.
++TEST setfattr -x trusted.gfid $B0/${V0}1/dir/f2
++TEST rm $B0/${V0}1/.glusterfs/${gfid_str_f2:0:2}/${gfid_str_f2:2:2}/$gfid_str_f2
++
++#Now simulate setting of pending entry xattr on parent dir of 1st brick.
++TEST setfattr -n trusted.afr.$V0-client-1 -v 0x000000000000000000000001 $B0/${V0}0/dir
++create_brick_xattrop_entry $B0/${V0}0 dir
++
++# storage/posix considers that a file without gfid changed less than a second
++# before doesn't exist, so we need to wait for a second to force posix to
++# consider that this is a valid file but without gfid.
++sleep 2
++
++#Trigger entry-heal via shd
++TEST $CLI volume set $V0 self-heal-daemon on
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "Y" glustershd_up_status
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 1
++
++TEST $CLI volume heal $V0
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" get_pending_heal_count $V0
++
++EXPECT "$gfid_f2" gf_get_gfid_xattr $B0/${V0}1/dir/f2
++TEST stat $B0/${V0}1/.glusterfs/${gfid_str_f2:0:2}/${gfid_str_f2:2:2}/$gfid_str_f2
++
++#------------------------------------------------------------------------------#
++cleanup;
+diff --git a/tests/basic/afr/bug-1722507-type-mismatch-error-handling-non-granular.t b/tests/basic/afr/bug-1722507-type-mismatch-error-handling-non-granular.t
+new file mode 100644
+index 0000000..9079c93
+--- /dev/null
++++ b/tests/basic/afr/bug-1722507-type-mismatch-error-handling-non-granular.t
+@@ -0,0 +1,117 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../afr.rc
++
++cleanup;
++
++## Start and create a volume
++TEST glusterd;
++TEST pidof glusterd;
++TEST $CLI volume info;
++
++TEST $CLI volume create $V0 replica 3 $H0:$B0/${V0}{0,1,2};
++TEST $CLI volume set $V0 cluster.granular-entry-heal off
++TEST $CLI volume start $V0;
++TEST $CLI volume set $V0 cluster.heal-timeout 5
++TEST $CLI volume heal $V0 disable
++EXPECT 'Started' volinfo_field $V0 'Status';
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0
++
++TEST mkdir $M0/dir
++
++##########################################################################################
++# GFID link file and the GFID is missing on one brick and all the bricks are being blamed.
++
++TEST touch $M0/dir/file
++TEST `echo append>> $M0/dir/file`
++
++#B0 and B2 must blame B1
++setfattr -n trusted.afr.$V0-client-0 -v 0x000000000000000000000001 $B0/$V0"2"/dir
++setfattr -n trusted.afr.$V0-client-1 -v 0x000000000000000000000001 $B0/$V0"0"/dir
++setfattr -n trusted.afr.$V0-client-2 -v 0x000000000000000000000001 $B0/$V0"0"/dir
++
++# Add entry to xattrop dir to trigger index heal.
++xattrop_dir0=$(afr_get_index_path $B0/$V0"0")
++base_entry_b0=`ls $xattrop_dir0`
++gfid_str=$(gf_gfid_xattr_to_str $(gf_get_gfid_xattr $B0/$V0"0"/dir/))
++ln $xattrop_dir0/$base_entry_b0 $xattrop_dir0/$gfid_str
++EXPECT "^1$" get_pending_heal_count $V0
++
++# Remove the gfid xattr and the link file on one brick.
++gfid_file=$(gf_get_gfid_xattr $B0/$V0"0"/dir/file)
++gfid_str_file=$(gf_gfid_xattr_to_str $gfid_file)
++TEST setfattr -x trusted.gfid $B0/${V0}0/dir/file
++TEST rm -f $B0/${V0}0/.glusterfs/${gfid_str_file:0:2}/${gfid_str_file:2:2}/$gfid_str_file
++
++# Launch heal
++TEST $CLI volume heal $V0 enable
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "^Y$" glustershd_up_status
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status_in_shd $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status_in_shd $V0 1
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status_in_shd $V0 2
++
++# Wait for 2 second to force posix to consider that this is a valid file but
++# without gfid.
++sleep 2
++TEST $CLI volume heal $V0
++
++# Heal should not fail as the file is missing gfid xattr and the link file,
++# which is not actually the gfid or type mismatch.
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" get_pending_heal_count $V0
++
++EXPECT "$gfid_file" gf_get_gfid_xattr $B0/${V0}0/dir/file
++TEST stat $B0/${V0}0/.glusterfs/${gfid_str_file:0:2}/${gfid_str_file:2:2}/$gfid_str_file
++rm -f $M0/dir/file
++
++
++###########################################################################################
++# GFID link file and the GFID is missing on two bricks and all the bricks are being blamed.
++
++TEST $CLI volume heal $V0 disable
++TEST touch $M0/dir/file
++#TEST kill_brick $V0 $H0 $B0/$V0"1"
++
++#B0 and B2 must blame B1
++setfattr -n trusted.afr.$V0-client-0 -v 0x000000000000000000000001 $B0/$V0"2"/dir
++setfattr -n trusted.afr.$V0-client-1 -v 0x000000000000000000000001 $B0/$V0"0"/dir
++setfattr -n trusted.afr.$V0-client-2 -v 0x000000000000000000000001 $B0/$V0"0"/dir
++
++# Add entry to xattrop dir to trigger index heal.
++xattrop_dir0=$(afr_get_index_path $B0/$V0"0")
++base_entry_b0=`ls $xattrop_dir0`
++gfid_str=$(gf_gfid_xattr_to_str $(gf_get_gfid_xattr $B0/$V0"0"/dir/))
++ln $xattrop_dir0/$base_entry_b0 $xattrop_dir0/$gfid_str
++EXPECT "^1$" get_pending_heal_count $V0
++
++# Remove the gfid xattr and the link file on two bricks.
++gfid_file=$(gf_get_gfid_xattr $B0/$V0"0"/dir/file)
++gfid_str_file=$(gf_gfid_xattr_to_str $gfid_file)
++TEST setfattr -x trusted.gfid $B0/${V0}0/dir/file
++TEST rm -f $B0/${V0}0/.glusterfs/${gfid_str_file:0:2}/${gfid_str_file:2:2}/$gfid_str_file
++TEST setfattr -x trusted.gfid $B0/${V0}1/dir/file
++TEST rm -f $B0/${V0}1/.glusterfs/${gfid_str_file:0:2}/${gfid_str_file:2:2}/$gfid_str_file
++
++# Launch heal
++TEST $CLI volume heal $V0 enable
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "^Y$" glustershd_up_status
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status_in_shd $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status_in_shd $V0 1
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status_in_shd $V0 2
++
++# Wait for 2 second to force posix to consider that this is a valid file but
++# without gfid.
++sleep 2
++TEST $CLI volume heal $V0
++
++# Heal should not fail as the file is missing gfid xattr and the link file,
++# which is not actually the gfid or type mismatch.
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" get_pending_heal_count $V0
++
++EXPECT "$gfid_file" gf_get_gfid_xattr $B0/${V0}0/dir/file
++TEST stat $B0/${V0}0/.glusterfs/${gfid_str_file:0:2}/${gfid_str_file:2:2}/$gfid_str_file
++EXPECT "$gfid_file" gf_get_gfid_xattr $B0/${V0}1/dir/file
++TEST stat $B0/${V0}1/.glusterfs/${gfid_str_file:0:2}/${gfid_str_file:2:2}/$gfid_str_file
++
++cleanup
+diff --git a/tests/basic/afr/bug-1749322-entry-heal-not-happening-non-granular.t b/tests/basic/afr/bug-1749322-entry-heal-not-happening-non-granular.t
+new file mode 100644
+index 0000000..4f27da4
+--- /dev/null
++++ b/tests/basic/afr/bug-1749322-entry-heal-not-happening-non-granular.t
+@@ -0,0 +1,90 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../afr.rc
++
++cleanup
++
++function check_gfid_and_link_count
++{
++        local file=$1
++
++        file_gfid_b0=$(gf_get_gfid_xattr $B0/${V0}0/$file)
++        TEST [ ! -z $file_gfid_b0 ]
++        file_gfid_b1=$(gf_get_gfid_xattr $B0/${V0}1/$file)
++        file_gfid_b2=$(gf_get_gfid_xattr $B0/${V0}2/$file)
++        EXPECT $file_gfid_b0 echo $file_gfid_b1
++        EXPECT $file_gfid_b0 echo $file_gfid_b2
++
++        EXPECT "2" stat -c %h $B0/${V0}0/$file
++        EXPECT "2" stat -c %h $B0/${V0}1/$file
++        EXPECT "2" stat -c %h $B0/${V0}2/$file
++}
++TESTS_EXPECTED_IN_LOOP=18
++
++################################################################################
++## Start and create a volume
++TEST glusterd;
++TEST pidof glusterd;
++TEST $CLI volume info;
++
++TEST $CLI volume create $V0 replica 3 $H0:$B0/${V0}{0,1,2};
++TEST $CLI volume set $V0 cluster.granular-entry-heal off
++TEST $CLI volume start $V0;
++TEST $CLI volume set $V0 cluster.heal-timeout 5
++TEST $CLI volume heal $V0 disable
++EXPECT 'Started' volinfo_field $V0 'Status';
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0
++
++TEST mkdir $M0/dir
++TEST `echo "File 1 " > $M0/dir/file1`
++TEST touch $M0/dir/file{2..4}
++
++# Remove file2 from 1st & 3rd bricks
++TEST rm -f $B0/$V0"0"/dir/file2
++TEST rm -f $B0/$V0"2"/dir/file2
++
++# Remove file3 and the .glusterfs hardlink from 1st & 2nd bricks
++gfid_file3=$(gf_get_gfid_xattr $B0/$V0"0"/dir/file3)
++gfid_str_file3=$(gf_gfid_xattr_to_str $gfid_file3)
++TEST rm $B0/$V0"0"/.glusterfs/${gfid_str_file3:0:2}/${gfid_str_file3:2:2}/$gfid_str_file3
++TEST rm $B0/$V0"1"/.glusterfs/${gfid_str_file3:0:2}/${gfid_str_file3:2:2}/$gfid_str_file3
++TEST rm -f $B0/$V0"0"/dir/file3
++TEST rm -f $B0/$V0"1"/dir/file3
++
++# Remove the .glusterfs hardlink and the gfid xattr of file4 on 3rd brick
++gfid_file4=$(gf_get_gfid_xattr $B0/$V0"0"/dir/file4)
++gfid_str_file4=$(gf_gfid_xattr_to_str $gfid_file4)
++TEST rm $B0/$V0"2"/.glusterfs/${gfid_str_file4:0:2}/${gfid_str_file4:2:2}/$gfid_str_file4
++TEST setfattr -x trusted.gfid $B0/$V0"2"/dir/file4
++
++# B0 and B2 blame each other
++setfattr -n trusted.afr.$V0-client-0 -v 0x000000000000000000000001 $B0/$V0"2"/dir
++setfattr -n trusted.afr.$V0-client-2 -v 0x000000000000000000000001 $B0/$V0"0"/dir
++
++# Add entry to xattrop dir on first brick.
++xattrop_dir0=$(afr_get_index_path $B0/$V0"0")
++base_entry_b0=`ls $xattrop_dir0`
++gfid_str=$(gf_gfid_xattr_to_str $(gf_get_gfid_xattr $B0/$V0"0"/dir/))
++TEST ln $xattrop_dir0/$base_entry_b0 $xattrop_dir0/$gfid_str
++
++EXPECT "^1$" get_pending_heal_count $V0
++
++# Launch heal
++TEST $CLI volume heal $V0 enable
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "^Y$" glustershd_up_status
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status_in_shd $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status_in_shd $V0 1
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "^1$" afr_child_up_status_in_shd $V0 2
++TEST $CLI volume heal $V0
++EXPECT_WITHIN $HEAL_TIMEOUT "^0$" get_pending_heal_count $V0
++
++# All the files must be present on all the bricks after conservative merge and
++# should have the gfid xattr and the .glusterfs hardlink.
++check_gfid_and_link_count dir/file1
++check_gfid_and_link_count dir/file2
++check_gfid_and_link_count dir/file3
++check_gfid_and_link_count dir/file4
++
++cleanup
+diff --git a/tests/basic/afr/replace-brick-self-heal-non-granular.t b/tests/basic/afr/replace-brick-self-heal-non-granular.t
+new file mode 100644
+index 0000000..c86bff1
+--- /dev/null
++++ b/tests/basic/afr/replace-brick-self-heal-non-granular.t
+@@ -0,0 +1,65 @@
++#!/bin/bash
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++cleanup;
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 replica 2 $H0:$B0/${V0}{0,1}
++TEST $CLI volume set $V0 cluster.granular-entry-heal off
++TEST $CLI volume start $V0
++TEST $CLI volume set $V0 cluster.data-self-heal off
++TEST $CLI volume set $V0 cluster.metadata-self-heal off
++TEST $CLI volume set $V0 cluster.entry-self-heal off
++TEST $CLI volume set $V0 cluster.heal-timeout 5
++TEST $CLI volume set $V0 self-heal-daemon off
++TEST $GFS --volfile-id=$V0 --volfile-server=$H0 $M0;
++
++# Create files
++for i in {1..5}
++do
++        echo $i > $M0/file$i.txt
++done
++
++# Metadata changes
++TEST setfattr -n user.test -v qwerty $M0/file5.txt
++
++# Replace brick1
++TEST $CLI volume replace-brick $V0 $H0:$B0/${V0}1 $H0:$B0/${V0}1_new commit force
++
++# Replaced-brick should accuse the non-replaced-brick (Simulating case for data-loss)
++TEST setfattr -n trusted.afr.$V0-client-0 -v 0x000000000000000000000001 $B0/${V0}1_new/
++
++# Check if pending xattr and dirty-xattr are set for replaced-brick
++EXPECT "000000000000000100000001" get_hex_xattr trusted.afr.$V0-client-1 $B0/${V0}0
++EXPECT "000000000000000000000001" get_hex_xattr trusted.afr.dirty $B0/${V0}1_new
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 1
++
++TEST $CLI volume set $V0 self-heal-daemon on
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "Y" glustershd_up_status
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 1
++TEST $CLI volume heal $V0
++
++# Wait for heal to complete
++EXPECT_WITHIN $HEAL_TIMEOUT "0" get_pending_heal_count $V0
++
++# Check if entry-heal has happened
++TEST diff <(ls $B0/${V0}0 | sort) <(ls $B0/${V0}1_new | sort)
++
++# To make sure that files were not lost from brick0
++TEST diff <(ls $B0/${V0}0 | sort) <(ls $B0/${V0}1 | sort)
++EXPECT "000000000000000000000000" get_hex_xattr trusted.afr.$V0-client-1 $B0/${V0}0
++
++# Test if data was healed
++TEST diff $B0/${V0}0/file1.txt $B0/${V0}1_new/file1.txt
++# To make sure that data was not lost from brick0
++TEST diff $B0/${V0}0/file1.txt $B0/${V0}1/file1.txt
++
++# Test if metadata was healed and exists on both the bricks
++EXPECT "qwerty" get_text_xattr user.test $B0/${V0}1_new/file5.txt
++EXPECT "qwerty" get_text_xattr user.test $B0/${V0}0/file5.txt
++
++cleanup;
+diff --git a/tests/basic/afr/replace-brick-self-heal.t b/tests/basic/afr/replace-brick-self-heal.t
+index 0360db7..da31c87 100644
+--- a/tests/basic/afr/replace-brick-self-heal.t
++++ b/tests/basic/afr/replace-brick-self-heal.t
+@@ -30,7 +30,7 @@ TEST $CLI volume replace-brick $V0 $H0:$B0/${V0}1 $H0:$B0/${V0}1_new commit forc
+ TEST setfattr -n trusted.afr.$V0-client-0 -v 0x000000000000000000000001 $B0/${V0}1_new/
+ 
+ # Check if pending xattr and dirty-xattr are set for replaced-brick
+-EXPECT "000000000000000100000001" get_hex_xattr trusted.afr.$V0-client-1 $B0/${V0}0
++EXPECT "000000010000000100000001" get_hex_xattr trusted.afr.$V0-client-1 $B0/${V0}0
+ EXPECT "000000000000000000000001" get_hex_xattr trusted.afr.dirty $B0/${V0}1_new
+ 
+ EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 0
+diff --git a/tests/bugs/replicate/bug-1130892.t b/tests/bugs/replicate/bug-1130892.t
+index 0f57d66..e23eb26 100644
+--- a/tests/bugs/replicate/bug-1130892.t
++++ b/tests/bugs/replicate/bug-1130892.t
+@@ -56,7 +56,7 @@ EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 1
+ TEST stat $M0/one
+ 
+ # Check pending xattrs
+-EXPECT "00000000" afr_get_specific_changelog_xattr $B0/${V0}-0/one trusted.afr.$V0-client-1 data
++EXPECT "00000001" afr_get_specific_changelog_xattr $B0/${V0}-0/one trusted.afr.$V0-client-1 data
+ EXPECT_NOT "00000000" afr_get_specific_changelog_xattr $B0/${V0}-0/one trusted.afr.$V0-client-1 entry
+ EXPECT "00000000" afr_get_specific_changelog_xattr $B0/${V0}-0/one trusted.afr.$V0-client-1 metadata
+ 
+diff --git a/tests/bugs/replicate/bug-1493415-gfid-heal.t b/tests/bugs/replicate/bug-1493415-gfid-heal.t
+index 125c35a..9714d5e 100644
+--- a/tests/bugs/replicate/bug-1493415-gfid-heal.t
++++ b/tests/bugs/replicate/bug-1493415-gfid-heal.t
+@@ -49,7 +49,7 @@ TEST setfattr -x trusted.gfid $B0/${V0}1/dir/f2
+ TEST rm $B0/${V0}1/.glusterfs/${gfid_str_f2:0:2}/${gfid_str_f2:2:2}/$gfid_str_f2
+ 
+ #Now simulate setting of pending entry xattr on parent dir of 1st brick.
+-TEST setfattr -n trusted.afr.$V0-client-1 -v 0x000000000000000000000001 $B0/${V0}0/dir
++TEST setfattr -n trusted.afr.$V0-client-1 -v 0x000000010000000000000001 $B0/${V0}0/dir
+ create_brick_xattrop_entry $B0/${V0}0 dir
+ 
+ #Trigger entry-heal via shd
+diff --git a/tests/bugs/replicate/bug-1722507-type-mismatch-error-handling.t b/tests/bugs/replicate/bug-1722507-type-mismatch-error-handling.t
+index 0aeaaaf..1fdf7ea 100644
+--- a/tests/bugs/replicate/bug-1722507-type-mismatch-error-handling.t
++++ b/tests/bugs/replicate/bug-1722507-type-mismatch-error-handling.t
+@@ -23,19 +23,21 @@ TEST mkdir $M0/dir
+ ##########################################################################################
+ # GFID link file and the GFID is missing on one brick and all the bricks are being blamed.
+ 
+-TEST touch $M0/dir/file
+-#TEST kill_brick $V0 $H0 $B0/$V0"1"
++TEST `echo append>> $M0/dir/file`
+ 
+ #B0 and B2 must blame B1
+-setfattr -n trusted.afr.$V0-client-0 -v 0x000000000000000000000001 $B0/$V0"2"/dir
+-setfattr -n trusted.afr.$V0-client-1 -v 0x000000000000000000000001 $B0/$V0"0"/dir
+-setfattr -n trusted.afr.$V0-client-2 -v 0x000000000000000000000001 $B0/$V0"0"/dir
++# Set data part of the xattr also to 1 so that local->need_full_crawl is true.
++# Another way is to create the needed entries inside indices/entry-changes
++# folder.
++setfattr -n trusted.afr.$V0-client-0 -v 0x000000010000000000000001 $B0/$V0"2"/dir
++setfattr -n trusted.afr.$V0-client-1 -v 0x000000010000000000000001 $B0/$V0"0"/dir
++setfattr -n trusted.afr.$V0-client-2 -v 0x000000010000000000000001 $B0/$V0"0"/dir
+ 
+ # Add entry to xattrop dir to trigger index heal.
+ xattrop_dir0=$(afr_get_index_path $B0/$V0"0")
+ base_entry_b0=`ls $xattrop_dir0`
+ gfid_str=$(gf_gfid_xattr_to_str $(gf_get_gfid_xattr $B0/$V0"0"/dir/))
+-ln -s $xattrop_dir0/$base_entry_b0 $xattrop_dir0/$gfid_str
++ln $xattrop_dir0/$base_entry_b0 $xattrop_dir0/$gfid_str
+ EXPECT "^1$" get_pending_heal_count $V0
+ 
+ # Remove the gfid xattr and the link file on one brick.
+@@ -70,18 +72,20 @@ rm -f $M0/dir/file
+ 
+ TEST $CLI volume heal $V0 disable
+ TEST touch $M0/dir/file
+-#TEST kill_brick $V0 $H0 $B0/$V0"1"
+ 
+ #B0 and B2 must blame B1
+-setfattr -n trusted.afr.$V0-client-0 -v 0x000000000000000000000001 $B0/$V0"2"/dir
+-setfattr -n trusted.afr.$V0-client-1 -v 0x000000000000000000000001 $B0/$V0"0"/dir
+-setfattr -n trusted.afr.$V0-client-2 -v 0x000000000000000000000001 $B0/$V0"0"/dir
++# Set data part of the xattr also to 1 so that local->need_full_crawl is true.
++# Another way is to create the needed entries inside indices/entry-changes
++# folder.
++setfattr -n trusted.afr.$V0-client-0 -v 0x000000010000000000000001 $B0/$V0"2"/dir
++setfattr -n trusted.afr.$V0-client-1 -v 0x000000010000000000000001 $B0/$V0"0"/dir
++setfattr -n trusted.afr.$V0-client-2 -v 0x000000010000000000000001 $B0/$V0"0"/dir
+ 
+ # Add entry to xattrop dir to trigger index heal.
+ xattrop_dir0=$(afr_get_index_path $B0/$V0"0")
+ base_entry_b0=`ls $xattrop_dir0`
+ gfid_str=$(gf_gfid_xattr_to_str $(gf_get_gfid_xattr $B0/$V0"0"/dir/))
+-ln -s $xattrop_dir0/$base_entry_b0 $xattrop_dir0/$gfid_str
++ln $xattrop_dir0/$base_entry_b0 $xattrop_dir0/$gfid_str
+ EXPECT "^1$" get_pending_heal_count $V0
+ 
+ # Remove the gfid xattr and the link file on two bricks.
+diff --git a/tests/bugs/replicate/bug-1749322-entry-heal-not-happening.t b/tests/bugs/replicate/bug-1749322-entry-heal-not-happening.t
+index 9627908..3da873a 100644
+--- a/tests/bugs/replicate/bug-1749322-entry-heal-not-happening.t
++++ b/tests/bugs/replicate/bug-1749322-entry-heal-not-happening.t
+@@ -59,8 +59,11 @@ TEST rm $B0/$V0"2"/.glusterfs/${gfid_str_file4:0:2}/${gfid_str_file4:2:2}/$gfid_
+ TEST setfattr -x trusted.gfid $B0/$V0"2"/dir/file4
+ 
+ # B0 and B2 blame each other
+-setfattr -n trusted.afr.$V0-client-0 -v 0x000000000000000000000001 $B0/$V0"2"/dir
+-setfattr -n trusted.afr.$V0-client-2 -v 0x000000000000000000000001 $B0/$V0"0"/dir
++# Set data part of the xattr also to 1 so that local->need_full_crawl is true.
++# Another way is to create the needed entries inside indices/entry-changes
++# folder.
++setfattr -n trusted.afr.$V0-client-0 -v 0x000000010000000000000001 $B0/$V0"2"/dir
++setfattr -n trusted.afr.$V0-client-2 -v 0x000000010000000000000001 $B0/$V0"0"/dir
+ 
+ # Add entry to xattrop dir on first brick.
+ xattrop_dir0=$(afr_get_index_path $B0/$V0"0")
+diff --git a/xlators/cluster/afr/src/afr-self-heal-common.c b/xlators/cluster/afr/src/afr-self-heal-common.c
+index 1608f75..36fd3a9 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-common.c
++++ b/xlators/cluster/afr/src/afr-self-heal-common.c
+@@ -2549,6 +2549,11 @@ afr_selfheal_do(call_frame_t *frame, xlator_t *this, uuid_t gfid)
+         }
+     }
+ 
++    gf_msg_debug(
++        this->name, 0,
++        "heals needed for %s: [entry-heal=%d, metadata-heal=%d, data-heal=%d]",
++        uuid_utoa(gfid), entry_selfheal, metadata_selfheal, data_selfheal);
++
+     if (data_selfheal && priv->data_self_heal)
+         data_ret = afr_selfheal_data(frame, this, fd);
+ 
+diff --git a/xlators/cluster/afr/src/afr-self-heal-data.c b/xlators/cluster/afr/src/afr-self-heal-data.c
+index cdff4a5..b97c66b 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-data.c
++++ b/xlators/cluster/afr/src/afr-self-heal-data.c
+@@ -239,6 +239,9 @@ afr_selfheal_data_block(call_frame_t *frame, xlator_t *this, fd_t *fd,
+     sink_count = AFR_COUNT(healed_sinks, priv->child_count);
+     data_lock = alloca0(priv->child_count);
+ 
++    gf_msg_debug(this->name, 0, "gfid:%s, offset=%jd, size=%zu",
++                 uuid_utoa(fd->inode->gfid), offset, size);
++
+     ret = afr_selfheal_inodelk(frame, this, fd->inode, this->name, offset, size,
+                                data_lock);
+     {
+diff --git a/xlators/cluster/afr/src/afr-self-heal-entry.c b/xlators/cluster/afr/src/afr-self-heal-entry.c
+index 40be898..00b5b2d 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-entry.c
++++ b/xlators/cluster/afr/src/afr-self-heal-entry.c
+@@ -206,8 +206,11 @@ __afr_selfheal_heal_dirent(call_frame_t *frame, xlator_t *this, fd_t *fd,
+                                             replies);
+         } else {
+             if (!gf_uuid_compare(replies[i].poststat.ia_gfid,
+-                                 replies[source].poststat.ia_gfid))
++                                 replies[source].poststat.ia_gfid)) {
++                gf_msg_debug(this->name, 0, "skipping %s, no heal needed.",
++                             name);
+                 continue;
++            }
+ 
+             ret = afr_selfheal_recreate_entry(frame, i, source, sources,
+                                               fd->inode, name, inode, replies);
+@@ -839,7 +842,7 @@ afr_selfheal_entry_granular_dirent(xlator_t *subvol, gf_dirent_t *entry,
+ 
+ out:
+     loc_wipe(&loc);
+-    return 0;
++    return ret;
+ }
+ 
+ static int
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index a72c494..bd17a82 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -13181,6 +13181,19 @@ glusterd_enable_default_options(glusterd_volinfo_t *volinfo, char *option)
+             goto out;
+         }
+     }
++
++    if ((conf->op_version >= GD_OP_VERSION_7_1) &&
++        (volinfo->status == GLUSTERD_STATUS_NONE)) {
++        ret = dict_set_dynstr_with_alloc(volinfo->dict,
++                                         "cluster.granular-entry-heal", "on");
++        if (ret) {
++            gf_msg(this->name, GF_LOG_ERROR, errno, GD_MSG_DICT_SET_FAILED,
++                   "Failed to set option 'cluster.granular-entry-heal' "
++                   "on volume %s",
++                   volinfo->volname);
++            goto out;
++        }
++    }
+ out:
+     return ret;
+ }
+-- 
+1.8.3.1
+

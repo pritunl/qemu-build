@@ -1,0 +1,862 @@
+From 66600fb55522d405a68d7340a5680a2633c4237e Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez <xhernandez@redhat.com>
+Date: Thu, 30 Apr 2020 11:19:01 +0200
+Subject: [PATCH 377/379] syncop: improve scaling and implement more tools
+
+The current scaling of the syncop thread pool is not working properly
+and can leave some tasks in the run queue more time than necessary
+when the maximum number of threads is not reached.
+
+This patch provides a better scaling condition to react faster to
+pending work.
+
+Condition variables and sleep in the context of a synctask have also
+been implemented. Their purpose is to replace regular condition
+variables and sleeps that block synctask threads and prevent other
+tasks to be executed.
+
+The new features have been applied to several places in glusterd.
+
+upstream patch: https://review.gluster.org/#/c/glusterfs/+/24396/
+
+> Change-Id: Ic50b7c73c104f9e41f08101a357d30b95efccfbf
+> Fixes: #1116
+> Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+
+Change-Id: Ic50b7c73c104f9e41f08101a357d30b95efccfbf
+BUG: 1810516
+Signed-off-by: Sanju Rakonde <srakonde@redhta.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/200409
+Tested-by: Sanju Rakonde <srakonde@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Xavi Hernandez Juan <xhernandez@redhat.com>
+---
+ libglusterfs/src/glusterfs/syncop.h                |  52 +++-
+ libglusterfs/src/libglusterfs.sym                  |   7 +
+ libglusterfs/src/syncop.c                          | 306 ++++++++++++++++-----
+ xlators/cluster/dht/src/dht-rebalance.c            |   2 +-
+ xlators/mgmt/glusterd/src/glusterd-op-sm.c         |   9 +-
+ xlators/mgmt/glusterd/src/glusterd-proc-mgmt.c     |   2 +-
+ .../mgmt/glusterd/src/glusterd-snapshot-utils.c    |   5 +-
+ xlators/mgmt/glusterd/src/glusterd-syncop.h        |   2 +-
+ xlators/mgmt/glusterd/src/glusterd-utils.c         |  29 +-
+ xlators/mgmt/glusterd/src/glusterd.c               |   2 +
+ xlators/mgmt/glusterd/src/glusterd.h               |   2 +
+ 11 files changed, 317 insertions(+), 101 deletions(-)
+
+diff --git a/libglusterfs/src/glusterfs/syncop.h b/libglusterfs/src/glusterfs/syncop.h
+index e0f1017..3011b4c 100644
+--- a/libglusterfs/src/glusterfs/syncop.h
++++ b/libglusterfs/src/glusterfs/syncop.h
+@@ -15,6 +15,7 @@
+ #include <sys/time.h>
+ #include <pthread.h>
+ #include <ucontext.h>
++#include "glusterfs/timer.h"
+ 
+ #define SYNCENV_PROC_MAX 16
+ #define SYNCENV_PROC_MIN 2
+@@ -32,6 +33,7 @@
+ struct synctask;
+ struct syncproc;
+ struct syncenv;
++struct synccond;
+ 
+ typedef int (*synctask_cbk_t)(int ret, call_frame_t *frame, void *opaque);
+ 
+@@ -55,9 +57,12 @@ struct synctask {
+     call_frame_t *opframe;
+     synctask_cbk_t synccbk;
+     synctask_fn_t syncfn;
+-    synctask_state_t state;
++    struct timespec *delta;
++    gf_timer_t *timer;
++    struct synccond *synccond;
+     void *opaque;
+     void *stack;
++    synctask_state_t state;
+     int woken;
+     int slept;
+     int ret;
+@@ -85,19 +90,21 @@ struct syncproc {
+ /* hosts the scheduler thread and framework for executing synctasks */
+ struct syncenv {
+     struct syncproc proc[SYNCENV_PROC_MAX];
+-    int procs;
++
++    pthread_mutex_t mutex;
++    pthread_cond_t cond;
+ 
+     struct list_head runq;
+-    int runcount;
+     struct list_head waitq;
+-    int waitcount;
++
++    int procs;
++    int procs_idle;
++
++    int runcount;
+ 
+     int procmin;
+     int procmax;
+ 
+-    pthread_mutex_t mutex;
+-    pthread_cond_t cond;
+-
+     size_t stacksize;
+ 
+     int destroy; /* FLAG to mark syncenv is in destroy mode
+@@ -123,6 +130,13 @@ struct synclock {
+ };
+ typedef struct synclock synclock_t;
+ 
++struct synccond {
++    pthread_mutex_t pmutex;
++    pthread_cond_t pcond;
++    struct list_head waitq;
++};
++typedef struct synccond synccond_t;
++
+ struct syncbarrier {
+     gf_boolean_t initialized; /*Set on successful initialization*/
+     pthread_mutex_t guard;    /* guard the remaining members, pair @cond */
+@@ -219,7 +233,7 @@ struct syncopctx {
+ #define __yield(args)                                                          \
+     do {                                                                       \
+         if (args->task) {                                                      \
+-            synctask_yield(args->task);                                        \
++            synctask_yield(args->task, NULL);                                  \
+         } else {                                                               \
+             pthread_mutex_lock(&args->mutex);                                  \
+             {                                                                  \
+@@ -307,7 +321,9 @@ synctask_join(struct synctask *task);
+ void
+ synctask_wake(struct synctask *task);
+ void
+-synctask_yield(struct synctask *task);
++synctask_yield(struct synctask *task, struct timespec *delta);
++void
++synctask_sleep(int32_t secs);
+ void
+ synctask_waitfor(struct synctask *task, int count);
+ 
+@@ -405,6 +421,24 @@ synclock_trylock(synclock_t *lock);
+ int
+ synclock_unlock(synclock_t *lock);
+ 
++int32_t
++synccond_init(synccond_t *cond);
++
++void
++synccond_destroy(synccond_t *cond);
++
++int
++synccond_wait(synccond_t *cond, synclock_t *lock);
++
++int
++synccond_timedwait(synccond_t *cond, synclock_t *lock, struct timespec *delta);
++
++void
++synccond_signal(synccond_t *cond);
++
++void
++synccond_broadcast(synccond_t *cond);
++
+ int
+ syncbarrier_init(syncbarrier_t *barrier);
+ int
+diff --git a/libglusterfs/src/libglusterfs.sym b/libglusterfs/src/libglusterfs.sym
+index 467a1b7..5a721e0 100644
+--- a/libglusterfs/src/libglusterfs.sym
++++ b/libglusterfs/src/libglusterfs.sym
+@@ -938,6 +938,12 @@ syncbarrier_destroy
+ syncbarrier_init
+ syncbarrier_wait
+ syncbarrier_wake
++synccond_init
++synccond_destroy
++synccond_wait
++synccond_timedwait
++synccond_signal
++synccond_broadcast
+ syncenv_destroy
+ syncenv_new
+ synclock_destroy
+@@ -1015,6 +1021,7 @@ synctask_new
+ synctask_new1
+ synctask_set
+ synctask_setid
++synctask_sleep
+ synctask_wake
+ synctask_yield
+ sys_access
+diff --git a/libglusterfs/src/syncop.c b/libglusterfs/src/syncop.c
+index 693970f..71d37b7 100644
+--- a/libglusterfs/src/syncop.c
++++ b/libglusterfs/src/syncop.c
+@@ -154,10 +154,14 @@ out:
+     return ret;
+ }
+ 
++void *
++syncenv_processor(void *thdata);
++
+ static void
+ __run(struct synctask *task)
+ {
+     struct syncenv *env = NULL;
++    int32_t total, ret, i;
+ 
+     env = task->env;
+ 
+@@ -173,7 +177,6 @@ __run(struct synctask *task)
+             env->runcount--;
+             break;
+         case SYNCTASK_WAIT:
+-            env->waitcount--;
+             break;
+         case SYNCTASK_DONE:
+             gf_msg(task->xl->name, GF_LOG_WARNING, 0, LG_MSG_COMPLETED_TASK,
+@@ -187,8 +190,27 @@ __run(struct synctask *task)
+     }
+ 
+     list_add_tail(&task->all_tasks, &env->runq);
+-    env->runcount++;
+     task->state = SYNCTASK_RUN;
++
++    env->runcount++;
++
++    total = env->procs + env->runcount - env->procs_idle;
++    if (total > env->procmax) {
++        total = env->procmax;
++    }
++    if (total > env->procs) {
++        for (i = 0; i < env->procmax; i++) {
++            if (env->proc[i].env == NULL) {
++                env->proc[i].env = env;
++                ret = gf_thread_create(&env->proc[i].processor, NULL,
++                                       syncenv_processor, &env->proc[i],
++                                       "sproc%d", i);
++                if ((ret < 0) || (++env->procs >= total)) {
++                    break;
++                }
++            }
++        }
++    }
+ }
+ 
+ static void
+@@ -210,7 +232,6 @@ __wait(struct synctask *task)
+             gf_msg(task->xl->name, GF_LOG_WARNING, 0, LG_MSG_REWAITING_TASK,
+                    "re-waiting already waiting "
+                    "task");
+-            env->waitcount--;
+             break;
+         case SYNCTASK_DONE:
+             gf_msg(task->xl->name, GF_LOG_WARNING, 0, LG_MSG_COMPLETED_TASK,
+@@ -223,12 +244,11 @@ __wait(struct synctask *task)
+     }
+ 
+     list_add_tail(&task->all_tasks, &env->waitq);
+-    env->waitcount++;
+     task->state = SYNCTASK_WAIT;
+ }
+ 
+ void
+-synctask_yield(struct synctask *task)
++synctask_yield(struct synctask *task, struct timespec *delta)
+ {
+     xlator_t *oldTHIS = THIS;
+ 
+@@ -237,6 +257,8 @@ synctask_yield(struct synctask *task)
+     task->proc->sched.uc_flags &= ~_UC_TLSBASE;
+ #endif
+ 
++    task->delta = delta;
++
+     if (task->state != SYNCTASK_DONE) {
+         task->state = SYNCTASK_SUSPEND;
+     }
+@@ -249,6 +271,35 @@ synctask_yield(struct synctask *task)
+ }
+ 
+ void
++synctask_sleep(int32_t secs)
++{
++    struct timespec delta;
++    struct synctask *task;
++
++    task = synctask_get();
++
++    if (task == NULL) {
++        sleep(secs);
++    } else {
++        delta.tv_sec = secs;
++        delta.tv_nsec = 0;
++
++        synctask_yield(task, &delta);
++    }
++}
++
++static void
++__synctask_wake(struct synctask *task)
++{
++    task->woken = 1;
++
++    if (task->slept)
++        __run(task);
++
++    pthread_cond_broadcast(&task->env->cond);
++}
++
++void
+ synctask_wake(struct synctask *task)
+ {
+     struct syncenv *env = NULL;
+@@ -257,13 +308,18 @@ synctask_wake(struct synctask *task)
+ 
+     pthread_mutex_lock(&env->mutex);
+     {
+-        task->woken = 1;
++        if (task->timer != NULL) {
++            if (gf_timer_call_cancel(task->xl->ctx, task->timer) != 0) {
++                goto unlock;
++            }
+ 
+-        if (task->slept)
+-            __run(task);
++            task->timer = NULL;
++            task->synccond = NULL;
++        }
+ 
+-        pthread_cond_broadcast(&env->cond);
++        __synctask_wake(task);
+     }
++unlock:
+     pthread_mutex_unlock(&env->mutex);
+ }
+ 
+@@ -282,7 +338,7 @@ synctask_wrap(void)
+ 
+     task->state = SYNCTASK_DONE;
+ 
+-    synctask_yield(task);
++    synctask_yield(task, NULL);
+ }
+ 
+ void
+@@ -422,11 +478,6 @@ synctask_create(struct syncenv *env, size_t stacksize, synctask_fn_t fn,
+     }
+ 
+     synctask_wake(newtask);
+-    /*
+-     * Make sure someone's there to execute anything we just put on the
+-     * run queue.
+-     */
+-    syncenv_scale(env);
+ 
+     return newtask;
+ err:
+@@ -520,8 +571,12 @@ syncenv_task(struct syncproc *proc)
+                 goto unlock;
+             }
+ 
++            env->procs_idle++;
++
+             sleep_till.tv_sec = time(NULL) + SYNCPROC_IDLE_TIME;
+             ret = pthread_cond_timedwait(&env->cond, &env->mutex, &sleep_till);
++
++            env->procs_idle--;
+         }
+ 
+         task = list_entry(env->runq.next, struct synctask, all_tasks);
+@@ -540,6 +595,34 @@ unlock:
+     return task;
+ }
+ 
++static void
++synctask_timer(void *data)
++{
++    struct synctask *task = data;
++    struct synccond *cond;
++
++    cond = task->synccond;
++    if (cond != NULL) {
++        pthread_mutex_lock(&cond->pmutex);
++
++        list_del_init(&task->waitq);
++        task->synccond = NULL;
++
++        pthread_mutex_unlock(&cond->pmutex);
++
++        task->ret = -ETIMEDOUT;
++    }
++
++    pthread_mutex_lock(&task->env->mutex);
++
++    gf_timer_call_cancel(task->xl->ctx, task->timer);
++    task->timer = NULL;
++
++    __synctask_wake(task);
++
++    pthread_mutex_unlock(&task->env->mutex);
++}
++
+ void
+ synctask_switchto(struct synctask *task)
+ {
+@@ -572,7 +655,14 @@ synctask_switchto(struct synctask *task)
+         } else {
+             task->slept = 1;
+             __wait(task);
++
++            if (task->delta != NULL) {
++                task->timer = gf_timer_call_after(task->xl->ctx, *task->delta,
++                                                  synctask_timer, task);
++            }
+         }
++
++        task->delta = NULL;
+     }
+     pthread_mutex_unlock(&env->mutex);
+ }
+@@ -580,65 +670,18 @@ synctask_switchto(struct synctask *task)
+ void *
+ syncenv_processor(void *thdata)
+ {
+-    struct syncenv *env = NULL;
+     struct syncproc *proc = NULL;
+     struct synctask *task = NULL;
+ 
+     proc = thdata;
+-    env = proc->env;
+-
+-    for (;;) {
+-        task = syncenv_task(proc);
+-        if (!task)
+-            break;
+ 
++    while ((task = syncenv_task(proc)) != NULL) {
+         synctask_switchto(task);
+-
+-        syncenv_scale(env);
+     }
+ 
+     return NULL;
+ }
+ 
+-void
+-syncenv_scale(struct syncenv *env)
+-{
+-    int diff = 0;
+-    int scale = 0;
+-    int i = 0;
+-    int ret = 0;
+-
+-    pthread_mutex_lock(&env->mutex);
+-    {
+-        if (env->procs > env->runcount)
+-            goto unlock;
+-
+-        scale = env->runcount;
+-        if (scale > env->procmax)
+-            scale = env->procmax;
+-        if (scale > env->procs)
+-            diff = scale - env->procs;
+-        while (diff) {
+-            diff--;
+-            for (; (i < env->procmax); i++) {
+-                if (env->proc[i].processor == 0)
+-                    break;
+-            }
+-
+-            env->proc[i].env = env;
+-            ret = gf_thread_create(&env->proc[i].processor, NULL,
+-                                   syncenv_processor, &env->proc[i],
+-                                   "sproc%03hx", env->procs & 0x3ff);
+-            if (ret)
+-                break;
+-            env->procs++;
+-            i++;
+-        }
+-    }
+-unlock:
+-    pthread_mutex_unlock(&env->mutex);
+-}
+-
+ /* The syncenv threads are cleaned up in this routine.
+  */
+ void
+@@ -715,12 +758,13 @@ syncenv_new(size_t stacksize, int procmin, int procmax)
+         newenv->stacksize = stacksize;
+     newenv->procmin = procmin;
+     newenv->procmax = procmax;
++    newenv->procs_idle = 0;
+ 
+     for (i = 0; i < newenv->procmin; i++) {
+         newenv->proc[i].env = newenv;
+         ret = gf_thread_create(&newenv->proc[i].processor, NULL,
+                                syncenv_processor, &newenv->proc[i], "sproc%d",
+-                               newenv->procs);
++                               i);
+         if (ret)
+             break;
+         newenv->procs++;
+@@ -810,7 +854,7 @@ __synclock_lock(struct synclock *lock)
+             task->woken = 0;
+             list_add_tail(&task->waitq, &lock->waitq);
+             pthread_mutex_unlock(&lock->guard);
+-            synctask_yield(task);
++            synctask_yield(task, NULL);
+             /* task is removed from waitq in unlock,
+              * under lock->guard.*/
+             pthread_mutex_lock(&lock->guard);
+@@ -963,6 +1007,136 @@ synclock_unlock(synclock_t *lock)
+     return ret;
+ }
+ 
++/* Condition variables */
++
++int32_t
++synccond_init(synccond_t *cond)
++{
++    int32_t ret;
++
++    INIT_LIST_HEAD(&cond->waitq);
++
++    ret = pthread_mutex_init(&cond->pmutex, NULL);
++    if (ret != 0) {
++        return -ret;
++    }
++
++    ret = pthread_cond_init(&cond->pcond, NULL);
++    if (ret != 0) {
++        pthread_mutex_destroy(&cond->pmutex);
++    }
++
++    return -ret;
++}
++
++void
++synccond_destroy(synccond_t *cond)
++{
++    pthread_cond_destroy(&cond->pcond);
++    pthread_mutex_destroy(&cond->pmutex);
++}
++
++int
++synccond_timedwait(synccond_t *cond, synclock_t *lock, struct timespec *delta)
++{
++    struct timespec now;
++    struct synctask *task = NULL;
++    int ret;
++
++    task = synctask_get();
++
++    if (task == NULL) {
++        if (delta != NULL) {
++            timespec_now_realtime(&now);
++            timespec_adjust_delta(&now, *delta);
++        }
++
++        pthread_mutex_lock(&cond->pmutex);
++
++        if (delta == NULL) {
++            ret = -pthread_cond_wait(&cond->pcond, &cond->pmutex);
++        } else {
++            ret = -pthread_cond_timedwait(&cond->pcond, &cond->pmutex, &now);
++        }
++    } else {
++        pthread_mutex_lock(&cond->pmutex);
++
++        list_add_tail(&task->waitq, &cond->waitq);
++        task->synccond = cond;
++
++        ret = synclock_unlock(lock);
++        if (ret == 0) {
++            pthread_mutex_unlock(&cond->pmutex);
++
++            synctask_yield(task, delta);
++
++            ret = synclock_lock(lock);
++            if (ret == 0) {
++                ret = task->ret;
++            }
++            task->ret = 0;
++
++            return ret;
++        }
++
++        list_del_init(&task->waitq);
++    }
++
++    pthread_mutex_unlock(&cond->pmutex);
++
++    return ret;
++}
++
++int
++synccond_wait(synccond_t *cond, synclock_t *lock)
++{
++    return synccond_timedwait(cond, lock, NULL);
++}
++
++void
++synccond_signal(synccond_t *cond)
++{
++    struct synctask *task;
++
++    pthread_mutex_lock(&cond->pmutex);
++
++    if (!list_empty(&cond->waitq)) {
++        task = list_first_entry(&cond->waitq, struct synctask, waitq);
++        list_del_init(&task->waitq);
++
++        pthread_mutex_unlock(&cond->pmutex);
++
++        synctask_wake(task);
++    } else {
++        pthread_cond_signal(&cond->pcond);
++
++        pthread_mutex_unlock(&cond->pmutex);
++    }
++}
++
++void
++synccond_broadcast(synccond_t *cond)
++{
++    struct list_head list;
++    struct synctask *task;
++
++    INIT_LIST_HEAD(&list);
++
++    pthread_mutex_lock(&cond->pmutex);
++
++    list_splice_init(&cond->waitq, &list);
++    pthread_cond_broadcast(&cond->pcond);
++
++    pthread_mutex_unlock(&cond->pmutex);
++
++    while (!list_empty(&list)) {
++        task = list_first_entry(&list, struct synctask, waitq);
++        list_del_init(&task->waitq);
++
++        synctask_wake(task);
++    }
++}
++
+ /* Barriers */
+ 
+ int
+@@ -1032,7 +1206,7 @@ __syncbarrier_wait(struct syncbarrier *barrier, int waitfor)
+             /* called within a synctask */
+             list_add_tail(&task->waitq, &barrier->waitq);
+             pthread_mutex_unlock(&barrier->guard);
+-            synctask_yield(task);
++            synctask_yield(task, NULL);
+             pthread_mutex_lock(&barrier->guard);
+         } else {
+             /* called by a non-synctask */
+diff --git a/xlators/cluster/dht/src/dht-rebalance.c b/xlators/cluster/dht/src/dht-rebalance.c
+index c692119..957deaa 100644
+--- a/xlators/cluster/dht/src/dht-rebalance.c
++++ b/xlators/cluster/dht/src/dht-rebalance.c
+@@ -5224,7 +5224,7 @@ gf_defrag_pause_tier(xlator_t *this, gf_defrag_info_t *defrag)
+     defrag->tier_conf.pause_timer = gf_timer_call_after(
+         this->ctx, delta, gf_defrag_pause_tier_timeout, this);
+ 
+-    synctask_yield(defrag->tier_conf.pause_synctask);
++    synctask_yield(defrag->tier_conf.pause_synctask, NULL);
+ 
+     if (gf_defrag_get_pause_state(&defrag->tier_conf) == TIER_PAUSED)
+         goto out;
+diff --git a/xlators/mgmt/glusterd/src/glusterd-op-sm.c b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+index 0d29de2..6475611 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-op-sm.c
++++ b/xlators/mgmt/glusterd/src/glusterd-op-sm.c
+@@ -6076,13 +6076,8 @@ glusterd_op_stage_validate(glusterd_op_t op, dict_t *dict, char **op_errstr,
+ static void
+ glusterd_wait_for_blockers(glusterd_conf_t *priv)
+ {
+-    uint64_t blockers = GF_ATOMIC_GET(priv->blockers);
+-
+-    while (blockers) {
+-        synclock_unlock(&priv->big_lock);
+-        sleep(1);
+-        blockers = GF_ATOMIC_GET(priv->blockers);
+-        synclock_lock(&priv->big_lock);
++    while (GF_ATOMIC_GET(priv->blockers)) {
++        synccond_wait(&priv->cond_blockers, &priv->big_lock);
+     }
+ }
+ 
+diff --git a/xlators/mgmt/glusterd/src/glusterd-proc-mgmt.c b/xlators/mgmt/glusterd/src/glusterd-proc-mgmt.c
+index 36018a0..f55a5fd 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-proc-mgmt.c
++++ b/xlators/mgmt/glusterd/src/glusterd-proc-mgmt.c
+@@ -112,7 +112,7 @@ glusterd_proc_stop(glusterd_proc_t *proc, int sig, int flags)
+         goto out;
+ 
+     synclock_unlock(&conf->big_lock);
+-    sleep(1);
++    synctask_sleep(1);
+     synclock_lock(&conf->big_lock);
+     if (gf_is_service_running(proc->pidfile, &pid)) {
+         ret = kill(pid, SIGKILL);
+diff --git a/xlators/mgmt/glusterd/src/glusterd-snapshot-utils.c b/xlators/mgmt/glusterd/src/glusterd-snapshot-utils.c
+index d225854..386eed2 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-snapshot-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-snapshot-utils.c
+@@ -1961,9 +1961,7 @@ glusterd_update_snaps_synctask(void *opaque)
+     synclock_lock(&conf->big_lock);
+ 
+     while (conf->restart_bricks) {
+-        synclock_unlock(&conf->big_lock);
+-        sleep(2);
+-        synclock_lock(&conf->big_lock);
++        synccond_wait(&conf->cond_restart_bricks, &conf->big_lock);
+     }
+     conf->restart_bricks = _gf_true;
+ 
+@@ -2070,6 +2068,7 @@ out:
+     if (dict)
+         dict_unref(dict);
+     conf->restart_bricks = _gf_false;
++    synccond_broadcast(&conf->cond_restart_bricks);
+ 
+     return ret;
+ }
+diff --git a/xlators/mgmt/glusterd/src/glusterd-syncop.h b/xlators/mgmt/glusterd/src/glusterd-syncop.h
+index ce4a940..a265f21 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-syncop.h
++++ b/xlators/mgmt/glusterd/src/glusterd-syncop.h
+@@ -32,7 +32,7 @@
+         ret = gd_syncop_submit_request(rpc, req, stb, cookie, prog, procnum,   \
+                                        cbk, (xdrproc_t)xdrproc);               \
+         if (!ret)                                                              \
+-            synctask_yield(stb->task);                                         \
++            synctask_yield(stb->task, NULL);                                   \
+         else                                                                   \
+             gf_asprintf(&stb->errstr,                                          \
+                         "%s failed. Check log file"                            \
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index 812c698..ce9931c 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -5068,22 +5068,22 @@ glusterd_import_friend_volumes_synctask(void *opaque)
+      * restarted (refer glusterd_restart_bricks ())
+      */
+     while (conf->restart_bricks) {
+-        synclock_unlock(&conf->big_lock);
+-        sleep(2);
+-        synclock_lock(&conf->big_lock);
++        synccond_wait(&conf->cond_restart_bricks, &conf->big_lock);
+     }
+     conf->restart_bricks = _gf_true;
+ 
+     while (i <= count) {
+         ret = glusterd_import_friend_volume(peer_data, i);
+         if (ret) {
+-            conf->restart_bricks = _gf_false;
+-            goto out;
++            break;
+         }
+         i++;
+     }
+-    glusterd_svcs_manager(NULL);
++    if (i > count) {
++        glusterd_svcs_manager(NULL);
++    }
+     conf->restart_bricks = _gf_false;
++    synccond_broadcast(&conf->cond_restart_bricks);
+ out:
+     if (peer_data)
+         dict_unref(peer_data);
+@@ -5769,7 +5769,9 @@ my_callback(struct rpc_req *req, struct iovec *iov, int count, void *v_frame)
+     call_frame_t *frame = v_frame;
+     glusterd_conf_t *conf = frame->this->private;
+ 
+-    GF_ATOMIC_DEC(conf->blockers);
++    if (GF_ATOMIC_DEC(conf->blockers) == 0) {
++        synccond_broadcast(&conf->cond_blockers);
++    }
+ 
+     STACK_DESTROY(frame->root);
+     return 0;
+@@ -5865,7 +5867,9 @@ attach_brick_callback(struct rpc_req *req, struct iovec *iov, int count,
+         }
+     }
+ out:
+-    GF_ATOMIC_DEC(conf->blockers);
++    if (GF_ATOMIC_DEC(conf->blockers) == 0) {
++        synccond_broadcast(&conf->cond_blockers);
++    }
+     STACK_DESTROY(frame->root);
+     return 0;
+ }
+@@ -6053,7 +6057,7 @@ attach_brick(xlator_t *this, glusterd_brickinfo_t *brickinfo,
+          * TBD: see if there's a better way
+          */
+         synclock_unlock(&conf->big_lock);
+-        sleep(1);
++        synctask_sleep(1);
+         synclock_lock(&conf->big_lock);
+     }
+ 
+@@ -6193,7 +6197,7 @@ find_compat_brick_in_vol(glusterd_conf_t *conf,
+                          "brick %s is still"
+                          " starting, waiting for 2 seconds ",
+                          other_brick->path);
+-            sleep(2);
++            synctask_sleep(2);
+             synclock_lock(&conf->big_lock);
+             retries--;
+         }
+@@ -6680,9 +6684,7 @@ glusterd_restart_bricks(void *opaque)
+      * glusterd_compare_friend_data ())
+      */
+     while (conf->restart_bricks) {
+-        synclock_unlock(&conf->big_lock);
+-        sleep(2);
+-        synclock_lock(&conf->big_lock);
++        synccond_wait(&conf->cond_restart_bricks, &conf->big_lock);
+     }
+     conf->restart_bricks = _gf_true;
+ 
+@@ -6798,6 +6800,7 @@ out:
+     GF_ATOMIC_DEC(conf->blockers);
+     conf->restart_done = _gf_true;
+     conf->restart_bricks = _gf_false;
++    synccond_broadcast(&conf->cond_restart_bricks);
+ 
+ return_block:
+     return ret;
+diff --git a/xlators/mgmt/glusterd/src/glusterd.c b/xlators/mgmt/glusterd/src/glusterd.c
+index d360312..a01034a 100644
+--- a/xlators/mgmt/glusterd/src/glusterd.c
++++ b/xlators/mgmt/glusterd/src/glusterd.c
+@@ -1845,6 +1845,8 @@ init(xlator_t *this)
+     (void)strncpy(conf->rundir, rundir, sizeof(conf->rundir));
+ 
+     synclock_init(&conf->big_lock, SYNC_LOCK_RECURSIVE);
++    synccond_init(&conf->cond_restart_bricks);
++    synccond_init(&conf->cond_blockers);
+     pthread_mutex_init(&conf->xprt_lock, NULL);
+     INIT_LIST_HEAD(&conf->xprt_list);
+     pthread_mutex_init(&conf->import_volumes, NULL);
+diff --git a/xlators/mgmt/glusterd/src/glusterd.h b/xlators/mgmt/glusterd/src/glusterd.h
+index 2be005c..1c6c3b1 100644
+--- a/xlators/mgmt/glusterd/src/glusterd.h
++++ b/xlators/mgmt/glusterd/src/glusterd.h
+@@ -209,6 +209,8 @@ typedef struct {
+     dict_t *opts;
+     synclock_t big_lock;
+     gf_boolean_t restart_done;
++    synccond_t cond_restart_bricks;
++    synccond_t cond_blockers;
+     rpcsvc_t *uds_rpc; /* RPCSVC for the unix domain socket */
+     uint32_t base_port;
+     uint32_t max_port;
+-- 
+1.8.3.1
+

@@ -1,0 +1,86 @@
+From bb39abc1dab3c7b7b725f9eefe119218e94f610b Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Mon, 29 Apr 2019 18:48:36 +0530
+Subject: [PATCH 128/141] glusterd: Fix bulkvoldict thread logic in brick
+ multiplexing
+
+Problem: Currently glusterd spawn bulkvoldict in brick_mux
+         environment while no. of volumes are less than configured
+         glusterd.vol_count_per_thread
+
+Solution: Correct the logic to spawn bulkvoldict thread
+          1) Calculate endindex only while total thread is non zero
+          2) Update end index correctly to pass index for bulkvoldict
+             thread
+
+> Fixes: bz#1704252
+> Change-Id: I1def847fbdd6a605e7687bfc4e42b706bf0eb70b
+> (Cherry picked from commit ac70f66c5805e10b3a1072bd467918730c0aeeb4)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/22647/)
+
+BUG: 1704769
+Change-Id: I1def847fbdd6a605e7687bfc4e42b706bf0eb70b
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/169091
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-utils.c | 24 ++++++++++++++++++------
+ 1 file changed, 18 insertions(+), 6 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index ff6102b..efa5a86 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -3436,9 +3436,19 @@ glusterd_add_bulk_volumes_create_thread(void *data)
+     cds_list_for_each_entry(volinfo, &priv->volumes, vol_list)
+     {
+         count++;
+-        if ((count < start) || (count > end))
++
++        /* Skip volumes if index count is less than start
++           index to handle volume for specific thread
++        */
++        if (count < start)
+             continue;
+ 
++        /* No need to process volume if index count is greater
++           than end index
++        */
++        if (count > end)
++            break;
++
+         ret = glusterd_add_volume_to_dict(volinfo, dict, count, "volume");
+         if (ret)
+             goto out;
+@@ -3499,9 +3509,11 @@ glusterd_add_volumes_to_export_dict(dict_t **peer_data)
+         totthread = 0;
+     } else {
+         totthread = volcnt / vol_per_thread_limit;
+-        endindex = volcnt % vol_per_thread_limit;
+-        if (endindex)
+-            totthread++;
++        if (totthread) {
++            endindex = volcnt % vol_per_thread_limit;
++            if (endindex)
++                totthread++;
++        }
+     }
+ 
+     if (totthread == 0) {
+@@ -3527,10 +3539,10 @@ glusterd_add_volumes_to_export_dict(dict_t **peer_data)
+             arg->this = this;
+             arg->voldict = dict_arr[i];
+             arg->start = start;
+-            if (!endindex) {
++            if ((i + 1) != totthread) {
+                 arg->end = ((i + 1) * vol_per_thread_limit);
+             } else {
+-                arg->end = (start + endindex);
++                arg->end = ((i * vol_per_thread_limit) + endindex);
+             }
+             th_ret = gf_thread_create_detached(
+                 &th_id, glusterd_add_bulk_volumes_create_thread, arg,
+-- 
+1.8.3.1
+

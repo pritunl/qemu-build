@@ -1,0 +1,594 @@
+From 866a4c49ad9c5a9125814a9f843d4c7fd967ab2b Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Mon, 3 Feb 2020 18:10:17 +0530
+Subject: [PATCH 446/449] bitrot: Make number of signer threads configurable
+
+The number of signing process threads (glfs_brpobj)
+is set to 4 by default. The recommendation is to set
+it to number of cores available. This patch makes it
+configurable as follows
+
+gluster vol bitrot <volname> signer-threads <count>
+
+> fixes: bz#1797869
+> Change-Id: Ia883b3e5e34e0bc8d095243508d320c9c9c58adc
+> Signed-off-by: Kotresh HR <khiremat@redhat.com>
+> (Cherry pick from commit 8fad76650bd85463708f59d2518f5b764ae4c702)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/24091/)
+
+BUG: 1790336
+Change-Id: Ia883b3e5e34e0bc8d095243508d320c9c9c58adc
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202780
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ cli/src/cli-cmd-parser.c                           | 29 +++++++-
+ cli/src/cli-cmd-volume.c                           | 12 +++
+ doc/gluster.8                                      |  6 ++
+ libglusterfs/src/glusterfs/common-utils.h          |  1 +
+ rpc/xdr/src/cli1-xdr.x                             |  1 +
+ tests/bitrot/br-signer-threads-config-1797869.t    | 73 +++++++++++++++++++
+ xlators/features/bit-rot/src/bitd/bit-rot.c        | 45 +++++++++---
+ xlators/features/bit-rot/src/bitd/bit-rot.h        | 20 ++---
+ .../bit-rot/src/stub/bit-rot-stub-mem-types.h      |  1 +
+ xlators/mgmt/glusterd/src/glusterd-bitrot.c        | 85 ++++++++++++++++++++++
+ xlators/mgmt/glusterd/src/glusterd-volgen.c        | 16 ++--
+ xlators/mgmt/glusterd/src/glusterd-volume-set.c    |  9 +++
+ 12 files changed, 270 insertions(+), 28 deletions(-)
+ create mode 100644 tests/bitrot/br-signer-threads-config-1797869.t
+
+diff --git a/cli/src/cli-cmd-parser.c b/cli/src/cli-cmd-parser.c
+index 7446b95..5fd05f4 100644
+--- a/cli/src/cli-cmd-parser.c
++++ b/cli/src/cli-cmd-parser.c
+@@ -5661,7 +5661,7 @@ cli_cmd_bitrot_parse(const char **words, int wordcount, dict_t **options)
+     char *volname = NULL;
+     char *opwords[] = {
+         "enable",       "disable", "scrub-throttle", "scrub-frequency", "scrub",
+-        "signing-time", NULL};
++        "signing-time", "signer-threads", NULL};
+     char *scrub_throt_values[] = {"lazy", "normal", "aggressive", NULL};
+     char *scrub_freq_values[] = {"hourly",  "daily",  "weekly", "biweekly",
+                                  "monthly", "minute", NULL};
+@@ -5669,6 +5669,7 @@ cli_cmd_bitrot_parse(const char **words, int wordcount, dict_t **options)
+     dict_t *dict = NULL;
+     gf_bitrot_type type = GF_BITROT_OPTION_TYPE_NONE;
+     int32_t expiry_time = 0;
++    int32_t signer_th_count = 0;
+ 
+     GF_ASSERT(words);
+     GF_ASSERT(options);
+@@ -5849,6 +5850,31 @@ cli_cmd_bitrot_parse(const char **words, int wordcount, dict_t **options)
+             }
+             goto set_type;
+         }
++    } else if (!strcmp(words[3], "signer-threads")) {
++        if (!words[4]) {
++            cli_err(
++                "Missing signer-thread value for bitrot "
++                "option");
++            ret = -1;
++            goto out;
++        } else {
++            type = GF_BITROT_OPTION_TYPE_SIGNER_THREADS;
++
++            signer_th_count = strtol(words[4], NULL, 0);
++            if (signer_th_count < 1) {
++                cli_err("signer-thread count should not be less than 1");
++                ret = -1;
++                goto out;
++            }
++
++            ret = dict_set_uint32(dict, "signer-threads",
++                                  (unsigned int)signer_th_count);
++            if (ret) {
++                cli_out("Failed to set dict for bitrot");
++                goto out;
++            }
++            goto set_type;
++        }
+     } else {
+         cli_err(
+             "Invalid option %s for bitrot. Please enter valid "
+@@ -5857,7 +5883,6 @@ cli_cmd_bitrot_parse(const char **words, int wordcount, dict_t **options)
+         ret = -1;
+         goto out;
+     }
+-
+ set_type:
+     ret = dict_set_int32(dict, "type", type);
+     if (ret < 0)
+diff --git a/cli/src/cli-cmd-volume.c b/cli/src/cli-cmd-volume.c
+index f33fc99..72504ca 100644
+--- a/cli/src/cli-cmd-volume.c
++++ b/cli/src/cli-cmd-volume.c
+@@ -3236,6 +3236,16 @@ struct cli_cmd bitrot_cmds[] = {
+     {"volume bitrot <VOLNAME> {enable|disable}", NULL, /*cli_cmd_bitrot_cbk,*/
+      "Enable/disable bitrot for volume <VOLNAME>"},
+ 
++    {"volume bitrot <VOLNAME> signing-time <time-in-secs>",
++     NULL, /*cli_cmd_bitrot_cbk,*/
++     "Waiting time for an object after last fd is closed to start signing "
++     "process"},
++
++    {"volume bitrot <VOLNAME> signer-threads <count>",
++     NULL, /*cli_cmd_bitrot_cbk,*/
++     "Number of signing process threads. Usually set to number of available "
++     "cores"},
++
+     {"volume bitrot <VOLNAME> scrub-throttle {lazy|normal|aggressive}",
+      NULL, /*cli_cmd_bitrot_cbk,*/
+      "Set the speed of the scrubber for volume <VOLNAME>"},
+@@ -3251,6 +3261,8 @@ struct cli_cmd bitrot_cmds[] = {
+      "the scrubber. ondemand starts the scrubber immediately."},
+ 
+     {"volume bitrot <VOLNAME> {enable|disable}\n"
++     "volume bitrot <VOLNAME> signing-time <time-in-secs>\n"
++     "volume bitrot <VOLNAME> signer-threads <count>\n"
+      "volume bitrot <volname> scrub-throttle {lazy|normal|aggressive}\n"
+      "volume bitrot <volname> scrub-frequency {hourly|daily|weekly|biweekly"
+      "|monthly}\n"
+diff --git a/doc/gluster.8 b/doc/gluster.8
+index 66bdb48..084346d 100644
+--- a/doc/gluster.8
++++ b/doc/gluster.8
+@@ -244,6 +244,12 @@ Use "!<OPTION>" to reset option <OPTION> to default value.
+ \fB\ volume bitrot <VOLNAME> {enable|disable} \fR
+ Enable/disable bitrot for volume <VOLNAME>
+ .TP
++\fB\ volume bitrot <VOLNAME> signing-time <time-in-secs> \fR
++Waiting time for an object after last fd is closed to start signing process.
++.TP
++\fB\ volume bitrot <VOLNAME> signer-threads <count> \fR
++Number of signing process threads. Usually set to number of available cores.
++.TP
+ \fB\ volume bitrot <VOLNAME> scrub-throttle {lazy|normal|aggressive} \fR
+ Scrub-throttle value is a measure of how fast or slow the scrubber scrubs the filesystem for volume <VOLNAME>
+ .TP
+diff --git a/libglusterfs/src/glusterfs/common-utils.h b/libglusterfs/src/glusterfs/common-utils.h
+index 0e2ecc7..f0a0a41 100644
+--- a/libglusterfs/src/glusterfs/common-utils.h
++++ b/libglusterfs/src/glusterfs/common-utils.h
+@@ -126,6 +126,7 @@ trap(void);
+ 
+ /* Default value of signing waiting time to sign a file for bitrot */
+ #define SIGNING_TIMEOUT "120"
++#define BR_WORKERS "4"
+ 
+ /* xxhash */
+ #define GF_XXH64_DIGEST_LENGTH 8
+diff --git a/rpc/xdr/src/cli1-xdr.x b/rpc/xdr/src/cli1-xdr.x
+index a32c864..777cb00 100644
+--- a/rpc/xdr/src/cli1-xdr.x
++++ b/rpc/xdr/src/cli1-xdr.x
+@@ -68,6 +68,7 @@ enum gf_bitrot_type {
+         GF_BITROT_OPTION_TYPE_EXPIRY_TIME,
+         GF_BITROT_CMD_SCRUB_STATUS,
+         GF_BITROT_CMD_SCRUB_ONDEMAND,
++        GF_BITROT_OPTION_TYPE_SIGNER_THREADS,
+         GF_BITROT_OPTION_TYPE_MAX
+ };
+ 
+diff --git a/tests/bitrot/br-signer-threads-config-1797869.t b/tests/bitrot/br-signer-threads-config-1797869.t
+new file mode 100644
+index 0000000..657ef3e
+--- /dev/null
++++ b/tests/bitrot/br-signer-threads-config-1797869.t
+@@ -0,0 +1,73 @@
++#!/bin/bash
++
++. $(dirname $0)/../include.rc
++. $(dirname $0)/../volume.rc
++. $(dirname $0)/../cluster.rc
++
++function get_bitd_count_1 {
++        ps auxww | grep glusterfs | grep bitd.pid | grep -v grep | grep $H1 | wc -l
++}
++
++function get_bitd_count_2 {
++        ps auxww | grep glusterfs | grep bitd.pid | grep -v grep | grep $H2 | wc -l
++}
++
++function get_bitd_pid_1 {
++        ps auxww | grep glusterfs | grep bitd.pid | grep -v grep | grep $H1 | awk '{print $2}'
++}
++
++function get_bitd_pid_2 {
++        ps auxww | grep glusterfs | grep bitd.pid | grep -v grep | grep $H2 | awk '{print $2}'
++}
++
++function get_signer_th_count_1 {
++        ps -eL | grep $(get_bitd_pid_1) | grep glfs_brpobj | wc -l
++}
++
++function get_signer_th_count_2 {
++        ps -eL | grep $(get_bitd_pid_2) | grep glfs_brpobj | wc -l
++}
++
++cleanup;
++
++TEST launch_cluster 2
++
++TEST $CLI_1 peer probe $H2;
++EXPECT_WITHIN $PROBE_TIMEOUT 1 peer_count;
++
++TEST $CLI_1 volume create $V0 $H1:$B1
++TEST $CLI_1 volume create $V1 $H2:$B2
++EXPECT 'Created' volinfo_field_1 $V0 'Status';
++EXPECT 'Created' volinfo_field_1 $V1 'Status';
++
++TEST $CLI_1 volume start $V0
++TEST $CLI_1 volume start $V1
++EXPECT 'Started' volinfo_field_1 $V0 'Status';
++EXPECT 'Started' volinfo_field_1 $V1 'Status';
++
++#Enable bitrot
++TEST $CLI_1 volume bitrot $V0 enable
++TEST $CLI_1 volume bitrot $V1 enable
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" get_bitd_count_1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" get_bitd_count_2
++
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "4" get_signer_th_count_1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "4" get_signer_th_count_2
++
++old_bitd_pid_1=$(get_bitd_pid_1)
++old_bitd_pid_2=$(get_bitd_pid_2)
++TEST $CLI_1 volume bitrot $V0 signer-threads 1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" get_signer_th_count_1
++EXPECT_NOT "$old_bitd_pid_1" get_bitd_pid_1;
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "4" get_signer_th_count_2
++EXPECT "$old_bitd_pid_2" get_bitd_pid_2;
++
++old_bitd_pid_1=$(get_bitd_pid_1)
++old_bitd_pid_2=$(get_bitd_pid_2)
++TEST $CLI_1 volume bitrot $V1 signer-threads 2
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "2" get_signer_th_count_2
++EXPECT_NOT "$old_bitd_pid_2" get_bitd_pid_2;
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" get_signer_th_count_1
++EXPECT "$old_bitd_pid_1" get_bitd_pid_1;
++
++cleanup;
+diff --git a/xlators/features/bit-rot/src/bitd/bit-rot.c b/xlators/features/bit-rot/src/bitd/bit-rot.c
+index 7b1c5dc..b8feef7 100644
+--- a/xlators/features/bit-rot/src/bitd/bit-rot.c
++++ b/xlators/features/bit-rot/src/bitd/bit-rot.c
+@@ -1734,22 +1734,26 @@ out:
+     return 0;
+ }
+ 
+-/**
+- * Initialize signer specific structures, spawn worker threads.
+- */
+-
+ static void
+ br_fini_signer(xlator_t *this, br_private_t *priv)
+ {
+     int i = 0;
+ 
+-    for (; i < BR_WORKERS; i++) {
++    if (priv == NULL)
++        return;
++
++    for (; i < priv->signer_th_count; i++) {
+         (void)gf_thread_cleanup_xint(priv->obj_queue->workers[i]);
+     }
++    GF_FREE(priv->obj_queue->workers);
+ 
+     pthread_cond_destroy(&priv->object_cond);
+ }
+ 
++/**
++ * Initialize signer specific structures, spawn worker threads.
++ */
++
+ static int32_t
+ br_init_signer(xlator_t *this, br_private_t *priv)
+ {
+@@ -1769,7 +1773,12 @@ br_init_signer(xlator_t *this, br_private_t *priv)
+         goto cleanup_cond;
+     INIT_LIST_HEAD(&priv->obj_queue->objects);
+ 
+-    for (i = 0; i < BR_WORKERS; i++) {
++    priv->obj_queue->workers = GF_CALLOC(
++        priv->signer_th_count, sizeof(pthread_t), gf_br_mt_br_worker_t);
++    if (!priv->obj_queue->workers)
++        goto cleanup_obj_queue;
++
++    for (i = 0; i < priv->signer_th_count; i++) {
+         ret = gf_thread_create(&priv->obj_queue->workers[i], NULL,
+                                br_process_object, this, "brpobj");
+         if (ret != 0) {
+@@ -1787,7 +1796,9 @@ cleanup_threads:
+     for (i--; i >= 0; i--) {
+         (void)gf_thread_cleanup_xint(priv->obj_queue->workers[i]);
+     }
++    GF_FREE(priv->obj_queue->workers);
+ 
++cleanup_obj_queue:
+     GF_FREE(priv->obj_queue);
+ 
+ cleanup_cond:
+@@ -1840,7 +1851,7 @@ br_rate_limit_signer(xlator_t *this, int child_count, int numbricks)
+     if (contribution == 0)
+         contribution = 1;
+     spec.rate = BR_HASH_CALC_READ_SIZE * contribution;
+-    spec.maxlimit = BR_WORKERS * BR_HASH_CALC_READ_SIZE;
++    spec.maxlimit = priv->signer_th_count * BR_HASH_CALC_READ_SIZE;
+ 
+ #endif
+ 
+@@ -1860,11 +1871,16 @@ br_rate_limit_signer(xlator_t *this, int child_count, int numbricks)
+ static int32_t
+ br_signer_handle_options(xlator_t *this, br_private_t *priv, dict_t *options)
+ {
+-    if (options)
++    if (options) {
+         GF_OPTION_RECONF("expiry-time", priv->expiry_time, options, uint32,
+                          error_return);
+-    else
++        GF_OPTION_RECONF("signer-threads", priv->signer_th_count, options,
++                         uint32, error_return);
++    } else {
+         GF_OPTION_INIT("expiry-time", priv->expiry_time, uint32, error_return);
++        GF_OPTION_INIT("signer-threads", priv->signer_th_count, uint32,
++                       error_return);
++    }
+ 
+     return 0;
+ 
+@@ -1880,6 +1896,8 @@ br_signer_init(xlator_t *this, br_private_t *priv)
+ 
+     GF_OPTION_INIT("expiry-time", priv->expiry_time, uint32, error_return);
+     GF_OPTION_INIT("brick-count", numbricks, int32, error_return);
++    GF_OPTION_INIT("signer-threads", priv->signer_th_count, uint32,
++                   error_return);
+ 
+     ret = br_rate_limit_signer(this, priv->child_count, numbricks);
+     if (ret)
+@@ -2210,6 +2228,15 @@ struct volume_options options[] = {
+         .description = "Pause/Resume scrub. Upon resume, scrubber "
+                        "continues from where it left off.",
+     },
++    {
++        .key = {"signer-threads"},
++        .type = GF_OPTION_TYPE_INT,
++        .default_value = BR_WORKERS,
++        .op_version = {GD_OP_VERSION_7_0},
++        .flags = OPT_FLAG_SETTABLE,
++        .description = "Number of signing process threads. As a best "
++                       "practice, set this to the number of processor cores",
++    },
+     {.key = {NULL}},
+ };
+ 
+diff --git a/xlators/features/bit-rot/src/bitd/bit-rot.h b/xlators/features/bit-rot/src/bitd/bit-rot.h
+index a4d4fd7..8ac7dcd 100644
+--- a/xlators/features/bit-rot/src/bitd/bit-rot.h
++++ b/xlators/features/bit-rot/src/bitd/bit-rot.h
+@@ -30,12 +30,6 @@
+ 
+ #include <openssl/sha.h>
+ 
+-/**
+- * TODO: make this configurable. As a best practice, set this to the
+- * number of processor cores.
+- */
+-#define BR_WORKERS 4
+-
+ typedef enum scrub_throttle {
+     BR_SCRUB_THROTTLE_VOID = -1,
+     BR_SCRUB_THROTTLE_LAZY = 0,
+@@ -108,12 +102,12 @@ struct br_child {
+ typedef struct br_child br_child_t;
+ 
+ struct br_obj_n_workers {
+-    struct list_head objects;      /* queue of objects expired from the
+-                                      timer wheel and ready to be picked
+-                                      up for signing */
+-    pthread_t workers[BR_WORKERS]; /* Threads which pick up the objects
+-                                      from the above queue and start
+-                                      signing each object */
++    struct list_head objects; /* queue of objects expired from the
++                                 timer wheel and ready to be picked
++                                 up for signing */
++    pthread_t *workers;       /* Threads which pick up the objects
++                                 from the above queue and start
++                                 signing each object */
+ };
+ 
+ struct br_scrubber {
+@@ -209,6 +203,8 @@ struct br_private {
+ 
+     uint32_t expiry_time; /* objects "wait" time */
+ 
++    uint32_t signer_th_count; /* Number of signing process threads */
++
+     tbf_t *tbf; /* token bucket filter */
+ 
+     gf_boolean_t iamscrubber; /* function as a fs scrubber */
+diff --git a/xlators/features/bit-rot/src/stub/bit-rot-stub-mem-types.h b/xlators/features/bit-rot/src/stub/bit-rot-stub-mem-types.h
+index 40bcda1..9d93caf 100644
+--- a/xlators/features/bit-rot/src/stub/bit-rot-stub-mem-types.h
++++ b/xlators/features/bit-rot/src/stub/bit-rot-stub-mem-types.h
+@@ -29,6 +29,7 @@ enum br_mem_types {
+     gf_br_stub_mt_sigstub_t,
+     gf_br_mt_br_child_event_t,
+     gf_br_stub_mt_misc,
++    gf_br_mt_br_worker_t,
+     gf_br_stub_mt_end,
+ };
+ 
+diff --git a/xlators/mgmt/glusterd/src/glusterd-bitrot.c b/xlators/mgmt/glusterd/src/glusterd-bitrot.c
+index c653249..f79af2d 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-bitrot.c
++++ b/xlators/mgmt/glusterd/src/glusterd-bitrot.c
+@@ -34,6 +34,7 @@ const char *gd_bitrot_op_list[GF_BITROT_OPTION_TYPE_MAX] = {
+     [GF_BITROT_OPTION_TYPE_SCRUB_FREQ] = "scrub-frequency",
+     [GF_BITROT_OPTION_TYPE_SCRUB] = "scrub",
+     [GF_BITROT_OPTION_TYPE_EXPIRY_TIME] = "expiry-time",
++    [GF_BITROT_OPTION_TYPE_SIGNER_THREADS] = "signer-threads",
+ };
+ 
+ int
+@@ -354,6 +355,81 @@ out:
+     return ret;
+ }
+ 
++static gf_boolean_t
++is_bitd_configure_noop(xlator_t *this, glusterd_volinfo_t *volinfo)
++{
++    gf_boolean_t noop = _gf_true;
++    glusterd_brickinfo_t *brickinfo = NULL;
++
++    if (!glusterd_is_bitrot_enabled(volinfo))
++        goto out;
++    else if (volinfo->status != GLUSTERD_STATUS_STARTED)
++        goto out;
++    else {
++        cds_list_for_each_entry(brickinfo, &volinfo->bricks, brick_list)
++        {
++            if (!glusterd_is_local_brick(this, volinfo, brickinfo))
++                continue;
++            noop = _gf_false;
++            return noop;
++        }
++    }
++out:
++    return noop;
++}
++
++static int
++glusterd_bitrot_signer_threads(glusterd_volinfo_t *volinfo, dict_t *dict,
++                               char *key, char **op_errstr)
++{
++    int32_t ret = -1;
++    uint32_t signer_th_count = 0;
++    uint32_t existing_th_count = 0;
++    xlator_t *this = NULL;
++    glusterd_conf_t *priv = NULL;
++    char dkey[32] = {
++        0,
++    };
++
++    this = THIS;
++    GF_ASSERT(this);
++
++    priv = this->private;
++    GF_VALIDATE_OR_GOTO(this->name, priv, out);
++
++    ret = dict_get_uint32(dict, "signer-threads", &signer_th_count);
++    if (ret) {
++        gf_msg(this->name, GF_LOG_ERROR, errno, GD_MSG_DICT_GET_FAILED,
++               "Unable to get bitrot signer thread count.");
++        goto out;
++    }
++
++    ret = dict_get_uint32(volinfo->dict, key, &existing_th_count);
++    if (ret == 0 && signer_th_count == existing_th_count) {
++        goto out;
++    }
++
++    snprintf(dkey, sizeof(dkey), "%d", signer_th_count);
++    ret = dict_set_dynstr_with_alloc(volinfo->dict, key, dkey);
++    if (ret) {
++        gf_msg(this->name, GF_LOG_ERROR, errno, GD_MSG_DICT_SET_FAILED,
++               "Failed to set option %s", key);
++        goto out;
++    }
++
++    if (!is_bitd_configure_noop(this, volinfo)) {
++        ret = priv->bitd_svc.manager(&(priv->bitd_svc), NULL,
++                                     PROC_START_NO_WAIT);
++        if (ret) {
++            gf_msg(this->name, GF_LOG_ERROR, 0, GD_MSG_BITDSVC_RECONF_FAIL,
++                   "Failed to reconfigure bitrot services");
++            goto out;
++        }
++    }
++out:
++    return ret;
++}
++
+ static int
+ glusterd_bitrot_enable(glusterd_volinfo_t *volinfo, char **op_errstr)
+ {
+@@ -594,6 +670,15 @@ glusterd_op_bitrot(dict_t *dict, char **op_errstr, dict_t *rsp_dict)
+                 volinfo, dict, "features.expiry-time", op_errstr);
+             if (ret)
+                 goto out;
++            break;
++
++        case GF_BITROT_OPTION_TYPE_SIGNER_THREADS:
++            ret = glusterd_bitrot_signer_threads(
++                volinfo, dict, "features.signer-threads", op_errstr);
++            if (ret)
++                goto out;
++            break;
++
+         case GF_BITROT_CMD_SCRUB_STATUS:
+         case GF_BITROT_CMD_SCRUB_ONDEMAND:
+             break;
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volgen.c b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+index 13f84ea..094a71f 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volgen.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volgen.c
+@@ -4658,6 +4658,12 @@ bitrot_option_handler(volgen_graph_t *graph, struct volopt_map_entry *vme,
+             return -1;
+     }
+ 
++    if (!strcmp(vme->option, "signer-threads")) {
++        ret = xlator_set_fixed_option(xl, "signer-threads", vme->value);
++        if (ret)
++            return -1;
++    }
++
+     return ret;
+ }
+ 
+@@ -4940,18 +4946,18 @@ glusterd_prepare_shd_volume_options_for_tier(glusterd_volinfo_t *volinfo,
+                                              dict_t *set_dict)
+ {
+     int ret = -1;
+-    char           *key             = NULL;
++    char *key = NULL;
+ 
+-    key = volgen_get_shd_key (volinfo->tier_info.cold_type);
++    key = volgen_get_shd_key(volinfo->tier_info.cold_type);
+     if (key) {
+-        ret = dict_set_str (set_dict, key, "enable");
++        ret = dict_set_str(set_dict, key, "enable");
+         if (ret)
+             goto out;
+     }
+ 
+-    key = volgen_get_shd_key (volinfo->tier_info.hot_type);
++    key = volgen_get_shd_key(volinfo->tier_info.hot_type);
+     if (key) {
+-        ret = dict_set_str (set_dict, key, "enable");
++        ret = dict_set_str(set_dict, key, "enable");
+         if (ret)
+             goto out;
+     }
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-set.c b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+index 9001b88..62acadf 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-set.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-set.c
+@@ -3379,6 +3379,15 @@ struct volopt_map_entry glusterd_volopt_map[] = {
+         .op_version = GD_OP_VERSION_3_7_0,
+         .type = NO_DOC,
+     },
++    {
++        .key = "features.signer-threads",
++        .voltype = "features/bit-rot",
++        .value = BR_WORKERS,
++        .option = "signer-threads",
++        .op_version = GD_OP_VERSION_7_0,
++        .type = NO_DOC,
++    },
++    /* Upcall translator options */
+     /* Upcall translator options */
+     {
+         .key = "features.cache-invalidation",
+-- 
+1.8.3.1
+

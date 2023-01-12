@@ -1,0 +1,299 @@
+From d7bb933742f4d9135621590bf13713633c549af1 Mon Sep 17 00:00:00 2001
+From: Aravinda VK <avishwan@redhat.com>
+Date: Thu, 14 Mar 2019 20:06:54 +0530
+Subject: [PATCH 52/52] geo-rep: IPv6 support
+
+`address_family=inet6` needs to be added while mounting master and
+slave volumes in gverify script.
+
+New option introduced to gluster cli(`--inet6`) which will be used
+internally by geo-rep while calling `gluster volume info
+--remote-host=<ipv6>`.
+
+Backport of https://review.gluster.org/22363
+
+Fixes: bz#1688231
+Change-Id: I1e0d42cae07158df043e64a2f991882d8c897837
+Signed-off-by: Aravinda VK <avishwan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167120
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ cli/src/cli.c                                | 11 ++++++++++
+ cli/src/cli.h                                |  1 +
+ geo-replication/src/gverify.sh               | 22 ++++++++++++++++----
+ geo-replication/syncdaemon/argsupgrade.py    | 13 +++++++++++-
+ geo-replication/syncdaemon/gsyncd.py         |  1 +
+ geo-replication/syncdaemon/subcmds.py        |  9 +++++++--
+ xlators/mgmt/glusterd/src/glusterd-geo-rep.c | 30 ++++++++++++++++++++++++++--
+ 7 files changed, 78 insertions(+), 9 deletions(-)
+
+diff --git a/cli/src/cli.c b/cli/src/cli.c
+index 08f117e..c33d152 100644
+--- a/cli/src/cli.c
++++ b/cli/src/cli.c
+@@ -433,6 +433,12 @@ cli_opt_parse(char *opt, struct cli_state *state)
+         return 0;
+     }
+ 
++    oarg = strtail(opt, "inet6");
++    if (oarg) {
++        state->address_family = "inet6";
++        return 0;
++    }
++
+     oarg = strtail(opt, "log-file=");
+     if (oarg) {
+         state->log_file = oarg;
+@@ -679,6 +685,11 @@ cli_rpc_init(struct cli_state *state)
+     this = THIS;
+     cli_rpc_prog = &cli_prog;
+ 
++    /* If address family specified in CLI */
++    if (state->address_family) {
++        addr_family = state->address_family;
++    }
++
+     /* Connect to glusterd using the specified method, giving preference
+      * to a unix socket connection.  If nothing is specified, connect to
+      * the default glusterd socket.
+diff --git a/cli/src/cli.h b/cli/src/cli.h
+index 5df86d5..b79a0a2 100644
+--- a/cli/src/cli.h
++++ b/cli/src/cli.h
+@@ -136,6 +136,7 @@ struct cli_state {
+     gf_loglevel_t log_level;
+ 
+     char *glusterd_sock;
++    char *address_family;
+ };
+ 
+ struct cli_local {
+diff --git a/geo-replication/src/gverify.sh b/geo-replication/src/gverify.sh
+index d048de0..7c88f9f 100755
+--- a/geo-replication/src/gverify.sh
++++ b/geo-replication/src/gverify.sh
+@@ -94,6 +94,7 @@ echo $cmd_line;
+ function master_stats()
+ {
+     MASTERVOL=$1;
++    local inet6=$2;
+     local d;
+     local i;
+     local disk_size;
+@@ -102,7 +103,12 @@ function master_stats()
+     local m_status;
+ 
+     d=$(mktemp -d -t ${0##*/}.XXXXXX 2>/dev/null);
+-    glusterfs -s localhost --xlator-option="*dht.lookup-unhashed=off" --volfile-id $MASTERVOL -l $master_log_file $d;
++    if [ "$inet6" = "inet6" ]; then
++        glusterfs -s localhost --xlator-option="*dht.lookup-unhashed=off" --xlator-option="transport.address-family=inet6" --volfile-id $MASTERVOL -l $master_log_file $d;
++    else
++        glusterfs -s localhost --xlator-option="*dht.lookup-unhashed=off" --volfile-id $MASTERVOL -l $master_log_file $d;
++    fi
++
+     i=$(get_inode_num $d);
+     if [[ "$i" -ne "1" ]]; then
+         echo 0:0;
+@@ -124,12 +130,18 @@ function slave_stats()
+     SLAVEUSER=$1;
+     SLAVEHOST=$2;
+     SLAVEVOL=$3;
++    local inet6=$4;
+     local cmd_line;
+     local ver;
+     local status;
+ 
+     d=$(mktemp -d -t ${0##*/}.XXXXXX 2>/dev/null);
+-    glusterfs --xlator-option="*dht.lookup-unhashed=off" --volfile-server $SLAVEHOST --volfile-id $SLAVEVOL -l $slave_log_file $d;
++    if [ "$inet6" = "inet6" ]; then
++        glusterfs --xlator-option="*dht.lookup-unhashed=off" --xlator-option="transport.address-family=inet6" --volfile-server $SLAVEHOST --volfile-id $SLAVEVOL -l $slave_log_file $d;
++    else
++        glusterfs --xlator-option="*dht.lookup-unhashed=off" --volfile-server $SLAVEHOST --volfile-id $SLAVEVOL -l $slave_log_file $d;
++    fi
++
+     i=$(get_inode_num $d);
+     if [[ "$i" -ne "1" ]]; then
+         echo 0:0;
+@@ -167,6 +179,8 @@ function main()
+     log_file=$6
+     > $log_file
+ 
++    inet6=$7
++
+     # Use FORCE_BLOCKER flag in the error message to differentiate
+     # between the errors which the force command should bypass
+ 
+@@ -204,8 +218,8 @@ function main()
+     fi;
+ 
+     ERRORS=0;
+-    master_data=$(master_stats $1);
+-    slave_data=$(slave_stats $2 $3 $4);
++    master_data=$(master_stats $1 ${inet6});
++    slave_data=$(slave_stats $2 $3 $4 ${inet6});
+     master_disk_size=$(echo $master_data | cut -f1 -d':');
+     slave_disk_size=$(echo $slave_data | cut -f1 -d':');
+     master_used_size=$(echo $master_data | cut -f2 -d':');
+diff --git a/geo-replication/syncdaemon/argsupgrade.py b/geo-replication/syncdaemon/argsupgrade.py
+index 4018143..7af4063 100644
+--- a/geo-replication/syncdaemon/argsupgrade.py
++++ b/geo-replication/syncdaemon/argsupgrade.py
+@@ -84,6 +84,10 @@ def upgrade():
+     # fail when it does stat to check the existence.
+     init_gsyncd_template_conf()
+ 
++    inet6 = False
++    if "--inet6" in sys.argv:
++        inet6 = True
++
+     if "--monitor" in sys.argv:
+         # python gsyncd.py --path=/bricks/b1
+         # --monitor -c gsyncd.conf
+@@ -147,8 +151,11 @@ def upgrade():
+ 
+             user, hname = remote_addr.split("@")
+ 
++            if not inet6:
++                hname = gethostbyname(hname)
++
+             print(("ssh://%s@%s:gluster://127.0.0.1:%s" % (
+-                user, gethostbyname(hname), vol)))
++                user, hname, vol)))
+ 
+         sys.exit(0)
+     elif "--normalize-url" in sys.argv:
+@@ -346,3 +353,7 @@ def upgrade():
+ 
+         if pargs.reset_sync_time:
+             sys.argv.append("--reset-sync-time")
++
++    if inet6:
++        # Add `--inet6` as first argument
++        sys.argv = [sys.argv[0], "--inet6"] + sys.argv[1:]
+diff --git a/geo-replication/syncdaemon/gsyncd.py b/geo-replication/syncdaemon/gsyncd.py
+index 037f351..effe0ce 100644
+--- a/geo-replication/syncdaemon/gsyncd.py
++++ b/geo-replication/syncdaemon/gsyncd.py
+@@ -47,6 +47,7 @@ def main():
+         sys.exit(0)
+ 
+     parser = ArgumentParser()
++    parser.add_argument("--inet6", action="store_true")
+     sp = parser.add_subparsers(dest="subcmd")
+ 
+     # Monitor Status File update
+diff --git a/geo-replication/syncdaemon/subcmds.py b/geo-replication/syncdaemon/subcmds.py
+index 30050ec..4ece7e0 100644
+--- a/geo-replication/syncdaemon/subcmds.py
++++ b/geo-replication/syncdaemon/subcmds.py
+@@ -110,8 +110,13 @@ def subcmd_voluuidget(args):
+ 
+     ParseError = XET.ParseError if hasattr(XET, 'ParseError') else SyntaxError
+ 
+-    po = Popen(['gluster', '--xml', '--remote-host=' + args.host,
+-                'volume', 'info', args.volname], bufsize=0,
++    cmd = ['gluster', '--xml', '--remote-host=' + args.host,
++           'volume', 'info', args.volname]
++
++    if args.inet6:
++        cmd.append("--inet6")
++
++    po = Popen(cmd, bufsize=0,
+                stdin=None, stdout=PIPE, stderr=PIPE,
+                universal_newlines=True)
+ 
+diff --git a/xlators/mgmt/glusterd/src/glusterd-geo-rep.c b/xlators/mgmt/glusterd/src/glusterd-geo-rep.c
+index 49baa58..0f40bea 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-geo-rep.c
++++ b/xlators/mgmt/glusterd/src/glusterd-geo-rep.c
+@@ -76,6 +76,19 @@ static char *gsync_reserved_opts[] = {"gluster-command",
+ static char *gsync_no_restart_opts[] = {"checkpoint", "log_rsync_performance",
+                                         "log-rsync-performance", NULL};
+ 
++void
++set_gsyncd_inet6_arg(runner_t *runner)
++{
++    xlator_t *this = NULL;
++    char *af;
++    int ret;
++
++    this = THIS;
++    ret = dict_get_str(this->options, "transport.address-family", &af);
++    if (ret == 0)
++        runner_argprintf(runner, "--%s", af);
++}
++
+ int
+ __glusterd_handle_sys_exec(rpcsvc_request_t *req)
+ {
+@@ -384,6 +397,7 @@ glusterd_urltransform_init(runner_t *runner, const char *transname)
+ {
+     runinit(runner);
+     runner_add_arg(runner, GSYNCD_PREFIX "/gsyncd");
++    set_gsyncd_inet6_arg(runner);
+     runner_argprintf(runner, "--%s-url", transname);
+ }
+ 
+@@ -725,6 +739,7 @@ glusterd_get_slave_voluuid(char *slave_host, char *slave_vol, char *vol_uuid)
+ 
+     runinit(&runner);
+     runner_add_arg(&runner, GSYNCD_PREFIX "/gsyncd");
++    set_gsyncd_inet6_arg(&runner);
+     runner_add_arg(&runner, "--slavevoluuid-get");
+     runner_argprintf(&runner, "%s::%s", slave_host, slave_vol);
+ 
+@@ -788,6 +803,7 @@ glusterd_gsync_get_config(char *master, char *slave, char *conf_path,
+     runinit(&runner);
+     runner_add_args(&runner, GSYNCD_PREFIX "/gsyncd", "-c", NULL);
+     runner_argprintf(&runner, "%s", conf_path);
++    set_gsyncd_inet6_arg(&runner);
+     runner_argprintf(&runner, "--iprefix=%s", DATADIR);
+     runner_argprintf(&runner, ":%s", master);
+     runner_add_args(&runner, slave, "--config-get-all", NULL);
+@@ -917,6 +933,7 @@ glusterd_gsync_get_status(char *master, char *slave, char *conf_path,
+     runinit(&runner);
+     runner_add_args(&runner, GSYNCD_PREFIX "/gsyncd", "-c", NULL);
+     runner_argprintf(&runner, "%s", conf_path);
++    set_gsyncd_inet6_arg(&runner);
+     runner_argprintf(&runner, "--iprefix=%s", DATADIR);
+     runner_argprintf(&runner, ":%s", master);
+     runner_add_args(&runner, slave, "--status-get", NULL);
+@@ -937,6 +954,7 @@ glusterd_gsync_get_param_file(char *prmfile, const char *param, char *master,
+     runinit(&runner);
+     runner_add_args(&runner, GSYNCD_PREFIX "/gsyncd", "-c", NULL);
+     runner_argprintf(&runner, "%s", conf_path);
++    set_gsyncd_inet6_arg(&runner);
+     runner_argprintf(&runner, "--iprefix=%s", DATADIR);
+     runner_argprintf(&runner, ":%s", master);
+     runner_add_args(&runner, slave, "--config-get", NULL);
+@@ -2811,6 +2829,7 @@ glusterd_verify_slave(char *volname, char *slave_url, char *slave_vol,
+     char *slave_ip = NULL;
+     glusterd_conf_t *priv = NULL;
+     xlator_t *this = NULL;
++    char *af = NULL;
+ 
+     this = THIS;
+     GF_ASSERT(this);
+@@ -2852,9 +2871,16 @@ glusterd_verify_slave(char *volname, char *slave_url, char *slave_vol,
+     runner_argprintf(&runner, "%s", slave_vol);
+     runner_argprintf(&runner, "%d", ssh_port);
+     runner_argprintf(&runner, "%s", log_file_path);
+-    gf_msg_debug(this->name, 0, "gverify Args = %s %s %s %s %s %s %s",
++    ret = dict_get_str(this->options, "transport.address-family", &af);
++    if (ret)
++        af = "-";
++
++    runner_argprintf(&runner, "%s", af);
++
++    gf_msg_debug(this->name, 0, "gverify Args = %s %s %s %s %s %s %s %s",
+                  runner.argv[0], runner.argv[1], runner.argv[2], runner.argv[3],
+-                 runner.argv[4], runner.argv[5], runner.argv[6]);
++                 runner.argv[4], runner.argv[5], runner.argv[6],
++                 runner.argv[7]);
+     runner_redir(&runner, STDOUT_FILENO, RUN_PIPE);
+     synclock_unlock(&priv->big_lock);
+     ret = runner_run(&runner);
+-- 
+1.8.3.1
+

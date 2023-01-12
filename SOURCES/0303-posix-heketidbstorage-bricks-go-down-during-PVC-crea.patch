@@ -1,0 +1,45 @@
+From ae4f538065d26a277e38810c6eef18c0312cd1f3 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Thu, 26 Sep 2019 17:52:30 +0530
+Subject: [PATCH 303/304] posix: heketidbstorage bricks go down during PVC
+ creation
+
+Problem: In OCS environment heketidbstorage is detached due
+         to health_check thread is failed.Sometime aio_write
+         is not successfully finished within default health-check-timeout
+         limit and the brick is detached.
+
+Solution: To avoid the issue increase default timeout to 20s
+
+> Change-Id: Idff283d5713da571f9d20a6b296274f69c3e5b7b
+> Fixes: bz#1755900
+> Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+> (Cherry picked from commit c6df9e962483bac5bfcd8916318b19040387ce81)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/23495/)
+
+Change-Id: Idff283d5713da571f9d20a6b296274f69c3e5b7b
+BUG: 1752713
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/182387
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/storage/posix/src/posix-common.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/storage/posix/src/posix-common.c b/xlators/storage/posix/src/posix-common.c
+index 69857d9..2cb58ba 100644
+--- a/xlators/storage/posix/src/posix-common.c
++++ b/xlators/storage/posix/src/posix-common.c
+@@ -1257,7 +1257,7 @@ struct volume_options posix_options[] = {
+     {.key = {"health-check-timeout"},
+      .type = GF_OPTION_TYPE_INT,
+      .min = 0,
+-     .default_value = "10",
++     .default_value = "20",
+      .validate = GF_OPT_VALIDATE_MIN,
+      .description =
+          "Interval in seconds to wait aio_write finish for health check, "
+-- 
+1.8.3.1
+

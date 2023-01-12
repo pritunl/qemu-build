@@ -1,0 +1,40 @@
+From 5daff948884b1b68ffcbc6ceea3c7affdb9700f4 Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Wed, 4 Apr 2018 09:29:43 +0530
+Subject: [PATCH 078/124] common-ha/scripts : pass the list of servers properly
+ to stop_ganesha_all()
+
+Label: DOWNSTREAM ONLY
+
+Upstream Reference :
+>Change-Id: I6d92623cd9fb450d7a27f5acc61eca0b3cbc9b08
+>BUG: 1563500
+>Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+>Patch link : https://review.gluster.org/#/c/19816/
+
+Change-Id: I6d92623cd9fb450d7a27f5acc61eca0b3cbc9b08
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167163
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/ganesha/scripts/ganesha-ha.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/extras/ganesha/scripts/ganesha-ha.sh b/extras/ganesha/scripts/ganesha-ha.sh
+index 8302c5e..4e5799f 100644
+--- a/extras/ganesha/scripts/ganesha-ha.sh
++++ b/extras/ganesha/scripts/ganesha-ha.sh
+@@ -199,7 +199,7 @@ setup_cluster()
+     if [ $? -ne 0 ]; then
+         logger "pcs cluster setup ${RHEL6_PCS_CNAME_OPTION} ${name} ${servers} failed"
+         #set up failed stop all ganesha process and clean up symlinks in cluster
+-        stop_ganesha_all ${servers}
++        stop_ganesha_all "${servers}"
+         exit 1;
+     fi
+     pcs cluster start --all
+-- 
+1.8.3.1
+

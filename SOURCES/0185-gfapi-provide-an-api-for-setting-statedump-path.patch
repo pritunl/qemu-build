@@ -1,0 +1,174 @@
+From 462e3988936761317975fd811dd355b81328b60a Mon Sep 17 00:00:00 2001
+From: Amar Tumballi <amarts@redhat.com>
+Date: Thu, 14 Mar 2019 10:04:28 +0530
+Subject: [PATCH 185/192] gfapi: provide an api for setting statedump path
+
+Currently for an application using glfsapi to use glusterfs, when a
+statedump is taken, it uses /var/run/gluster dir to dump info.
+
+There can be concerns as this directory may be owned by some other
+user, and hence it may fail taking statedump. Such applications
+should have an option to use different path.
+
+This patch provides an API to do so.
+
+Upstream details:
+> Updates: bz#1689097
+> Change-Id: I8918e002bc823d83614c972b6c738baa04681b23
+> URL: https://review.gluster.org/22364
+
+BUG: 1720461
+Change-Id: I6079c8d799f35eaf76e62d259b51573bf561ba5b
+Signed-off-by: Amar Tumballi <amarts@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/173451
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ api/src/gfapi.aliases |  2 ++
+ api/src/gfapi.map     |  5 ++++
+ api/src/glfs.c        | 63 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ api/src/glfs.h        | 28 +++++++++++++++++++++++
+ 4 files changed, 98 insertions(+)
+
+diff --git a/api/src/gfapi.aliases b/api/src/gfapi.aliases
+index 09c0fd8..8fdf734 100644
+--- a/api/src/gfapi.aliases
++++ b/api/src/gfapi.aliases
+@@ -195,3 +195,5 @@ _pub_glfs_zerofill_async _glfs_zerofill_async$GFAPI_6.0
+ _pub_glfs_copy_file_range _glfs_copy_file_range$GFAPI_6.0
+ _pub_glfs_fsetattr _glfs_fsetattr$GFAPI_6.0
+ _pub_glfs_setattr _glfs_setattr$GFAPI_6.0
++
++_pub_glfs_set_statedump_path _glfs_set_statedump_path@GFAPI_future
+diff --git a/api/src/gfapi.map b/api/src/gfapi.map
+index b97a614..cf118e8 100644
+--- a/api/src/gfapi.map
++++ b/api/src/gfapi.map
+@@ -271,3 +271,8 @@ GFAPI_PRIVATE_6.1 {
+ 	global:
+ 		glfs_setfspid;
+ } GFAPI_6.0;
++
++GFAPI_future {
++	global:
++		glfs_set_statedump_path;
++} GFAPI_PRIVATE_6.1;
+diff --git a/api/src/glfs.c b/api/src/glfs.c
+index f4a8e08..ba513e6 100644
+--- a/api/src/glfs.c
++++ b/api/src/glfs.c
+@@ -1212,6 +1212,7 @@ glusterfs_ctx_destroy(glusterfs_ctx_t *ctx)
+         glusterfs_graph_destroy_residual(trav_graph);
+     }
+ 
++    GF_FREE(ctx->statedump_path);
+     FREE(ctx);
+ 
+     return ret;
+@@ -1738,3 +1739,65 @@ invalid_fs:
+ }
+ 
+ GFAPI_SYMVER_PUBLIC_DEFAULT(glfs_upcall_unregister, 3.13.0);
++
++int
++pub_glfs_set_statedump_path(struct glfs *fs, const char *path)
++{
++    struct stat st;
++    int ret;
++    DECLARE_OLD_THIS;
++    __GLFS_ENTRY_VALIDATE_FS(fs, invalid_fs);
++
++    if (!path) {
++        gf_log("glfs", GF_LOG_ERROR, "path is NULL");
++        errno = EINVAL;
++        goto err;
++    }
++
++    /* If path is not present OR, if it is directory AND has enough permission
++     * to create files, then proceed */
++    ret = sys_stat(path, &st);
++    if (ret && errno != ENOENT) {
++        gf_log("glfs", GF_LOG_ERROR, "%s: not a valid path (%s)", path,
++               strerror(errno));
++        errno = EINVAL;
++        goto err;
++    }
++
++    if (!ret) {
++        /* file is present, now check other things */
++        if (!S_ISDIR(st.st_mode)) {
++            gf_log("glfs", GF_LOG_ERROR, "%s: path is not directory", path);
++            errno = EINVAL;
++            goto err;
++        }
++        if (sys_access(path, W_OK | X_OK) < 0) {
++            gf_log("glfs", GF_LOG_ERROR,
++                   "%s: path doesn't have write permission", path);
++            errno = EPERM;
++            goto err;
++        }
++    }
++
++    /* If set, it needs to be freed, so we don't have leak */
++    GF_FREE(fs->ctx->statedump_path);
++
++    fs->ctx->statedump_path = gf_strdup(path);
++    if (!fs->ctx->statedump_path) {
++        gf_log("glfs", GF_LOG_ERROR,
++               "%s: failed to set statedump path, no memory", path);
++        errno = ENOMEM;
++        goto err;
++    }
++
++    __GLFS_EXIT_FS;
++
++    return 0;
++err:
++    __GLFS_EXIT_FS;
++
++invalid_fs:
++    return -1;
++}
++
++GFAPI_SYMVER_PUBLIC_DEFAULT(glfs_set_statedump_path, future);
+diff --git a/api/src/glfs.h b/api/src/glfs.h
+index 6714782..a6c12e1 100644
+--- a/api/src/glfs.h
++++ b/api/src/glfs.h
+@@ -1453,5 +1453,33 @@ int
+ glfs_setattr(struct glfs *fs, const char *path, struct glfs_stat *stat,
+              int follow) __THROW GFAPI_PUBLIC(glfs_setattr, 6.0);
+ 
++/*
++  SYNOPSIS
++
++  glfs_set_statedump_path: Function to set statedump path.
++
++  DESCRIPTION
++
++  This function is used to set statedump directory
++
++  PARAMETERS
++
++  @fs: The 'virtual mount' object to be configured with the volume
++       specification file.
++
++  @path: statedump path. Should be a directory. But the API won't fail if the
++  directory doesn't exist yet, as one may create it later.
++
++  RETURN VALUES
++
++   0 : Success.
++  -1 : Failure. @errno will be set with the type of failure.
++
++ */
++
++int
++glfs_set_statedump_path(struct glfs *fs, const char *path) __THROW
++    GFAPI_PUBLIC(glfs_set_statedump_path, future);
++
+ __END_DECLS
+ #endif /* !_GLFS_H */
+-- 
+1.8.3.1
+

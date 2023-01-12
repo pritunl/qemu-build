@@ -1,0 +1,35 @@
+From 7e0342e0d01204f136b0bd28931a6313ea216649 Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Wed, 6 Feb 2019 19:06:45 +0530
+Subject: [PATCH 37/52] cli: change the warning message
+
+This patch changes the warning message user gets, when enabling brick
+multiplexing to reflect OCS instead of CNS/CRS.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Id5fd87955d5a692f8e57560245f8b0cf9882e1da
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/162405
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ cli/src/cli-cmd-parser.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/cli/src/cli-cmd-parser.c b/cli/src/cli-cmd-parser.c
+index 760a10c..541dc62 100644
+--- a/cli/src/cli-cmd-parser.c
++++ b/cli/src/cli-cmd-parser.c
+@@ -1697,7 +1697,7 @@ cli_cmd_volume_set_parse(struct cli_state *state, const char **words,
+ 
+     if ((strcmp (key, "cluster.brick-multiplex") == 0)) {
+         question = "Brick-multiplexing is supported only for "
+-                   "container workloads (CNS/CRS). Also it is "
++                   "OCS converged or independent mode. Also it is "
+                    "advised to make sure that either all "
+                    "volumes are in stopped state or no bricks "
+                    "are running before this option is modified."
+-- 
+1.8.3.1
+

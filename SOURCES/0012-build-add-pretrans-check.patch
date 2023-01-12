@@ -1,0 +1,73 @@
+From f054086daf4549a6227196fe37a57a7e49aa5849 Mon Sep 17 00:00:00 2001
+From: "Bala.FA" <barumuga@redhat.com>
+Date: Fri, 7 Dec 2018 14:13:40 +0530
+Subject: [PATCH 12/52] build: add pretrans check
+
+This patch adds pretrans check for client-xlators
+
+NOTE: ganesha and python-gluster sub-packages are now obsolete
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I454016319832c11902c0ca79a79fbbcf8ac0a121
+Signed-off-by: Bala.FA <barumuga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/50967
+Reviewed-on: https://code.engineering.redhat.com/gerrit/60140
+Tested-by: Milind Changire <mchangir@redhat.com>
+---
+ glusterfs.spec.in | 39 +++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 39 insertions(+)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 1c631db..a1ff6e0 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -1704,6 +1704,45 @@ if not (ok == 0) then
+ end
+ 
+ 
++%pretrans client-xlators -p <lua>
++if not posix.access("/bin/bash", "x") then
++    -- initial installation, no shell, no running glusterfsd
++    return 0
++end
++
++-- TODO: move this completely to a lua script
++-- For now, we write a temporary bash script and execute that.
++
++script = [[#!/bin/sh
++pidof -c -o %PPID -x glusterfsd &>/dev/null
++
++if [ $? -eq 0 ]; then
++   pushd . > /dev/null 2>&1
++   for volume in /var/lib/glusterd/vols/*; do cd $volume;
++       vol_type=`grep '^type=' info | awk -F'=' '{print $2}'`
++       volume_started=`grep '^status=' info | awk -F'=' '{print $2}'`
++       if [ $vol_type -eq 0 ] && [ $volume_started -eq 1 ] ; then
++          exit 1;
++       fi
++   done
++
++   popd > /dev/null 2>&1
++   exit 1;
++fi
++]]
++
++-- rpm in RHEL5 does not have os.tmpname()
++-- io.tmpfile() can not be resolved to a filename to pass to bash :-/
++tmpname = "/tmp/glusterfs-client-xlators_pretrans_" .. os.date("%s")
++tmpfile = io.open(tmpname, "w")
++tmpfile:write(script)
++tmpfile:close()
++ok, how, val = os.execute("/bin/bash " .. tmpname)
++os.remove(tmpname)
++if not (ok == 0) then
++   error("Detected running glusterfs processes", ok)
++end
++
+ 
+ %pretrans devel -p <lua>
+ if not posix.access("/bin/bash", "x") then
+-- 
+1.8.3.1
+

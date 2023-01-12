@@ -1,0 +1,270 @@
+From 775d500cd136bd8c940faaeffde1217c25a87e3d Mon Sep 17 00:00:00 2001
+From: Yaniv Kaul <ykaul@redhat.com>
+Date: Sun, 2 Jun 2019 21:14:18 +0300
+Subject: [PATCH 535/538] (multiple files) use dict_allocate_and_serialize()
+ where applicable.
+
+This function does length, allocation and serialization for you.
+
+Upstream patch:
+> Upstream-patch-link: https://review.gluster.org/#/c/glusterfs/+/22800
+> Change-Id: I142a259952a2fe83dd719442afaefe4a43a8e55e
+> updates: bz#1193929
+> Signed-off-by: Yaniv Kaul <ykaul@redhat.com>
+
+Change-Id: I142a259952a2fe83dd719442afaefe4a43a8e55e
+BUG: 1911292
+Signed-off-by: Yaniv Kaul <ykaul@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/228611
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/afr/src/afr-inode-read.c       | 34 +++++---------------------
+ xlators/cluster/ec/src/ec-combine.c            | 16 +++---------
+ xlators/features/locks/src/posix.c             | 23 +++--------------
+ xlators/protocol/client/src/client-handshake.c | 14 +++--------
+ xlators/protocol/server/src/server-handshake.c | 24 +++++++-----------
+ xlators/protocol/server/src/server-helpers.c   | 27 +++-----------------
+ 6 files changed, 28 insertions(+), 110 deletions(-)
+
+diff --git a/xlators/cluster/afr/src/afr-inode-read.c b/xlators/cluster/afr/src/afr-inode-read.c
+index 523a5b4..cf305af 100644
+--- a/xlators/cluster/afr/src/afr-inode-read.c
++++ b/xlators/cluster/afr/src/afr-inode-read.c
+@@ -948,24 +948,13 @@ unlock:
+             goto unwind;
+         }
+ 
+-        len = dict_serialized_length(local->dict);
+-        if (len <= 0) {
+-            goto unwind;
+-        }
+-
+-        lockinfo_buf = GF_CALLOC(1, len, gf_common_mt_char);
+-        if (!lockinfo_buf) {
++        op_ret = dict_allocate_and_serialize(
++            local->dict, (char **)&lockinfo_buf, (unsigned int *)&len);
++        if (op_ret != 0) {
+             local->op_ret = -1;
+-            local->op_errno = ENOMEM;
+             goto unwind;
+         }
+ 
+-        op_ret = dict_serialize(local->dict, lockinfo_buf);
+-        if (op_ret < 0) {
+-            local->op_ret = -1;
+-            local->op_errno = -op_ret;
+-        }
+-
+         op_ret = dict_set_dynptr(newdict, GF_XATTR_LOCKINFO_KEY,
+                                  (void *)lockinfo_buf, len);
+         if (op_ret < 0) {
+@@ -1064,24 +1053,13 @@ unlock:
+             goto unwind;
+         }
+ 
+-        len = dict_serialized_length(local->dict);
+-        if (len <= 0) {
+-            goto unwind;
+-        }
+-
+-        lockinfo_buf = GF_CALLOC(1, len, gf_common_mt_char);
+-        if (!lockinfo_buf) {
++        op_ret = dict_allocate_and_serialize(
++            local->dict, (char **)&lockinfo_buf, (unsigned int *)&len);
++        if (op_ret != 0) {
+             local->op_ret = -1;
+-            local->op_errno = ENOMEM;
+             goto unwind;
+         }
+ 
+-        op_ret = dict_serialize(local->dict, lockinfo_buf);
+-        if (op_ret < 0) {
+-            local->op_ret = -1;
+-            local->op_errno = -op_ret;
+-        }
+-
+         op_ret = dict_set_dynptr(newdict, GF_XATTR_LOCKINFO_KEY,
+                                  (void *)lockinfo_buf, len);
+         if (op_ret < 0) {
+diff --git a/xlators/cluster/ec/src/ec-combine.c b/xlators/cluster/ec/src/ec-combine.c
+index 99e5534..9d712b3 100644
+--- a/xlators/cluster/ec/src/ec-combine.c
++++ b/xlators/cluster/ec/src/ec-combine.c
+@@ -486,22 +486,12 @@ ec_dict_data_merge(ec_cbk_data_t *cbk, int32_t which, char *key)
+ 
+     tmp = NULL;
+ 
+-    len = dict_serialized_length(lockinfo);
+-    if (len < 0) {
+-        err = len;
+-
+-        goto out;
+-    }
+-    ptr = GF_MALLOC(len, gf_common_mt_char);
+-    if (ptr == NULL) {
+-        err = -ENOMEM;
+-
+-        goto out;
+-    }
+-    err = dict_serialize(lockinfo, ptr);
++    err = dict_allocate_and_serialize(lockinfo, (char **)&ptr,
++                                      (unsigned int *)&len);
+     if (err != 0) {
+         goto out;
+     }
++
+     dict = (which == EC_COMBINE_XDATA) ? cbk->xdata : cbk->dict;
+     err = dict_set_dynptr(dict, key, ptr, len);
+     if (err != 0) {
+diff --git a/xlators/features/locks/src/posix.c b/xlators/features/locks/src/posix.c
+index 5ae0125..cdd1ff7 100644
+--- a/xlators/features/locks/src/posix.c
++++ b/xlators/features/locks/src/posix.c
+@@ -1547,8 +1547,9 @@ pl_fgetxattr_handle_lockinfo(xlator_t *this, fd_t *fd, dict_t *dict,
+         goto out;
+     }
+ 
+-    len = dict_serialized_length(tmp);
+-    if (len < 0) {
++    op_ret = dict_allocate_and_serialize(tmp, (char **)&buf,
++                                         (unsigned int *)&len);
++    if (op_ret != 0) {
+         *op_errno = -op_ret;
+         op_ret = -1;
+         gf_log(this->name, GF_LOG_WARNING,
+@@ -1558,24 +1559,6 @@ pl_fgetxattr_handle_lockinfo(xlator_t *this, fd_t *fd, dict_t *dict,
+         goto out;
+     }
+ 
+-    buf = GF_CALLOC(1, len, gf_common_mt_char);
+-    if (buf == NULL) {
+-        op_ret = -1;
+-        *op_errno = ENOMEM;
+-        goto out;
+-    }
+-
+-    op_ret = dict_serialize(tmp, buf);
+-    if (op_ret < 0) {
+-        *op_errno = -op_ret;
+-        op_ret = -1;
+-        gf_log(this->name, GF_LOG_WARNING,
+-               "dict_serialize failed (%s) while handling lockinfo "
+-               "for fd (ptr: %p inode-gfid:%s)",
+-               strerror(*op_errno), fd, uuid_utoa(fd->inode->gfid));
+-        goto out;
+-    }
+-
+     op_ret = dict_set_dynptr(dict, GF_XATTR_LOCKINFO_KEY, buf, len);
+     if (op_ret < 0) {
+         *op_errno = -op_ret;
+diff --git a/xlators/protocol/client/src/client-handshake.c b/xlators/protocol/client/src/client-handshake.c
+index 0002361..6b20d92 100644
+--- a/xlators/protocol/client/src/client-handshake.c
++++ b/xlators/protocol/client/src/client-handshake.c
+@@ -1286,18 +1286,10 @@ client_setvolume(xlator_t *this, struct rpc_clnt *rpc)
+                "Failed to set client opversion in handshake message");
+     }
+ 
+-    ret = dict_serialized_length(options);
+-    if (ret < 0) {
+-        gf_msg(this->name, GF_LOG_ERROR, 0, PC_MSG_DICT_ERROR,
+-               "failed to get serialized length of dict");
++    ret = dict_allocate_and_serialize(options, (char **)&req.dict.dict_val,
++                                      &req.dict.dict_len);
++    if (ret != 0) {
+         ret = -1;
+-        goto fail;
+-    }
+-    req.dict.dict_len = ret;
+-    req.dict.dict_val = GF_CALLOC(1, req.dict.dict_len,
+-                                  gf_client_mt_clnt_req_buf_t);
+-    ret = dict_serialize(options, req.dict.dict_val);
+-    if (ret < 0) {
+         gf_msg(this->name, GF_LOG_ERROR, 0, PC_MSG_DICT_SERIALIZE_FAIL,
+                "failed to serialize "
+                "dictionary");
+diff --git a/xlators/protocol/server/src/server-handshake.c b/xlators/protocol/server/src/server-handshake.c
+index eeca73c..54dc030 100644
+--- a/xlators/protocol/server/src/server-handshake.c
++++ b/xlators/protocol/server/src/server-handshake.c
+@@ -676,22 +676,16 @@ fail:
+     GF_ASSERT(rsp);
+ 
+     rsp->op_ret = 0;
+-    ret = dict_serialized_length(reply);
+-    if (ret > 0) {
+-        rsp->dict.dict_len = ret;
+-        rsp->dict.dict_val = GF_CALLOC(1, rsp->dict.dict_len,
+-                                       gf_server_mt_rsp_buf_t);
+-        if (rsp->dict.dict_val) {
+-            ret = dict_serialize(reply, rsp->dict.dict_val);
+-            if (ret < 0) {
+-                gf_msg_debug("server-handshake", 0,
+-                             "failed "
+-                             "to serialize reply dict");
+-                op_ret = -1;
+-                op_errno = -ret;
+-            }
+-        }
++
++    ret = dict_allocate_and_serialize(reply, (char **)&rsp->dict.dict_val,
++                                      &rsp->dict.dict_len);
++    if (ret != 0) {
++        ret = -1;
++        gf_msg_debug("server-handshake", 0, "failed to serialize reply dict");
++        op_ret = -1;
++        op_errno = -ret;
+     }
++
+     rsp->op_ret = op_ret;
+     rsp->op_errno = gf_errno_to_error(op_errno);
+ 
+diff --git a/xlators/protocol/server/src/server-helpers.c b/xlators/protocol/server/src/server-helpers.c
+index e74a24d..33959b5 100644
+--- a/xlators/protocol/server/src/server-helpers.c
++++ b/xlators/protocol/server/src/server-helpers.c
+@@ -902,7 +902,6 @@ serialize_rsp_direntp(gf_dirent_t *entries, gfs3_readdirp_rsp *rsp)
+     gfs3_dirplist *trav = NULL;
+     gfs3_dirplist *prev = NULL;
+     int ret = -1;
+-    int temp = 0;
+ 
+     GF_VALIDATE_OR_GOTO("server", entries, out);
+     GF_VALIDATE_OR_GOTO("server", rsp, out);
+@@ -923,28 +922,10 @@ serialize_rsp_direntp(gf_dirent_t *entries, gfs3_readdirp_rsp *rsp)
+ 
+         /* if 'dict' is present, pack it */
+         if (entry->dict) {
+-            temp = dict_serialized_length(entry->dict);
+-
+-            if (temp < 0) {
+-                gf_msg(THIS->name, GF_LOG_ERROR, EINVAL, PS_MSG_INVALID_ENTRY,
+-                       "failed to get "
+-                       "serialized length of reply dict");
+-                errno = EINVAL;
+-                trav->dict.dict_len = 0;
+-                goto out;
+-            }
+-            trav->dict.dict_len = temp;
+-
+-            trav->dict.dict_val = GF_CALLOC(1, trav->dict.dict_len,
+-                                            gf_server_mt_rsp_buf_t);
+-            if (!trav->dict.dict_val) {
+-                errno = ENOMEM;
+-                trav->dict.dict_len = 0;
+-                goto out;
+-            }
+-
+-            ret = dict_serialize(entry->dict, trav->dict.dict_val);
+-            if (ret < 0) {
++            ret = dict_allocate_and_serialize(entry->dict,
++                                              (char **)&trav->dict.dict_val,
++                                              &trav->dict.dict_len);
++            if (ret != 0) {
+                 gf_msg(THIS->name, GF_LOG_ERROR, 0, PS_MSG_DICT_SERIALIZE_FAIL,
+                        "failed to serialize reply dict");
+                 errno = -ret;
+-- 
+1.8.3.1
+

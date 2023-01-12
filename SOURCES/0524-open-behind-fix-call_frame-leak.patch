@@ -1,0 +1,70 @@
+From 36dddf59a02d91d3db5b124be626ab6bc235ed5a Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez <xhernandez@redhat.com>
+Date: Wed, 19 Aug 2020 23:27:38 +0200
+Subject: [PATCH 524/526] open-behind: fix call_frame leak
+
+When an open was delayed, a copy of the frame was created because the
+current frame was used to unwind the "fake" open. When the open was
+actually sent, the frame was correctly destroyed. However if the file
+was closed before needing to send the open, the frame was not destroyed.
+
+This patch correctly destroys the frame in all cases.
+
+Upstream patch:
+> Upstream-patch-link: https://review.gluster.org/#/c/glusterfs/+/24892
+> Change-Id: I8c00fc7f15545c240e8151305d9e4cf06d653926
+> Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+> Fixes: #1440
+
+BUG: 1830713
+Change-Id: I8c00fc7f15545c240e8151305d9e4cf06d653926
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/224488
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/performance/open-behind/src/open-behind.c | 14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/xlators/performance/open-behind/src/open-behind.c b/xlators/performance/open-behind/src/open-behind.c
+index e43fe73..1ab635e 100644
+--- a/xlators/performance/open-behind/src/open-behind.c
++++ b/xlators/performance/open-behind/src/open-behind.c
+@@ -333,6 +333,14 @@ ob_stub_dispatch(xlator_t *xl, ob_inode_t *ob_inode, fd_t *fd,
+     return 0;
+ }
+ 
++static void
++ob_open_destroy(call_stub_t *stub, fd_t *fd)
++{
++    STACK_DESTROY(stub->frame->root);
++    call_stub_destroy(stub);
++    fd_unref(fd);
++}
++
+ static int32_t
+ ob_open_dispatch(xlator_t *xl, ob_inode_t *ob_inode, fd_t *fd,
+                  call_stub_t *stub)
+@@ -355,8 +363,7 @@ ob_open_dispatch(xlator_t *xl, ob_inode_t *ob_inode, fd_t *fd,
+ 
+     if (stub != NULL) {
+         if (closed) {
+-            call_stub_destroy(stub);
+-            fd_unref(fd);
++            ob_open_destroy(stub, fd);
+         } else {
+             call_resume(stub);
+         }
+@@ -776,8 +783,7 @@ ob_fdclose(xlator_t *this, fd_t *fd)
+     UNLOCK(&fd->inode->lock);
+ 
+     if (stub != NULL) {
+-        call_stub_destroy(stub);
+-        fd_unref(fd);
++        ob_open_destroy(stub, fd);
+     }
+ 
+     ob_resume_pending(&list);
+-- 
+1.8.3.1
+

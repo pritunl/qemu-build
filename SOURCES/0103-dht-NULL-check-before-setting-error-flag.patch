@@ -1,0 +1,43 @@
+From 45c9eeb5544738d4d1d0aefb8a7f61e5d8859ad8 Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Tue, 12 Mar 2019 18:00:37 +0530
+Subject: [PATCH 103/124] dht: NULL check before setting error flag
+
+Function dht_common_mark_mdsxattr blindly setting value for
+an integer pointer without validating it. In fact there are
+two callers of this function that passes NULL value to the
+same pointer which leads to a crash.
+
+Backport of : https://review.gluster.org/#/c/22345/
+
+>Change-Id: Id94ffe216f6a21f007b3291bff0b1e1c1989075c
+>fixes: bz#1687811
+>Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+
+Change-Id: Id9785c16184fd80e8184e5ae135fb63bf44692cd
+BUG: 1471742
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167846
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/cluster/dht/src/dht-common.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/xlators/cluster/dht/src/dht-common.c b/xlators/cluster/dht/src/dht-common.c
+index 367548f..2a68193 100644
+--- a/xlators/cluster/dht/src/dht-common.c
++++ b/xlators/cluster/dht/src/dht-common.c
+@@ -852,7 +852,8 @@ dht_common_mark_mdsxattr(call_frame_t *frame, int *errst,
+                    "Failed to get hashed subvol for path %s"
+                    "gfid is %s ",
+                    local->loc.path, gfid_local);
+-            (*errst) = 1;
++            if (errst)
++                (*errst) = 1;
+             ret = -1;
+             goto out;
+         }
+-- 
+1.8.3.1
+

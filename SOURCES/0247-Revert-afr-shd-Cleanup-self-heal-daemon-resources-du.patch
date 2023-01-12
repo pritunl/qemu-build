@@ -1,0 +1,144 @@
+From 33d59c74169192b4ba89abc915d8d785bc450fbb Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Thu, 11 Jul 2019 12:49:54 +0530
+Subject: [PATCH 247/255] Revert "afr/shd: Cleanup self heal daemon resources
+ during afr fini"
+
+This reverts commit faaaa3452ceec6afcc18cffc9beca3fe19841cce.
+
+BUG: 1471742
+Change-Id: Id4a22ab45b89872684830f866ec4b589fca50a90
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/175956
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/syncop-utils.c          |  8 -----
+ xlators/cluster/afr/src/afr-self-heald.c |  2 --
+ xlators/cluster/afr/src/afr.c            | 57 --------------------------------
+ 3 files changed, 67 deletions(-)
+
+diff --git a/libglusterfs/src/syncop-utils.c b/libglusterfs/src/syncop-utils.c
+index b842142..be03527 100644
+--- a/libglusterfs/src/syncop-utils.c
++++ b/libglusterfs/src/syncop-utils.c
+@@ -350,11 +350,6 @@ syncop_mt_dir_scan(call_frame_t *frame, xlator_t *subvol, loc_t *loc, int pid,
+     gf_boolean_t cond_init = _gf_false;
+     gf_boolean_t mut_init = _gf_false;
+     gf_dirent_t entries;
+-    xlator_t *this = NULL;
+-
+-    if (frame) {
+-        this = frame->this;
+-    }
+ 
+     /*For this functionality to be implemented in general, we need
+      * synccond_t infra which doesn't block the executing thread. Until then
+@@ -402,9 +397,6 @@ syncop_mt_dir_scan(call_frame_t *frame, xlator_t *subvol, loc_t *loc, int pid,
+ 
+         list_for_each_entry_safe(entry, tmp, &entries.list, list)
+         {
+-            if (this && this->cleanup_starting)
+-                goto out;
+-
+             list_del_init(&entry->list);
+             if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) {
+                 gf_dirent_entry_free(entry);
+diff --git a/xlators/cluster/afr/src/afr-self-heald.c b/xlators/cluster/afr/src/afr-self-heald.c
+index 8bc4720..7eb1207 100644
+--- a/xlators/cluster/afr/src/afr-self-heald.c
++++ b/xlators/cluster/afr/src/afr-self-heald.c
+@@ -373,7 +373,6 @@ afr_shd_sweep_prepare(struct subvol_healer *healer)
+ 
+     time(&event->start_time);
+     event->end_time = 0;
+-    _mask_cancellation();
+ }
+ 
+ void
+@@ -395,7 +394,6 @@ afr_shd_sweep_done(struct subvol_healer *healer)
+ 
+     if (eh_save_history(shd->statistics[healer->subvol], history) < 0)
+         GF_FREE(history);
+-    _unmask_cancellation();
+ }
+ 
+ int
+diff --git a/xlators/cluster/afr/src/afr.c b/xlators/cluster/afr/src/afr.c
+index a0a7551..33258a0 100644
+--- a/xlators/cluster/afr/src/afr.c
++++ b/xlators/cluster/afr/src/afr.c
+@@ -611,70 +611,13 @@ init(xlator_t *this)
+ out:
+     return ret;
+ }
+-void
+-afr_destroy_healer_object(xlator_t *this, struct subvol_healer *healer)
+-{
+-    int ret = -1;
+-
+-    if (!healer)
+-        return;
+-
+-    if (healer->running) {
+-        /*
+-         * If there are any resources to cleanup, We need
+-         * to do that gracefully using pthread_cleanup_push
+-         */
+-        ret = gf_thread_cleanup_xint(healer->thread);
+-        if (ret)
+-            gf_msg(this->name, GF_LOG_WARNING, 0, AFR_MSG_SELF_HEAL_FAILED,
+-                   "Failed to clean up healer threads.");
+-        healer->thread = 0;
+-    }
+-    pthread_cond_destroy(&healer->cond);
+-    pthread_mutex_destroy(&healer->mutex);
+-}
+-
+-void
+-afr_selfheal_daemon_fini(xlator_t *this)
+-{
+-    struct subvol_healer *healer = NULL;
+-    afr_self_heald_t *shd = NULL;
+-    afr_private_t *priv = NULL;
+-    int i = 0;
+-
+-    priv = this->private;
+-    if (!priv)
+-        return;
+-
+-    shd = &priv->shd;
+-    if (!shd->iamshd)
+-        return;
+-
+-    for (i = 0; i < priv->child_count; i++) {
+-        healer = &shd->index_healers[i];
+-        afr_destroy_healer_object(this, healer);
+ 
+-        healer = &shd->full_healers[i];
+-        afr_destroy_healer_object(this, healer);
+-
+-        if (shd->statistics[i])
+-            eh_destroy(shd->statistics[i]);
+-    }
+-    GF_FREE(shd->index_healers);
+-    GF_FREE(shd->full_healers);
+-    GF_FREE(shd->statistics);
+-    if (shd->split_brain)
+-        eh_destroy(shd->split_brain);
+-}
+ void
+ fini(xlator_t *this)
+ {
+     afr_private_t *priv = NULL;
+ 
+     priv = this->private;
+-
+-    afr_selfheal_daemon_fini(this);
+-
+     LOCK(&priv->lock);
+     if (priv->timer != NULL) {
+         gf_timer_call_cancel(this->ctx, priv->timer);
+-- 
+1.8.3.1
+

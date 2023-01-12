@@ -1,0 +1,141 @@
+From 2d172144810956225eac3599c943416c4a7e25d0 Mon Sep 17 00:00:00 2001
+From: Ravishankar N <ravishankar@redhat.com>
+Date: Tue, 8 Dec 2020 20:30:23 +0530
+Subject: [PATCH 489/511] glusterd: fix bug in enabling granular-entry-heal
+
+Upstream patch details:
+/------------------------------------------------------------------------------/
+commit f5e1eb87d4af44be3b317b7f99ab88f89c2f0b1a meant to enable  the
+volume option only for replica volumes but inadvertently enabled
+it for all volume types. Fixing it now.
+
+Also found a bug in glusterd where disabling the option on plain
+distribute was succeeding even though setting it in the fist place
+fails. Fixed that too.
+
+>Fixes: #1483
+>Change-Id: Icb6c169a8eec44cc4fb4dd636405d3b3485e91b4
+>Reported-by: Sheetal Pamecha <spamecha@redhat.com>
+>Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+Upstream Patch: https://github.com/gluster/glusterfs/pull/1752
+/------------------------------------------------------------------------------/
+
+BUG: 1890506
+Change-Id: Id63655dac08d2cfda4899d7ee0efe96e72cd6986
+Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/220556
+Tested-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/basic/afr/granular-esh/cli.t              | 30 ++++++++++++++++++++-----
+ xlators/mgmt/glusterd/src/glusterd-utils.c      |  3 ++-
+ xlators/mgmt/glusterd/src/glusterd-volume-ops.c | 12 +++++-----
+ 3 files changed, 34 insertions(+), 11 deletions(-)
+
+diff --git a/tests/basic/afr/granular-esh/cli.t b/tests/basic/afr/granular-esh/cli.t
+index 995d93e..5ab2e39 100644
+--- a/tests/basic/afr/granular-esh/cli.t
++++ b/tests/basic/afr/granular-esh/cli.t
+@@ -11,25 +11,38 @@ TESTS_EXPECTED_IN_LOOP=4
+ TEST glusterd
+ TEST pidof glusterd
+ 
+-TEST   $CLI volume create $V0 replica 2 $H0:$B0/${V0}{0,1}
+-# Test that enabling the option should work on a newly created volume
+-TEST   $CLI volume set $V0 cluster.granular-entry-heal on
+-TEST   $CLI volume set $V0 cluster.granular-entry-heal off
+-
+ #########################
+ ##### DISPERSE TEST #####
+ #########################
+ # Execute the same command on a disperse volume and make sure it fails.
+ TEST $CLI volume create $V1 disperse 3 redundancy 1 $H0:$B0/${V1}{0,1,2}
++EXPECT "no" volume_get_field $V1 cluster.granular-entry-heal
++TEST $CLI volume start $V1
++TEST ! $CLI volume heal $V1 granular-entry-heal enable
++TEST ! $CLI volume heal $V1 granular-entry-heal disable
++
++TEST $CLI volume stop $V1
++TEST $CLI volume delete $V1
++
++#########################
++##### PLAIN DISTRIBUTE TEST #####
++#########################
++# Execute the same command on a distribute volume and make sure it fails.
++TEST $CLI volume create $V1 $H0:$B0/${V1}{0,1,2}
++EXPECT "no" volume_get_field $V1 cluster.granular-entry-heal
+ TEST $CLI volume start $V1
+ TEST ! $CLI volume heal $V1 granular-entry-heal enable
+ TEST ! $CLI volume heal $V1 granular-entry-heal disable
++TEST $CLI volume stop $V1
++TEST $CLI volume delete $V1
+ 
+ #######################
+ ###### TIER TEST ######
+ #######################
+ # Execute the same command on a disperse + replicate tiered volume and make
+ # sure the option is set on the replicate leg of the volume
++TEST $CLI volume create $V1 disperse 3 redundancy 1 $H0:$B0/${V1}{0,1,2}
++TEST $CLI volume start $V1
+ TEST $CLI volume tier $V1 attach replica 2 $H0:$B0/${V1}{3,4}
+ TEST $CLI volume heal $V1 granular-entry-heal enable
+ EXPECT "enable" volume_get_field $V1 cluster.granular-entry-heal
+@@ -52,10 +65,17 @@ TEST kill_brick $V1 $H0 $B0/${V1}3
+ # failed.
+ TEST ! $CLI volume heal $V1 granular-entry-heal enable
+ EXPECT "disable" volume_get_field $V1 cluster.granular-entry-heal
++TEST $CLI volume stop $V1
++TEST $CLI volume delete $V1
+ 
+ ######################
+ ### REPLICATE TEST ###
+ ######################
++TEST   $CLI volume create $V0 replica 3 $H0:$B0/${V0}{0,1,2}
++EXPECT "on" volume_get_field $V0 cluster.granular-entry-heal
++# Test that enabling the option should work on a newly created volume
++TEST   $CLI volume set $V0 cluster.granular-entry-heal on
++TEST   $CLI volume set $V0 cluster.granular-entry-heal off
+ TEST   $CLI volume start $V0
+ TEST   $CLI volume set $V0 cluster.data-self-heal off
+ TEST   $CLI volume set $V0 cluster.metadata-self-heal off
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index bd17a82..ad3750e 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -13183,7 +13183,8 @@ glusterd_enable_default_options(glusterd_volinfo_t *volinfo, char *option)
+     }
+ 
+     if ((conf->op_version >= GD_OP_VERSION_7_1) &&
+-        (volinfo->status == GLUSTERD_STATUS_NONE)) {
++        (volinfo->status == GLUSTERD_STATUS_NONE) &&
++        (volinfo->type == GF_CLUSTER_TYPE_REPLICATE)) {
+         ret = dict_set_dynstr_with_alloc(volinfo->dict,
+                                          "cluster.granular-entry-heal", "on");
+         if (ret) {
+diff --git a/xlators/mgmt/glusterd/src/glusterd-volume-ops.c b/xlators/mgmt/glusterd/src/glusterd-volume-ops.c
+index 134b04c..09e6ead 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-volume-ops.c
++++ b/xlators/mgmt/glusterd/src/glusterd-volume-ops.c
+@@ -621,11 +621,13 @@ glusterd_handle_heal_options_enable_disable(rpcsvc_request_t *req, dict_t *dict,
+         goto out;
+     }
+ 
+-    if (((heal_op == GF_SHD_OP_GRANULAR_ENTRY_HEAL_ENABLE) ||
+-         (heal_op == GF_SHD_OP_GRANULAR_ENTRY_HEAL_DISABLE)) &&
+-        (volinfo->type == GF_CLUSTER_TYPE_DISPERSE)) {
+-        ret = -1;
+-        goto out;
++    if ((heal_op == GF_SHD_OP_GRANULAR_ENTRY_HEAL_ENABLE) ||
++        (heal_op == GF_SHD_OP_GRANULAR_ENTRY_HEAL_DISABLE)) {
++        if ((volinfo->type != GF_CLUSTER_TYPE_REPLICATE) &&
++            (volinfo->type != GF_CLUSTER_TYPE_TIER)) {
++            ret = -1;
++            goto out;
++        }
+     }
+ 
+     if ((heal_op == GF_SHD_OP_HEAL_ENABLE) ||
+-- 
+1.8.3.1
+

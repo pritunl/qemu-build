@@ -1,0 +1,65 @@
+From 9be255f76c78fcbbda1e3a72eb2e99d3aface53e Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Wed, 16 Oct 2019 23:26:03 +0530
+Subject: [PATCH 322/335] glusterd: display correct rebalance data size after
+ glusterd restart
+
+Problem: After completion of rebalance, if glusterd is restarted,
+rebalance status displays wrong rebalance data size in its output.
+
+Cause: While glusterd restoring the information from /var/lib/glusterd/
+into its memory, glusterd fetches rebalance_data from
+/var/lib/glusterd/vols/volname/node_state.info. This value is
+converted into an integer using atoi(), which is returning
+incorrect value for larger values.
+
+Solution: use sscanf() instead of atoi() to convert string to
+integer(in this case it is unsigned long)
+
+> upstream patch: https://review.gluster.org/#/c/glusterfs/+/23560/
+> fixes: bz#1762438
+> Change-Id: Icbdb096919612b4a1d6fb0e315f09d38900abf4e
+> Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+
+BUG: 1761486
+Change-Id: Icbdb096919612b4a1d6fb0e315f09d38900abf4e
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/185752
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-store.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-store.c b/xlators/mgmt/glusterd/src/glusterd-store.c
+index 8a10eb8..b3b5ee9 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-store.c
++++ b/xlators/mgmt/glusterd/src/glusterd-store.c
+@@ -2974,19 +2974,19 @@ glusterd_store_retrieve_node_state(glusterd_volinfo_t *volinfo)
+             volinfo->rebal.op = atoi(value);
+         } else if (!strncmp(key, GLUSTERD_STORE_KEY_VOL_DEFRAG_REB_FILES,
+                             SLEN(GLUSTERD_STORE_KEY_VOL_DEFRAG_REB_FILES))) {
+-            volinfo->rebal.rebalance_files = atoi(value);
++            sscanf(value, "%" PRIu64, &volinfo->rebal.rebalance_files);
+         } else if (!strncmp(key, GLUSTERD_STORE_KEY_VOL_DEFRAG_SIZE,
+                             SLEN(GLUSTERD_STORE_KEY_VOL_DEFRAG_SIZE))) {
+-            volinfo->rebal.rebalance_data = atoi(value);
++            sscanf(value, "%" PRIu64, &volinfo->rebal.rebalance_data);
+         } else if (!strncmp(key, GLUSTERD_STORE_KEY_VOL_DEFRAG_SCANNED,
+                             SLEN(GLUSTERD_STORE_KEY_VOL_DEFRAG_SCANNED))) {
+-            volinfo->rebal.lookedup_files = atoi(value);
++            sscanf(value, "%" PRIu64, &volinfo->rebal.lookedup_files);
+         } else if (!strncmp(key, GLUSTERD_STORE_KEY_VOL_DEFRAG_FAILURES,
+                             SLEN(GLUSTERD_STORE_KEY_VOL_DEFRAG_FAILURES))) {
+-            volinfo->rebal.rebalance_failures = atoi(value);
++            sscanf(value, "%" PRIu64, &volinfo->rebal.rebalance_failures);
+         } else if (!strncmp(key, GLUSTERD_STORE_KEY_VOL_DEFRAG_SKIPPED,
+                             SLEN(GLUSTERD_STORE_KEY_VOL_DEFRAG_SKIPPED))) {
+-            volinfo->rebal.skipped_files = atoi(value);
++            sscanf(value, "%" PRIu64, &volinfo->rebal.skipped_files);
+         } else if (!strncmp(key, GLUSTERD_STORE_KEY_VOL_DEFRAG_RUN_TIME,
+                             SLEN(GLUSTERD_STORE_KEY_VOL_DEFRAG_RUN_TIME))) {
+             volinfo->rebal.rebalance_time = atoi(value);
+-- 
+1.8.3.1
+

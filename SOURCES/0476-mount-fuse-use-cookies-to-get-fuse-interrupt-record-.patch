@@ -1,0 +1,114 @@
+From 40519185067d891f06818c574301ea1af4b36479 Mon Sep 17 00:00:00 2001
+From: Pranith Kumar K <pkarampu@redhat.com>
+Date: Wed, 17 Jun 2020 10:45:19 +0530
+Subject: [PATCH 476/478] mount/fuse: use cookies to get fuse-interrupt-record
+ instead of xdata
+
+Problem:
+On executing tests/features/flock_interrupt.t the following error log
+appears
+[2020-06-16 11:51:54.631072 +0000] E
+[fuse-bridge.c:4791:fuse_setlk_interrupt_handler_cbk] 0-glusterfs-fuse:
+interrupt record not found
+
+This happens because fuse-interrupt-record is never sent on the wire by
+getxattr fop and there is no guarantee that in the cbk it will be
+available in case of failures.
+
+Fix:
+wind getxattr fop with fuse-interrupt-record as cookie and recover it
+in the cbk
+
+Upstream:
+> Reviewed-on: https://review.gluster.org/24588
+> Fixes: #1310
+> Change-Id: I4cfff154321a449114fc26e9440db0f08e5c7daa
+> Signed-off-by: Pranith Kumar K <pkarampu@redhat.com>
+
+BUG: 1821743
+Change-Id: If9576801654d4d743bd66ae90ca259c4d34746a7
+Signed-off-by: Csaba Henk <csaba@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/216159
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/features/flock_interrupt.t     |  1 -
+ xlators/mount/fuse/src/fuse-bridge.c | 28 +++++++---------------------
+ 2 files changed, 7 insertions(+), 22 deletions(-)
+
+diff --git a/tests/features/flock_interrupt.t b/tests/features/flock_interrupt.t
+index 964a4bc..b8717e3 100644
+--- a/tests/features/flock_interrupt.t
++++ b/tests/features/flock_interrupt.t
+@@ -28,6 +28,5 @@ flock $M0/testfile sleep 6 & { sleep 0.3; flock -w 2 $M0/testfile true; echo ok
+ EXPECT_WITHIN 4 ok cat got_lock;
+ 
+ ## Finish up
+-sleep 7;
+ rm -f got_lock;
+ cleanup;
+diff --git a/xlators/mount/fuse/src/fuse-bridge.c b/xlators/mount/fuse/src/fuse-bridge.c
+index f61fa39..1bddac2 100644
+--- a/xlators/mount/fuse/src/fuse-bridge.c
++++ b/xlators/mount/fuse/src/fuse-bridge.c
+@@ -4768,16 +4768,8 @@ fuse_setlk_interrupt_handler_cbk(call_frame_t *frame, void *cookie,
+                                  int32_t op_errno, dict_t *dict, dict_t *xdata)
+ {
+     fuse_interrupt_state_t intstat = INTERRUPT_NONE;
+-    fuse_interrupt_record_t *fir;
++    fuse_interrupt_record_t *fir = cookie;
+     fuse_state_t *state = NULL;
+-    int ret = 0;
+-
+-    ret = dict_get_bin(xdata, "fuse-interrupt-record", (void **)&fir);
+-    if (ret < 0) {
+-        gf_log("glusterfs-fuse", GF_LOG_ERROR, "interrupt record not found");
+-
+-        goto out;
+-    }
+ 
+     intstat = op_ret >= 0 ? INTERRUPT_HANDLED : INTERRUPT_SQUELCHED;
+ 
+@@ -4789,7 +4781,6 @@ fuse_setlk_interrupt_handler_cbk(call_frame_t *frame, void *cookie,
+         GF_FREE(state);
+     }
+ 
+-out:
+     STACK_DESTROY(frame->root);
+ 
+     return 0;
+@@ -4827,9 +4818,10 @@ fuse_setlk_interrupt_handler(xlator_t *this, fuse_interrupt_record_t *fir)
+     frame->op = GF_FOP_GETXATTR;
+     state->name = xattr_name;
+ 
+-    STACK_WIND(frame, fuse_setlk_interrupt_handler_cbk, state->active_subvol,
+-               state->active_subvol->fops->fgetxattr, state->fd, xattr_name,
+-               state->xdata);
++    STACK_WIND_COOKIE(frame, fuse_setlk_interrupt_handler_cbk, fir,
++                      state->active_subvol,
++                      state->active_subvol->fops->fgetxattr, state->fd,
++                      xattr_name, state->xdata);
+ 
+     return;
+ 
+@@ -4852,15 +4844,9 @@ fuse_setlk_resume(fuse_state_t *state)
+     fir = fuse_interrupt_record_new(state->finh, fuse_setlk_interrupt_handler);
+     state_clone = gf_memdup(state, sizeof(*state));
+     if (state_clone) {
+-        /*
+-         * Calling this allocator with fir casted to (char *) seems like
+-         * an abuse of this API, but in fact the API is stupid to assume
+-         * a (char *) argument (in the funcion it's casted to (void *)
+-         * anyway).
+-         */
+-        state_clone->xdata = dict_for_key_value(
+-            "fuse-interrupt-record", (char *)fir, sizeof(*fir), _gf_true);
++        state_clone->xdata = dict_new();
+     }
++
+     if (!fir || !state_clone || !state_clone->xdata) {
+         if (fir) {
+             GF_FREE(fir);
+-- 
+1.8.3.1
+

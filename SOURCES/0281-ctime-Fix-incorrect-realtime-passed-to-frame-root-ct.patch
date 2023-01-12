@@ -1,0 +1,105 @@
+From fa3cc9971bf1bf4ea52edfedc0cea67a0d6990d1 Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Tue, 20 Aug 2019 15:49:40 +0530
+Subject: [PATCH 281/284] ctime: Fix incorrect realtime passed to
+ frame->root->ctime
+
+On systems that don't support "timespec_get"(e.g., centos6), it
+was using "clock_gettime" with "CLOCK_MONOTONIC" to get unix epoch
+time which is incorrect. This patch introduces "timespec_now_realtime"
+which uses "clock_gettime" with "CLOCK_REALTIME" which fixes
+the issue.
+
+Backport of:
+ > Patch: https://review.gluster.org/23274/
+ > Change-Id: I57be35ce442d7e05319e82112b687eb4f28d7612
+ > Signed-off-by: Kotresh HR <khiremat@redhat.com>
+ > fixes: bz#1743652
+
+Change-Id: I57be35ce442d7e05319e82112b687eb4f28d7612
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+BUG: 1743611
+Reviewed-on: https://code.engineering.redhat.com/gerrit/179185
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/glusterfs/timespec.h      |  2 ++
+ libglusterfs/src/libglusterfs.sym          |  1 +
+ libglusterfs/src/timespec.c                | 22 ++++++++++++++++++++++
+ xlators/features/utime/src/utime-helpers.c |  2 +-
+ 4 files changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/libglusterfs/src/glusterfs/timespec.h b/libglusterfs/src/glusterfs/timespec.h
+index 871871d..bb9ab44 100644
+--- a/libglusterfs/src/glusterfs/timespec.h
++++ b/libglusterfs/src/glusterfs/timespec.h
+@@ -21,6 +21,8 @@
+ void
+ timespec_now(struct timespec *ts);
+ void
++timespec_now_realtime(struct timespec *ts);
++void
+ timespec_adjust_delta(struct timespec *ts, struct timespec delta);
+ void
+ timespec_sub(const struct timespec *begin, const struct timespec *end,
+diff --git a/libglusterfs/src/libglusterfs.sym b/libglusterfs/src/libglusterfs.sym
+index b161380..467a1b7 100644
+--- a/libglusterfs/src/libglusterfs.sym
++++ b/libglusterfs/src/libglusterfs.sym
+@@ -1073,6 +1073,7 @@ sys_accept
+ tbf_init
+ tbf_throttle
+ timespec_now
++timespec_now_realtime
+ timespec_sub
+ timespec_adjust_delta
+ timespec_cmp
+diff --git a/libglusterfs/src/timespec.c b/libglusterfs/src/timespec.c
+index c01527f..d0d5005 100644
+--- a/libglusterfs/src/timespec.c
++++ b/libglusterfs/src/timespec.c
+@@ -71,6 +71,28 @@ timespec_now(struct timespec *ts)
+ }
+ 
+ void
++timespec_now_realtime(struct timespec *ts)
++{
++#if defined GF_LINUX_HOST_OS || defined GF_SOLARIS_HOST_OS ||                  \
++    defined GF_BSD_HOST_OS
++    if (0 == clock_gettime(CLOCK_REALTIME, ts)) {
++        return;
++    }
++#endif
++
++    /* Fall back to gettimeofday()*/
++    struct timeval tv = {
++        0,
++    };
++    if (0 == gettimeofday(&tv, NULL)) {
++        TIMEVAL_TO_TIMESPEC(&tv, ts);
++        return;
++    }
++
++    return;
++}
++
++void
+ timespec_adjust_delta(struct timespec *ts, struct timespec delta)
+ {
+     ts->tv_nsec = ((ts->tv_nsec + delta.tv_nsec) % 1000000000);
+diff --git a/xlators/features/utime/src/utime-helpers.c b/xlators/features/utime/src/utime-helpers.c
+index 79cc014..29d9ad9 100644
+--- a/xlators/features/utime/src/utime-helpers.c
++++ b/xlators/features/utime/src/utime-helpers.c
+@@ -17,7 +17,7 @@ gl_timespec_get(struct timespec *ts)
+ #ifdef TIME_UTC
+     timespec_get(ts, TIME_UTC);
+ #else
+-    timespec_now(ts);
++    timespec_now_realtime(ts);
+ #endif
+ }
+ 
+-- 
+1.8.3.1
+

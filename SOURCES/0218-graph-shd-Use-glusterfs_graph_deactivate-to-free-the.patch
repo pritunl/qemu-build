@@ -1,0 +1,88 @@
+From 8cc6d8af00303c445b94715c92fe9e3e01edb867 Mon Sep 17 00:00:00 2001
+From: Mohammed Rafi KC <rkavunga@redhat.com>
+Date: Mon, 24 Jun 2019 15:49:04 +0530
+Subject: [PATCH 218/221] graph/shd: Use glusterfs_graph_deactivate to free the
+ xl rec
+
+We were using glusterfs_graph_fini to free the xl rec from
+glusterfs_process_volfp as well as glusterfs_graph_cleanup.
+
+Instead we can use glusterfs_graph_deactivate, which does
+fini as well as other common rec free.
+
+Backport of:https://review.gluster.org/#/c/glusterfs/+/22904/
+
+>Change-Id: Ie4a5f2771e5254aa5ed9f00c3672a6d2cc8e4bc1
+>Updates: bz#1716695
+>Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+
+Change-Id: I09d7124366bc690ceca9e8d0adee8a0dc8081091
+BUG: 1711939
+Signed-off-by: Mohammed Rafi KC <rkavunga@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/174814
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/graph.c           | 2 +-
+ libglusterfs/src/xlator.c          | 9 ++++++++-
+ xlators/features/shard/src/shard.c | 3 +++
+ 3 files changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/libglusterfs/src/graph.c b/libglusterfs/src/graph.c
+index 27d9335..5b95fd6 100644
+--- a/libglusterfs/src/graph.c
++++ b/libglusterfs/src/graph.c
+@@ -1394,7 +1394,7 @@ glusterfs_graph_cleanup(void *arg)
+ 
+     pthread_mutex_lock(&ctx->cleanup_lock);
+     {
+-        glusterfs_graph_fini(graph);
++        glusterfs_graph_deactivate(graph);
+         glusterfs_graph_destroy(graph);
+     }
+     pthread_mutex_unlock(&ctx->cleanup_lock);
+diff --git a/libglusterfs/src/xlator.c b/libglusterfs/src/xlator.c
+index 71e1ed4..d9d3441 100644
+--- a/libglusterfs/src/xlator.c
++++ b/libglusterfs/src/xlator.c
+@@ -659,6 +659,7 @@ xlator_fini_rec(xlator_t *xl)
+         trav = trav->next;
+     }
+ 
++    xl->cleanup_starting = 1;
+     if (xl->init_succeeded) {
+         if (xl->fini) {
+             old_THIS = THIS;
+@@ -666,8 +667,14 @@ xlator_fini_rec(xlator_t *xl)
+ 
+             xl->fini(xl);
+ 
+-            if (xl->local_pool)
++            if (xl->local_pool) {
+                 mem_pool_destroy(xl->local_pool);
++                xl->local_pool = NULL;
++            }
++            if (xl->itable) {
++                inode_table_destroy(xl->itable);
++                xl->itable = NULL;
++            }
+ 
+             THIS = old_THIS;
+         } else {
+diff --git a/xlators/features/shard/src/shard.c b/xlators/features/shard/src/shard.c
+index b248767..31c7eec 100644
+--- a/xlators/features/shard/src/shard.c
++++ b/xlators/features/shard/src/shard.c
+@@ -6785,6 +6785,9 @@ fini(xlator_t *this)
+ 
+     GF_VALIDATE_OR_GOTO("shard", this, out);
+ 
++    /*Itable was not created by shard, hence setting to NULL.*/
++    this->itable = NULL;
++
+     mem_pool_destroy(this->local_pool);
+     this->local_pool = NULL;
+ 
+-- 
+1.8.3.1
+

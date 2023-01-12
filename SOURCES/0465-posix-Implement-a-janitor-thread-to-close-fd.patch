@@ -1,0 +1,384 @@
+From 143b93b230b429cc712353243ed794b68494c040 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawa@redhat.com>
+Date: Mon, 27 Jul 2020 18:08:00 +0530
+Subject: [PATCH 465/465] posix: Implement a janitor thread to close fd
+
+Problem: In the commit fb20713b380e1df8d7f9e9df96563be2f9144fd6 we use
+         syntask to close fd but we have found the patch is reducing the
+         performance
+
+Solution: Use janitor thread to close fd's and save the pfd ctx into
+          ctx janitor list and also save the posix_xlator into pfd object to
+          avoid the race condition during cleanup in brick_mux environment
+
+> Change-Id: Ifb3d18a854b267333a3a9e39845bfefb83fbc092
+> Fixes: #1396
+> Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/24755/)
+> (Cherry pick from commit 41b9616435cbdf671805856e487e373060c9455b
+
+Change-Id: Ifb3d18a854b267333a3a9e39845bfefb83fbc092
+BUG: 1851989
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/209448
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfsd/src/glusterfsd.c                    |  4 ++
+ libglusterfs/src/glusterfs/glusterfs.h         |  7 ++
+ rpc/rpc-lib/src/rpcsvc.c                       |  6 --
+ xlators/storage/posix/src/posix-common.c       | 34 +++++++++-
+ xlators/storage/posix/src/posix-helpers.c      | 93 ++++++++++++++++++++++++++
+ xlators/storage/posix/src/posix-inode-fd-ops.c | 33 ++++-----
+ xlators/storage/posix/src/posix.h              |  7 ++
+ 7 files changed, 161 insertions(+), 23 deletions(-)
+
+diff --git a/glusterfsd/src/glusterfsd.c b/glusterfsd/src/glusterfsd.c
+index 9821180..955bf1d 100644
+--- a/glusterfsd/src/glusterfsd.c
++++ b/glusterfsd/src/glusterfsd.c
+@@ -1839,6 +1839,10 @@ glusterfs_ctx_defaults_init(glusterfs_ctx_t *ctx)
+ 
+     INIT_LIST_HEAD(&cmd_args->xlator_options);
+     INIT_LIST_HEAD(&cmd_args->volfile_servers);
++    ctx->pxl_count = 0;
++    pthread_mutex_init(&ctx->fd_lock, NULL);
++    pthread_cond_init(&ctx->fd_cond, NULL);
++    INIT_LIST_HEAD(&ctx->janitor_fds);
+ 
+     lim.rlim_cur = RLIM_INFINITY;
+     lim.rlim_max = RLIM_INFINITY;
+diff --git a/libglusterfs/src/glusterfs/glusterfs.h b/libglusterfs/src/glusterfs/glusterfs.h
+index 495a4d7..bf6a987 100644
+--- a/libglusterfs/src/glusterfs/glusterfs.h
++++ b/libglusterfs/src/glusterfs/glusterfs.h
+@@ -733,6 +733,13 @@ struct _glusterfs_ctx {
+     } stats;
+ 
+     struct list_head volfile_list;
++    /* Add members to manage janitor threads for cleanup fd */
++    struct list_head janitor_fds;
++    pthread_cond_t fd_cond;
++    pthread_mutex_t fd_lock;
++    pthread_t janitor;
++    /* The variable is use to save total posix xlator count */
++    uint32_t pxl_count;
+ 
+     char volume_id[GF_UUID_BUF_SIZE]; /* Used only in protocol/client */
+ };
+diff --git a/rpc/rpc-lib/src/rpcsvc.c b/rpc/rpc-lib/src/rpcsvc.c
+index 23ca1fd..3f184bf 100644
+--- a/rpc/rpc-lib/src/rpcsvc.c
++++ b/rpc/rpc-lib/src/rpcsvc.c
+@@ -375,12 +375,6 @@ rpcsvc_program_actor(rpcsvc_request_t *req)
+ 
+     req->ownthread = program->ownthread;
+     req->synctask = program->synctask;
+-    if (((req->procnum == GFS3_OP_RELEASE) ||
+-         (req->procnum == GFS3_OP_RELEASEDIR)) &&
+-        (program->prognum == GLUSTER_FOP_PROGRAM)) {
+-        req->ownthread = _gf_false;
+-        req->synctask = _gf_true;
+-    }
+ 
+     err = SUCCESS;
+     gf_log(GF_RPCSVC, GF_LOG_TRACE, "Actor found: %s - %s for %s",
+diff --git a/xlators/storage/posix/src/posix-common.c b/xlators/storage/posix/src/posix-common.c
+index b317627..c5a43a1 100644
+--- a/xlators/storage/posix/src/posix-common.c
++++ b/xlators/storage/posix/src/posix-common.c
+@@ -150,6 +150,7 @@ posix_notify(xlator_t *this, int32_t event, void *data, ...)
+     struct timespec sleep_till = {
+         0,
+     };
++    glusterfs_ctx_t *ctx = this->ctx;
+ 
+     switch (event) {
+         case GF_EVENT_PARENT_UP: {
+@@ -160,8 +161,6 @@ posix_notify(xlator_t *this, int32_t event, void *data, ...)
+         case GF_EVENT_PARENT_DOWN: {
+             if (!victim->cleanup_starting)
+                 break;
+-            gf_log(this->name, GF_LOG_INFO, "Sending CHILD_DOWN for brick %s",
+-                   victim->name);
+ 
+             if (priv->janitor) {
+                 pthread_mutex_lock(&priv->janitor_mutex);
+@@ -187,6 +186,16 @@ posix_notify(xlator_t *this, int32_t event, void *data, ...)
+                 GF_FREE(priv->janitor);
+             }
+             priv->janitor = NULL;
++            pthread_mutex_lock(&ctx->fd_lock);
++            {
++                while (priv->rel_fdcount > 0) {
++                    pthread_cond_wait(&priv->fd_cond, &ctx->fd_lock);
++                }
++            }
++            pthread_mutex_unlock(&ctx->fd_lock);
++
++            gf_log(this->name, GF_LOG_INFO, "Sending CHILD_DOWN for brick %s",
++                   victim->name);
+             default_notify(this->parents->xlator, GF_EVENT_CHILD_DOWN, data);
+         } break;
+         default:
+@@ -1038,7 +1047,13 @@ posix_init(xlator_t *this)
+     pthread_cond_init(&_private->fsync_cond, NULL);
+     pthread_mutex_init(&_private->janitor_mutex, NULL);
+     pthread_cond_init(&_private->janitor_cond, NULL);
++    pthread_cond_init(&_private->fd_cond, NULL);
+     INIT_LIST_HEAD(&_private->fsyncs);
++    _private->rel_fdcount = 0;
++    ret = posix_spawn_ctx_janitor_thread(this);
++    if (ret)
++        goto out;
++
+     ret = gf_thread_create(&_private->fsyncer, NULL, posix_fsyncer, this,
+                            "posixfsy");
+     if (ret) {
+@@ -1133,6 +1148,8 @@ posix_fini(xlator_t *this)
+ {
+     struct posix_private *priv = this->private;
+     gf_boolean_t health_check = _gf_false;
++    glusterfs_ctx_t *ctx = this->ctx;
++    uint32_t count;
+     int ret = 0;
+ 
+     if (!priv)
+@@ -1166,6 +1183,19 @@ posix_fini(xlator_t *this)
+         priv->janitor = NULL;
+     }
+ 
++    pthread_mutex_lock(&ctx->fd_lock);
++    {
++        count = --ctx->pxl_count;
++        if (count == 0) {
++            pthread_cond_signal(&ctx->fd_cond);
++        }
++    }
++    pthread_mutex_unlock(&ctx->fd_lock);
++
++    if (count == 0) {
++        pthread_join(ctx->janitor, NULL);
++    }
++
+     if (priv->fsyncer) {
+         (void)gf_thread_cleanup_xint(priv->fsyncer);
+         priv->fsyncer = 0;
+diff --git a/xlators/storage/posix/src/posix-helpers.c b/xlators/storage/posix/src/posix-helpers.c
+index 39dbcce..73a44be 100644
+--- a/xlators/storage/posix/src/posix-helpers.c
++++ b/xlators/storage/posix/src/posix-helpers.c
+@@ -1582,6 +1582,99 @@ unlock:
+     return;
+ }
+ 
++static struct posix_fd *
++janitor_get_next_fd(glusterfs_ctx_t *ctx)
++{
++    struct posix_fd *pfd = NULL;
++
++    while (list_empty(&ctx->janitor_fds)) {
++        if (ctx->pxl_count == 0) {
++            return NULL;
++        }
++
++        pthread_cond_wait(&ctx->fd_cond, &ctx->fd_lock);
++    }
++
++    pfd = list_first_entry(&ctx->janitor_fds, struct posix_fd, list);
++    list_del_init(&pfd->list);
++
++    return pfd;
++}
++
++static void
++posix_close_pfd(xlator_t *xl, struct posix_fd *pfd)
++{
++    THIS = xl;
++
++    if (pfd->dir == NULL) {
++        gf_msg_trace(xl->name, 0, "janitor: closing file fd=%d", pfd->fd);
++        sys_close(pfd->fd);
++    } else {
++        gf_msg_debug(xl->name, 0, "janitor: closing dir fd=%p", pfd->dir);
++        sys_closedir(pfd->dir);
++    }
++
++    GF_FREE(pfd);
++}
++
++static void *
++posix_ctx_janitor_thread_proc(void *data)
++{
++    xlator_t *xl;
++    struct posix_fd *pfd;
++    glusterfs_ctx_t *ctx = NULL;
++    struct posix_private *priv_fd;
++
++    ctx = data;
++
++    pthread_mutex_lock(&ctx->fd_lock);
++
++    while ((pfd = janitor_get_next_fd(ctx)) != NULL) {
++        pthread_mutex_unlock(&ctx->fd_lock);
++
++        xl = pfd->xl;
++        posix_close_pfd(xl, pfd);
++
++        pthread_mutex_lock(&ctx->fd_lock);
++
++        priv_fd = xl->private;
++        priv_fd->rel_fdcount--;
++        if (!priv_fd->rel_fdcount)
++            pthread_cond_signal(&priv_fd->fd_cond);
++    }
++
++    pthread_mutex_unlock(&ctx->fd_lock);
++
++    return NULL;
++}
++
++int
++posix_spawn_ctx_janitor_thread(xlator_t *this)
++{
++    int ret = 0;
++    glusterfs_ctx_t *ctx = NULL;
++
++    ctx = this->ctx;
++
++    pthread_mutex_lock(&ctx->fd_lock);
++    {
++        if (ctx->pxl_count++ == 0) {
++            ret = gf_thread_create(&ctx->janitor, NULL,
++                                   posix_ctx_janitor_thread_proc, ctx,
++                                   "posixctxjan");
++
++            if (ret) {
++                gf_msg(this->name, GF_LOG_ERROR, errno, P_MSG_THREAD_FAILED,
++                       "spawning janitor thread failed");
++                ctx->pxl_count--;
++            }
++        }
++    }
++    pthread_mutex_unlock(&ctx->fd_lock);
++
++    return ret;
++}
++
+ static int
+ is_fresh_file(int64_t ctime_sec)
+ {
+diff --git a/xlators/storage/posix/src/posix-inode-fd-ops.c b/xlators/storage/posix/src/posix-inode-fd-ops.c
+index 81f4a6b..21119ea 100644
+--- a/xlators/storage/posix/src/posix-inode-fd-ops.c
++++ b/xlators/storage/posix/src/posix-inode-fd-ops.c
+@@ -1352,6 +1352,22 @@ out:
+     return 0;
+ }
+ 
++static void
++posix_add_fd_to_cleanup(xlator_t *this, struct posix_fd *pfd)
++{
++    glusterfs_ctx_t *ctx = this->ctx;
++    struct posix_private *priv = this->private;
++
++    pfd->xl = this;
++    pthread_mutex_lock(&ctx->fd_lock);
++    {
++        list_add_tail(&pfd->list, &ctx->janitor_fds);
++        priv->rel_fdcount++;
++        pthread_cond_signal(&ctx->fd_cond);
++    }
++    pthread_mutex_unlock(&ctx->fd_lock);
++}
++
+ int32_t
+ posix_releasedir(xlator_t *this, fd_t *fd)
+ {
+@@ -1374,11 +1390,7 @@ posix_releasedir(xlator_t *this, fd_t *fd)
+                "pfd->dir is NULL for fd=%p", fd);
+         goto out;
+     }
+-
+-    gf_msg_debug(this->name, 0, "janitor: closing dir fd=%p", pfd->dir);
+-
+-    sys_closedir(pfd->dir);
+-    GF_FREE(pfd);
++    posix_add_fd_to_cleanup(this, pfd);
+ 
+ out:
+     return 0;
+@@ -2494,7 +2506,6 @@ out:
+ int32_t
+ posix_release(xlator_t *this, fd_t *fd)
+ {
+-    struct posix_private *priv = NULL;
+     struct posix_fd *pfd = NULL;
+     int ret = -1;
+     uint64_t tmp_pfd = 0;
+@@ -2502,8 +2513,6 @@ posix_release(xlator_t *this, fd_t *fd)
+     VALIDATE_OR_GOTO(this, out);
+     VALIDATE_OR_GOTO(fd, out);
+ 
+-    priv = this->private;
+-
+     ret = fd_ctx_del(fd, this, &tmp_pfd);
+     if (ret < 0) {
+         gf_msg(this->name, GF_LOG_WARNING, 0, P_MSG_PFD_NULL,
+@@ -2517,13 +2526,7 @@ posix_release(xlator_t *this, fd_t *fd)
+                "pfd->dir is %p (not NULL) for file fd=%p", pfd->dir, fd);
+     }
+ 
+-    gf_msg_debug(this->name, 0, "janitor: closing dir fd=%p", pfd->dir);
+-
+-    sys_close(pfd->fd);
+-    GF_FREE(pfd);
+-
+-    if (!priv)
+-        goto out;
++    posix_add_fd_to_cleanup(this, pfd);
+ 
+ out:
+     return 0;
+diff --git a/xlators/storage/posix/src/posix.h b/xlators/storage/posix/src/posix.h
+index 124dbb4..07f367b 100644
+--- a/xlators/storage/posix/src/posix.h
++++ b/xlators/storage/posix/src/posix.h
+@@ -134,6 +134,8 @@ struct posix_fd {
+     off_t dir_eof; /* offset at dir EOF */
+     int odirect;
+     struct list_head list; /* to add to the janitor list */
++    xlator_t *xl;
++    char _pad[4]; /* manual padding */
+ };
+ 
+ struct posix_private {
+@@ -204,6 +206,7 @@ struct posix_private {
+     pthread_cond_t fsync_cond;
+     pthread_mutex_t janitor_mutex;
+     pthread_cond_t janitor_cond;
++    pthread_cond_t fd_cond;
+     int fsync_queue_count;
+ 
+     enum {
+@@ -259,6 +262,7 @@ struct posix_private {
+     gf_boolean_t fips_mode_rchecksum;
+     gf_boolean_t ctime;
+     gf_boolean_t janitor_task_stop;
++    uint32_t rel_fdcount;
+ };
+ 
+ typedef struct {
+@@ -665,6 +669,9 @@ posix_cs_maintenance(xlator_t *this, fd_t *fd, loc_t *loc, int *pfd,
+ int
+ posix_check_dev_file(xlator_t *this, inode_t *inode, char *fop, int *op_errno);
+ 
++int
++posix_spawn_ctx_janitor_thread(xlator_t *this);
++
+ void
+ posix_update_iatt_buf(struct iatt *buf, int fd, char *loc, dict_t *xdata);
+ 
+-- 
+1.8.3.1
+

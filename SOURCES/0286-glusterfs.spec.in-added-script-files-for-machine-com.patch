@@ -1,0 +1,162 @@
+From 2a905a8ae6b4737e84543ad76b55f3346fa0f32c Mon Sep 17 00:00:00 2001
+From: Hari Gowtham <hgowtham@redhat.com>
+Date: Tue, 27 Aug 2019 14:12:31 +0530
+Subject: [PATCH 286/297] glusterfs.spec.in: added script files for machine /
+ component stats
+
+Have added the file (extras/identify-hangs.sh) to the code base.
+And included the following to be packaged:
+
+Quota Accounting issue:
+extras/quota/xattr_analysis.py (made available only on server)
+extras/quota/quota_fsck.py (made available only on server)
+extras/quota/log_accounting.sh
+
+Debugging Statedumps:
+extras/identify-hangs.sh
+
+Performance:
+extras/collect-system-stats.sh
+
+Note: rest of the files were already included.
+
+Label: DOWNSTREAM ONLY.
+
+Change-Id: I2efb959865c3f381166c6a25c6eef613d13dd5ee
+fixes: bz#1719171
+Signed-off-by: Hari Gowtham <hgowtham@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/179515
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ extras/Makefile.am       |  9 +++++++-
+ extras/identify-hangs.sh | 53 ++++++++++++++++++++++++++++++++++++++++++++++++
+ glusterfs.spec.in        |  8 ++++++++
+ 3 files changed, 69 insertions(+), 1 deletion(-)
+ create mode 100644 extras/identify-hangs.sh
+
+diff --git a/extras/Makefile.am b/extras/Makefile.am
+index 983f014..8cbfda1 100644
+--- a/extras/Makefile.am
++++ b/extras/Makefile.am
+@@ -30,9 +30,14 @@ endif
+ 
+ scriptsdir = $(datadir)/glusterfs/scripts
+ scripts_SCRIPTS = thin-arbiter/setup-thin-arbiter.sh
++scripts_SCRIPTS += quota/log_accounting.sh
++scripts_SCRIPTS += collect-system-stats.sh
++scripts_SCRIPTS += identify-hangs.sh
+ if WITH_SERVER
+ scripts_SCRIPTS += post-upgrade-script-for-quota.sh \
+ 	pre-upgrade-script-for-quota.sh stop-all-gluster-processes.sh
++scripts_SCRIPTS += quota/quota_fsck.py
++scripts_SCRIPTS += quota/xattr_analysis.py
+ if USE_SYSTEMD
+ scripts_SCRIPTS += control-cpu-load.sh
+ scripts_SCRIPTS += control-mem.sh
+@@ -50,7 +55,9 @@ EXTRA_DIST = glusterfs-logrotate gluster-rsyslog-7.2.conf gluster-rsyslog-5.8.co
+ 	command-completion/Makefile command-completion/README \
+ 	stop-all-gluster-processes.sh clang-checker.sh mount-shared-storage.sh \
+ 	control-cpu-load.sh control-mem.sh group-distributed-virt \
+-	thin-arbiter/thin-arbiter.vol thin-arbiter/setup-thin-arbiter.sh
++	thin-arbiter/thin-arbiter.vol thin-arbiter/setup-thin-arbiter.sh \
++	quota/xattr_analysis.py quota/quota_fsck.py quota/log_accounting.sh \
++	collect-system-stats.sh identify-hangs.sh
+ 
+ if WITH_SERVER
+ install-data-local:
+diff --git a/extras/identify-hangs.sh b/extras/identify-hangs.sh
+new file mode 100644
+index 0000000..ebc6bf1
+--- /dev/null
++++ b/extras/identify-hangs.sh
+@@ -0,0 +1,53 @@
++#!/bin/bash
++function get_statedump_fnames_without_timestamps
++{
++    ls | grep -E "[.]dump[.][0-9][0-9]*" | cut -f1-3 -d'.' | sort -u
++}
++
++function get_non_uniq_fields
++{
++    local statedump_fname_prefix=$1
++    print_stack_lkowner_unique_in_one_line "$statedump_fname_prefix" | sort | uniq -c | grep -vE "^\s*1 " | awk '{$1="repeats="$1; print $0}'
++}
++
++function print_stack_lkowner_unique_in_one_line
++{
++    local statedump_fname_prefix=$1
++    sed -e '/./{H;$!d;}' -e 'x;/unique=/!d;/stack=/!d;/lk-owner=/!d;/pid=/!d;' "${statedump_fname_prefix}"* | grep -E "(stack|lk-owner|unique|pid)=" | paste -d " " - - - -
++}
++
++function get_stacks_that_appear_in_multiple_statedumps
++{
++    #If a stack with same 'unique/lk-owner/stack' appears in multiple statedumps
++    #print the stack
++    local statedump_fname_prefix=$1
++    while read -r non_uniq_stack;
++    do
++        if [ -z "$printed" ];
++        then
++            printed="1"
++        fi
++        echo "$statedump_fname_prefix" "$non_uniq_stack"
++    done < <(get_non_uniq_fields "$statedump_fname_prefix")
++}
++
++statedumpdir=${1}
++if [ -z "$statedumpdir" ];
++then
++    echo "Usage: $0 <statedump-dir>"
++    exit 1
++fi
++
++if [ ! -d "$statedumpdir" ];
++then
++    echo "$statedumpdir: Is not a directory"
++    echo "Usage: $0 <statedump-dir>"
++    exit 1
++fi
++
++cd "$statedumpdir" || exit 1
++for statedump_fname_prefix in $(get_statedump_fnames_without_timestamps);
++do
++    get_stacks_that_appear_in_multiple_statedumps "$statedump_fname_prefix"
++done | column -t
++echo "NOTE: stacks with lk-owner=\"\"/lk-owner=0000000000000000/unique=0 may not be hung frames and need further inspection" >&2
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 00603ec..3c2e2dc 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -1107,6 +1107,9 @@ exit 0
+      %{_datadir}/glusterfs/scripts/post-upgrade-script-for-quota.sh
+      %{_datadir}/glusterfs/scripts/pre-upgrade-script-for-quota.sh
+ %endif
++%{_datadir}/glusterfs/scripts/identify-hangs.sh
++%{_datadir}/glusterfs/scripts/collect-system-stats.sh
++%{_datadir}/glusterfs/scripts/log_accounting.sh
+ # xlators that are needed on the client- and on the server-side
+ %dir %{_libdir}/glusterfs
+ %dir %{_libdir}/glusterfs/%{version}%{?prereltag}
+@@ -1352,6 +1355,8 @@ exit 0
+ %if ( 0%{!?_without_server:1} )
+ %files server
+ %doc extras/clear_xattrs.sh
++%{_datadir}/glusterfs/scripts/xattr_analysis.py*
++%{_datadir}/glusterfs/scripts/quota_fsck.py*
+ # sysconf
+ %config(noreplace) %{_sysconfdir}/glusterfs
+ %exclude %{_sysconfdir}/glusterfs/thin-arbiter.vol
+@@ -1942,6 +1947,9 @@ fi
+ %endif
+ 
+ %changelog
++* Tue Aug 27 2019 Hari Gowtham <hgowtham@redhat.com>
++- Added scripts to collect machine stats and component stats (#1719171)
++
+ * Tue Jun 18  2019 Jiffin Tony Thottan <jthottan@redhat.com>
+ - build glusterfs-ganesha for rhel 7 and above (#1720551)
+ 
+-- 
+1.8.3.1
+

@@ -1,0 +1,46 @@
+From 0c996d6c40c625f8a0ee6be2c220c89aaf70c840 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Tue, 10 Dec 2019 08:35:23 +0530
+Subject: [PATCH 340/344] rpc: event_slot_alloc converted infinite loop after
+ reach slot_used to 1024
+
+Problem: In the commit faf5ac13c4ee00a05e9451bf8da3be2a9043bbf2 missed one
+         condition to come out from the loop so after reach the slot_used to
+         1024 loop has become infinite loop
+
+Solution: Correct the code path to avoid the infinite loop
+
+> Change-Id: Ia02a109571f0d8cc9902c32db3e9b9282ee5c1db
+> Fixes: bz#1781440
+> Credits: Xavi Hernandez <xhernandez@redhat.com>
+> Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+> (Cherry picked from commit 8030f9c0f092170ceb50cedf59b9c330022825b7)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/23843/)
+
+Change-Id: Ia02a109571f0d8cc9902c32db3e9b9282ee5c1db
+BUG: 1781444
+Credits: Xavi Hernandez <xhernandez@redhat.com>
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/187460
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Xavi Hernandez Juan <xhernandez@redhat.com>
+---
+ libglusterfs/src/event-epoll.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libglusterfs/src/event-epoll.c b/libglusterfs/src/event-epoll.c
+index 65f5efd..5afb2f2 100644
+--- a/libglusterfs/src/event-epoll.c
++++ b/libglusterfs/src/event-epoll.c
+@@ -92,7 +92,7 @@ retry:
+     while (i < EVENT_EPOLL_TABLES) {
+         switch (event_pool->slots_used[i]) {
+             case EVENT_EPOLL_SLOTS:
+-                continue;
++                break;
+             case 0:
+                 if (!event_pool->ereg[i]) {
+                     table = __event_newtable(event_pool, i);
+-- 
+1.8.3.1
+

@@ -1,0 +1,47 @@
+From 7455900798446681fea1a2693fac9b423ad9722a Mon Sep 17 00:00:00 2001
+From: Csaba Henk <csaba@redhat.com>
+Date: Tue, 9 Jul 2019 11:06:49 +0200
+Subject: [PATCH 265/265] fuse: add missing GF_FREE to fuse_interrupt
+
+Upstream:
+(Reviewed on https://review.gluster.org/c/glusterfs/+/23016)
+> Change-Id: Id7e003e4a53d0a0057c1c84e1cd704c80a6cb015
+> Fixes: bz#1728047
+> Signed-off-by: Csaba Henk <csaba@redhat.com>
+
+BUG: 1734423
+Change-Id: I50640bf9b56349ab9b07140bdce8a45a7d07ba7a
+Signed-off-by: Csaba Henk <csaba@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/177298
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mount/fuse/src/fuse-bridge.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/xlators/mount/fuse/src/fuse-bridge.c b/xlators/mount/fuse/src/fuse-bridge.c
+index c05866b..1c946a2 100644
+--- a/xlators/mount/fuse/src/fuse-bridge.c
++++ b/xlators/mount/fuse/src/fuse-bridge.c
+@@ -661,7 +661,7 @@ fuse_interrupt(xlator_t *this, fuse_in_header_t *finh, void *msg,
+                    " failed to allocate timed message",
+                    finh->unique, fii->unique);
+ 
+-            return;
++            goto out;
+         }
+ 
+         dmsg->fuse_out_header.unique = finh->unique;
+@@ -673,6 +673,9 @@ fuse_interrupt(xlator_t *this, fuse_in_header_t *finh, void *msg,
+ 
+         send_fuse_timed(this, dmsg);
+     }
++
++out:
++    GF_FREE(finh);
+ }
+ 
+ /*
+-- 
+1.8.3.1
+

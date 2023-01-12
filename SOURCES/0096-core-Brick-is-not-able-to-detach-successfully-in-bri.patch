@@ -1,0 +1,94 @@
+From 3bcffadcd77eebe6b4f7e5015ad41ec7c1d1ec3e Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Thu, 11 Apr 2019 20:38:53 +0530
+Subject: [PATCH 096/124] core: Brick is not able to detach successfully in
+ brick_mux environment
+
+Problem: In brick_mux environment, while volumes are stopped in a
+         loop bricks are not detached successfully. Brick's are not
+         detached because xprtrefcnt has not become 0 for detached brick.
+         At the time of initiating brick detach process server_notify
+         saves xprtrefcnt on detach brick and once counter has become
+         0 then server_rpc_notify spawn a server_graph_janitor_threads
+         for cleanup brick resources.xprtrefcnt has not become 0 because
+         socket framework is not working due to assigning 0 as a fd for socket.
+         In commit dc25d2c1eeace91669052e3cecc083896e7329b2
+         there was a change in changelog fini to close htime_fd if htime_fd is not
+         negative, by default htime_fd is 0 so it close 0 also.
+
+Solution: Initialize htime_fd to -1 after just allocate changelog_priv
+          by GF_CALLOC
+
+> Fixes: bz#1699025
+> Change-Id: I5f7ca62a0eb1c0510c3e9b880d6ab8af8d736a25
+> Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+> (Cherry picked from commit b777d83001d8006420b6c7d2d88fe68950aa7e00)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/22549/
+
+Fixes: bz#1698919
+Change-Id: Ib5b74aa0818235625f8aac7c23d4daa599da3fd1
+Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167826
+Tested-by: Mohit Agrawal <moagrawa@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ .../bug-1699025-brick-mux-detach-brick-fd-issue.t  | 33 ++++++++++++++++++++++
+ xlators/features/changelog/src/changelog.c         |  1 +
+ 2 files changed, 34 insertions(+)
+ create mode 100644 tests/bugs/core/bug-1699025-brick-mux-detach-brick-fd-issue.t
+
+diff --git a/tests/bugs/core/bug-1699025-brick-mux-detach-brick-fd-issue.t b/tests/bugs/core/bug-1699025-brick-mux-detach-brick-fd-issue.t
+new file mode 100644
+index 0000000..1acbaa8
+--- /dev/null
++++ b/tests/bugs/core/bug-1699025-brick-mux-detach-brick-fd-issue.t
+@@ -0,0 +1,33 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++. $(dirname $0)/../../cluster.rc
++
++function count_brick_processes {
++        pgrep glusterfsd | wc -l
++}
++
++cleanup
++
++#bug-1444596 - validating brick mux
++
++TEST glusterd
++TEST $CLI volume create $V0 $H0:$B0/brick{0,1}
++TEST $CLI volume create $V1 $H0:$B0/brick{2,3}
++
++TEST $CLI volume set all cluster.brick-multiplex on
++
++TEST $CLI volume start $V0
++TEST $CLI volume start $V1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 4 online_brick_count
++EXPECT 1 count_brick_processes
++
++TEST $CLI volume stop $V1
++# At the time initialize brick daemon it always keeps open
++# standard fd's (0, 1 , 2) so after stop 1 volume fd's should
++# be open
++nofds=$(ls -lrth /proc/`pgrep glusterfsd`/fd | grep dev/null | wc -l)
++TEST [ $((nofds)) -eq 3 ]
++
++cleanup
+diff --git a/xlators/features/changelog/src/changelog.c b/xlators/features/changelog/src/changelog.c
+index 1f22a97..d9025f3 100644
+--- a/xlators/features/changelog/src/changelog.c
++++ b/xlators/features/changelog/src/changelog.c
+@@ -2740,6 +2740,7 @@ init(xlator_t *this)
+     GF_ATOMIC_INIT(priv->clntcnt, 0);
+     GF_ATOMIC_INIT(priv->xprtcnt, 0);
+     INIT_LIST_HEAD(&priv->xprt_list);
++    priv->htime_fd = -1;
+ 
+     ret = changelog_init_options(this, priv);
+     if (ret)
+-- 
+1.8.3.1
+

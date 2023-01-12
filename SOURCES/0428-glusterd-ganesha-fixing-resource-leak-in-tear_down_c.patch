@@ -1,0 +1,48 @@
+From 7e1bf1e338a6effe209f57b1b92a70d5d25a73bf Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Mon, 26 Aug 2019 11:32:18 +0530
+Subject: [PATCH 428/449] glusterd/ganesha: fixing resource leak in
+ tear_down_cluster()
+
+backport of https://review.gluster.org/#/c/glusterfs/+/23295/
+>CID: 1370947
+>Updates: bz#789278
+>Change-Id: Ib694056430ff0536ed705a0e77e5ace22486891e
+>Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+
+BUG: 1787310
+Change-Id: Ib694056430ff0536ed705a0e77e5ace22486891e
+Signed-off-by: Barak Sason Rofman <bsasonro@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202561
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-ganesha.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-ganesha.c b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+index 0a16925..06f028f 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-ganesha.c
++++ b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+@@ -659,10 +659,18 @@ tear_down_cluster(gf_boolean_t run_teardown)
+                          "Failed to close dir %s. Reason :"
+                          " %s",
+                          CONFDIR, strerror(errno));
++            goto exit;
+         }
+     }
+ 
+ out:
++    if (dir && sys_closedir(dir)) {
++        gf_msg_debug(THIS->name, 0,
++                     "Failed to close dir %s. Reason :"
++                     " %s",
++                     CONFDIR, strerror(errno));
++    }
++exit:
+     return ret;
+ }
+ 
+-- 
+1.8.3.1
+

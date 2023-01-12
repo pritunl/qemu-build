@@ -1,0 +1,387 @@
+From 7b7ec67680415c22773ebb2a5daacf298b6b1e06 Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez <xhernandez@redhat.com>
+Date: Sat, 13 Feb 2021 18:37:32 +0100
+Subject: [PATCH 537/538] cluster/afr: Fix race in lockinfo (f)getxattr
+
+A shared dictionary was updated outside the lock after having updated
+the number of remaining answers. This means that one thread may be
+processing the last answer and unwinding the request before another
+thread completes updating the dict.
+
+    Thread 1                           Thread 2
+
+    LOCK()
+    call_cnt-- (=1)
+    UNLOCK()
+                                       LOCK()
+                                       call_cnt-- (=0)
+                                       UNLOCK()
+                                       update_dict(dict)
+                                       if (call_cnt == 0) {
+                                           STACK_UNWIND(dict);
+                                       }
+    update_dict(dict)
+    if (call_cnt == 0) {
+        STACK_UNWIND(dict);
+    }
+
+The updates from thread 1 are lost.
+
+This patch also reduces the work done inside the locked region and
+reduces code duplication.
+
+Upstream-patch:
+> Upstream-patch-link: https://github.com/gluster/glusterfs/pull/2162
+> Fixes: #2161
+> Change-Id: Idc0d34ab19ea6031de0641f7b05c624d90fac8fa
+> Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+
+BUG: 1911292
+Change-Id: Idc0d34ab19ea6031de0641f7b05c624d90fac8fa
+Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/228924
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/afr/src/afr-inode-read.c | 254 ++++++++++++++-----------------
+ 1 file changed, 112 insertions(+), 142 deletions(-)
+
+diff --git a/xlators/cluster/afr/src/afr-inode-read.c b/xlators/cluster/afr/src/afr-inode-read.c
+index cf305af..98e195a 100644
+--- a/xlators/cluster/afr/src/afr-inode-read.c
++++ b/xlators/cluster/afr/src/afr-inode-read.c
+@@ -15,6 +15,8 @@
+ #include <stdlib.h>
+ #include <signal.h>
+ 
++#include <urcu/uatomic.h>
++
+ #include <glusterfs/glusterfs.h>
+ #include "afr.h"
+ #include <glusterfs/dict.h>
+@@ -868,188 +870,121 @@ afr_getxattr_quota_size_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+     return 0;
+ }
+ 
+-int32_t
+-afr_getxattr_lockinfo_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+-                          int32_t op_ret, int32_t op_errno, dict_t *dict,
+-                          dict_t *xdata)
++static int32_t
++afr_update_local_dicts(call_frame_t *frame, dict_t *dict, dict_t *xdata)
+ {
+-    int call_cnt = 0, len = 0;
+-    char *lockinfo_buf = NULL;
+-    dict_t *lockinfo = NULL, *newdict = NULL;
+-    afr_local_t *local = NULL;
++    afr_local_t *local;
++    dict_t *local_dict;
++    dict_t *local_xdata;
++    int32_t ret;
+ 
+-    LOCK(&frame->lock);
+-    {
+-        local = frame->local;
++    local = frame->local;
++    local_dict = NULL;
++    local_xdata = NULL;
+ 
+-        call_cnt = --local->call_count;
++    ret = -ENOMEM;
+ 
+-        if ((op_ret < 0) || (!dict && !xdata)) {
+-            goto unlock;
+-        }
+-
+-        if (xdata) {
+-            if (!local->xdata_rsp) {
+-                local->xdata_rsp = dict_new();
+-                if (!local->xdata_rsp) {
+-                    local->op_ret = -1;
+-                    local->op_errno = ENOMEM;
+-                    goto unlock;
+-                }
+-            }
++    if ((dict != NULL) && (local->dict == NULL)) {
++        local_dict = dict_new();
++        if (local_dict == NULL) {
++            goto done;
+         }
++    }
+ 
+-        if (!dict) {
+-            goto unlock;
++    if ((xdata != NULL) && (local->xdata_rsp == NULL)) {
++        local_xdata = dict_new();
++        if (local_xdata == NULL) {
++            goto done;
+         }
++    }
+ 
+-        op_ret = dict_get_ptr_and_len(dict, GF_XATTR_LOCKINFO_KEY,
+-                                      (void **)&lockinfo_buf, &len);
++    if ((local_dict != NULL) || (local_xdata != NULL)) {
++        /* TODO: Maybe it would be better to preallocate both dicts before
++         *       sending the requests. This way we don't need to use a LOCK()
++         *       here. */
++        LOCK(&frame->lock);
+ 
+-        if (!lockinfo_buf) {
+-            goto unlock;
++        if ((local_dict != NULL) && (local->dict == NULL)) {
++            local->dict = local_dict;
++            local_dict = NULL;
+         }
+ 
+-        if (!local->dict) {
+-            local->dict = dict_new();
+-            if (!local->dict) {
+-                local->op_ret = -1;
+-                local->op_errno = ENOMEM;
+-                goto unlock;
+-            }
++        if ((local_xdata != NULL) && (local->xdata_rsp == NULL)) {
++            local->xdata_rsp = local_xdata;
++            local_xdata = NULL;
+         }
+-    }
+-unlock:
+-    UNLOCK(&frame->lock);
+ 
+-    if (lockinfo_buf != NULL) {
+-        lockinfo = dict_new();
+-        if (lockinfo == NULL) {
+-            local->op_ret = -1;
+-            local->op_errno = ENOMEM;
+-        } else {
+-            op_ret = dict_unserialize(lockinfo_buf, len, &lockinfo);
+-
+-            if (lockinfo && local->dict) {
+-                dict_copy(lockinfo, local->dict);
+-            }
+-        }
+-    }
+-
+-    if (xdata && local->xdata_rsp) {
+-        dict_copy(xdata, local->xdata_rsp);
++        UNLOCK(&frame->lock);
+     }
+ 
+-    if (!call_cnt) {
+-        newdict = dict_new();
+-        if (!newdict) {
+-            local->op_ret = -1;
+-            local->op_errno = ENOMEM;
+-            goto unwind;
++    if (dict != NULL) {
++        if (dict_copy(dict, local->dict) < 0) {
++            goto done;
+         }
++    }
+ 
+-        op_ret = dict_allocate_and_serialize(
+-            local->dict, (char **)&lockinfo_buf, (unsigned int *)&len);
+-        if (op_ret != 0) {
+-            local->op_ret = -1;
+-            goto unwind;
++    if (xdata != NULL) {
++        if (dict_copy(xdata, local->xdata_rsp) < 0) {
++            goto done;
+         }
++    }
+ 
+-        op_ret = dict_set_dynptr(newdict, GF_XATTR_LOCKINFO_KEY,
+-                                 (void *)lockinfo_buf, len);
+-        if (op_ret < 0) {
+-            local->op_ret = -1;
+-            local->op_errno = -op_ret;
+-            goto unwind;
+-        }
++    ret = 0;
+ 
+-    unwind:
+-        AFR_STACK_UNWIND(getxattr, frame, op_ret, op_errno, newdict,
+-                         local->xdata_rsp);
++done:
++    if (local_dict != NULL) {
++        dict_unref(local_dict);
+     }
+ 
+-    dict_unref(lockinfo);
++    if (local_xdata != NULL) {
++        dict_unref(local_xdata);
++    }
+ 
+-    return 0;
++    return ret;
+ }
+ 
+-int32_t
+-afr_fgetxattr_lockinfo_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+-                           int32_t op_ret, int32_t op_errno, dict_t *dict,
+-                           dict_t *xdata)
++static void
++afr_getxattr_lockinfo_cbk_common(call_frame_t *frame, int32_t op_ret,
++                                 int32_t op_errno, dict_t *dict, dict_t *xdata,
++                                 bool is_fgetxattr)
+ {
+-    int call_cnt = 0, len = 0;
++    int len = 0;
+     char *lockinfo_buf = NULL;
+     dict_t *lockinfo = NULL, *newdict = NULL;
+     afr_local_t *local = NULL;
+ 
+-    LOCK(&frame->lock);
+-    {
+-        local = frame->local;
+-
+-        call_cnt = --local->call_count;
+-
+-        if ((op_ret < 0) || (!dict && !xdata)) {
+-            goto unlock;
+-        }
+-
+-        if (xdata) {
+-            if (!local->xdata_rsp) {
+-                local->xdata_rsp = dict_new();
+-                if (!local->xdata_rsp) {
+-                    local->op_ret = -1;
+-                    local->op_errno = ENOMEM;
+-                    goto unlock;
+-                }
+-            }
+-        }
+-
+-        if (!dict) {
+-            goto unlock;
+-        }
++    local = frame->local;
+ 
++    if ((op_ret >= 0) && (dict != NULL)) {
+         op_ret = dict_get_ptr_and_len(dict, GF_XATTR_LOCKINFO_KEY,
+                                       (void **)&lockinfo_buf, &len);
+-
+-        if (!lockinfo_buf) {
+-            goto unlock;
+-        }
+-
+-        if (!local->dict) {
+-            local->dict = dict_new();
+-            if (!local->dict) {
+-                local->op_ret = -1;
+-                local->op_errno = ENOMEM;
+-                goto unlock;
++        if (lockinfo_buf != NULL) {
++            lockinfo = dict_new();
++            if (lockinfo == NULL) {
++                op_ret = -1;
++            } else {
++                op_ret = dict_unserialize(lockinfo_buf, len, &lockinfo);
+             }
+         }
+     }
+-unlock:
+-    UNLOCK(&frame->lock);
+ 
+-    if (lockinfo_buf != NULL) {
+-        lockinfo = dict_new();
+-        if (lockinfo == NULL) {
+-            local->op_ret = -1;
+-            local->op_errno = ENOMEM;
+-        } else {
+-            op_ret = dict_unserialize(lockinfo_buf, len, &lockinfo);
+-
+-            if (lockinfo && local->dict) {
+-                dict_copy(lockinfo, local->dict);
+-            }
++    if ((op_ret >= 0) && ((lockinfo != NULL) || (xdata != NULL))) {
++        op_ret = afr_update_local_dicts(frame, lockinfo, xdata);
++        if (lockinfo != NULL) {
++            dict_unref(lockinfo);
+         }
+     }
+ 
+-    if (xdata && local->xdata_rsp) {
+-        dict_copy(xdata, local->xdata_rsp);
++    if (op_ret < 0) {
++        local->op_ret = -1;
++        local->op_errno = ENOMEM;
+     }
+ 
+-    if (!call_cnt) {
++    if (uatomic_sub_return(&local->call_count, 1) == 0) {
+         newdict = dict_new();
+         if (!newdict) {
+             local->op_ret = -1;
+-            local->op_errno = ENOMEM;
++            local->op_errno = op_errno = ENOMEM;
+             goto unwind;
+         }
+ 
+@@ -1057,23 +992,58 @@ unlock:
+             local->dict, (char **)&lockinfo_buf, (unsigned int *)&len);
+         if (op_ret != 0) {
+             local->op_ret = -1;
++            local->op_errno = op_errno = ENOMEM;
+             goto unwind;
+         }
+ 
+         op_ret = dict_set_dynptr(newdict, GF_XATTR_LOCKINFO_KEY,
+                                  (void *)lockinfo_buf, len);
+         if (op_ret < 0) {
+-            local->op_ret = -1;
+-            local->op_errno = -op_ret;
++            GF_FREE(lockinfo_buf);
++            local->op_ret = op_ret = -1;
++            local->op_errno = op_errno = -op_ret;
+             goto unwind;
+         }
+ 
+     unwind:
+-        AFR_STACK_UNWIND(fgetxattr, frame, op_ret, op_errno, newdict,
+-                         local->xdata_rsp);
++        /* TODO: These unwinds use op_ret and op_errno instead of local->op_ret
++         *       and local->op_errno. This doesn't seem right because any
++         *       failure during processing of each answer could be silently
++         *       ignored. This is kept this was the old behavior and because
++         *       local->op_ret is initialized as -1 and local->op_errno is
++         *       initialized as EUCLEAN, which makes these values useless. */
++        if (is_fgetxattr) {
++            AFR_STACK_UNWIND(fgetxattr, frame, op_ret, op_errno, newdict,
++                             local->xdata_rsp);
++        } else {
++            AFR_STACK_UNWIND(getxattr, frame, op_ret, op_errno, newdict,
++                             local->xdata_rsp);
++        }
++
++        if (newdict != NULL) {
++            dict_unref(newdict);
++        }
+     }
++}
++
++static int32_t
++afr_getxattr_lockinfo_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
++                          int32_t op_ret, int32_t op_errno, dict_t *dict,
++                          dict_t *xdata)
++{
++    afr_getxattr_lockinfo_cbk_common(frame, op_ret, op_errno, dict, xdata,
++                                     false);
+ 
+-    dict_unref(lockinfo);
++    return 0;
++}
++
++static int32_t
++afr_fgetxattr_lockinfo_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
++                           int32_t op_ret, int32_t op_errno, dict_t *dict,
++                           dict_t *xdata)
++{
++    afr_getxattr_lockinfo_cbk_common(frame, op_ret, op_errno, dict, xdata,
++                                     true);
+ 
+     return 0;
+ }
+-- 
+1.8.3.1
+

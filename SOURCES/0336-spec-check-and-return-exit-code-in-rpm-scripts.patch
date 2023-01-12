@@ -1,0 +1,162 @@
+From 562283ad34021bbf4fc540127ee7072d5152d34d Mon Sep 17 00:00:00 2001
+From: Yuval Turgeman <yturgema@redhat.com>
+Date: Wed, 24 Jul 2019 16:42:22 +0300
+Subject: [PATCH 336/336] spec: check and return exit code in rpm scripts
+
+lua's error() call expects a value as its second argument, and this is
+taken from the `val` variable, while the `ok` is boolean.  This causes
+the rpm scripts to fail on:
+
+bad argument #2 to 'error' (number expected, got boolean)
+
+Label: DOWNSTREAM ONLY
+BUG: 1768786
+Change-Id: I9c6b1f62ebf15dbc93196d018bc1fd628b36fc33
+>Signed-off-by: Yuval Turgeman <yturgema@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/186405
+Reviewed-by: Mohit Agrawal <moagrawa@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ glusterfs.spec.in | 55 +++++++++++++++++++++++++++++++++----------------------
+ 1 file changed, 33 insertions(+), 22 deletions(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 91180db..1b975b2 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -1572,8 +1572,9 @@ fi
+ ]]
+ 
+ ok, how, val = os.execute(script)
+-if not (ok == 0) then
+-   error("Detected running glusterfs processes", ok)
++rc = val or ok
++if not (rc == 0) then
++   error("Detected running glusterfs processes", rc)
+ end
+ 
+ 
+@@ -1606,8 +1607,9 @@ fi
+ ]]
+ 
+ ok, how, val = os.execute(script)
+-if not (ok == 0) then
+-   error("Detected running glusterfs processes", ok)
++rc = val or ok
++if not (rc == 0) then
++   error("Detected running glusterfs processes", rc)
+ end
+ 
+ 
+@@ -1640,8 +1642,9 @@ fi
+ ]]
+ 
+ ok, how, val = os.execute(script)
+-if not (ok == 0) then
+-   error("Detected running glusterfs processes", ok)
++rc = val or ok
++if not (rc == 0) then
++   error("Detected running glusterfs processes", rc)
+ end
+ 
+ 
+@@ -1674,8 +1677,9 @@ fi
+ ]]
+ 
+ ok, how, val = os.execute(script)
+-if not (ok == 0) then
+-   error("Detected running glusterfs processes", ok)
++rc = val or ok
++if not (rc == 0) then
++   error("Detected running glusterfs processes", rc)
+ end
+ 
+ 
+@@ -1707,8 +1711,9 @@ fi
+ ]]
+ 
+ ok, how, val = os.execute(script)
+-if not (ok == 0) then
+-   error("Detected running glusterfs processes", ok)
++rc = val or ok
++if not (rc == 0) then
++   error("Detected running glusterfs processes", rc)
+ end
+ 
+ 
+@@ -1740,8 +1745,9 @@ fi
+ ]]
+ 
+ ok, how, val = os.execute(script)
+-if not (ok == 0) then
+-   error("Detected running glusterfs processes", ok)
++rc = val or ok
++if not (rc == 0) then
++   error("Detected running glusterfs processes", rc)
+ end
+ 
+ 
+@@ -1775,8 +1781,9 @@ fi
+ ]]
+ 
+ ok, how, val = os.execute(script)
+-if not (ok == 0) then
+-   error("Detected running glusterfs processes", ok)
++rc = val or ok
++if not (rc == 0) then
++   error("Detected running glusterfs processes", rc)
+ end
+ %endif
+ 
+@@ -1810,8 +1817,9 @@ fi
+ ]]
+ 
+ ok, how, val = os.execute(script)
+-if not (ok == 0) then
+-   error("Detected running glusterfs processes", ok)
++rc = val or ok
++if not (rc == 0) then
++   error("Detected running glusterfs processes", rc)
+ end
+ 
+ 
+@@ -1845,8 +1853,9 @@ fi
+ ]]
+ 
+ ok, how, val = os.execute(script)
+-if not (ok == 0) then
+-   error("Detected running glusterfs processes", ok)
++rc = val or ok
++if not (rc == 0) then
++   error("Detected running glusterfs processes", rc)
+ end
+ %endif
+ 
+@@ -1881,8 +1890,9 @@ fi
+ ]]
+ 
+ ok, how, val = os.execute(script)
+-if not (ok == 0) then
+-   error("Detected running glusterfs processes", ok)
++rc = val or ok
++if not (rc == 0) then
++   error("Detected running glusterfs processes", rc)
+ end
+ %endif
+ 
+@@ -1916,8 +1926,9 @@ fi
+ ]]
+ 
+ ok, how, val = os.execute(script)
+-if not (ok == 0) then
+-   error("Detected running glusterfs processes", ok)
++rc = val or ok
++if not (rc == 0) then
++   error("Detected running glusterfs processes", rc)
+ end
+ 
+ %posttrans server
+-- 
+1.8.3.1
+

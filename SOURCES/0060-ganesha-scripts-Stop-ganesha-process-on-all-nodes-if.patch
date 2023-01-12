@@ -1,0 +1,61 @@
+From 93635333d17a03078a6bf72771445e1bd9ebdc15 Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Thu, 2 Mar 2017 12:22:30 +0530
+Subject: [PATCH 060/124] ganesha/scripts : Stop ganesha process on all nodes
+ if cluster setup fails
+
+During staging phase of volume option "nfs-ganesha", symlink "ganesha.conf"
+will be created plus ganesha process will be started. The cluster setup
+happens during commit phase of that option. So if cluster set up fails, the
+ganesha process will be running on all cluster nodes.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Ib2cb85364b7ef5b702acb4826ffdf8e6f31a2acd
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://review.gluster.org/16823
+Smoke: Gluster Build System <jenkins@build.gluster.org>
+Tested-by: Kaleb KEITHLEY <kkeithle@redhat.com>
+Reviewed-by: soumya k <skoduri@redhat.com>
+Reviewed-by: Kaleb KEITHLEY <kkeithle@redhat.com>
+NetBSD-regression: NetBSD Build System <jenkins@build.gluster.org>
+CentOS-regression: Gluster Build System <jenkins@build.gluster.org>
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167145
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/ganesha/scripts/ganesha-ha.sh | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/extras/ganesha/scripts/ganesha-ha.sh b/extras/ganesha/scripts/ganesha-ha.sh
+index 7ba80b5..db3f921 100644
+--- a/extras/ganesha/scripts/ganesha-ha.sh
++++ b/extras/ganesha/scripts/ganesha-ha.sh
+@@ -175,6 +175,13 @@ determine_servers()
+     fi
+ }
+ 
++stop_ganesha_all()
++{
++    local serverlist=${1}
++    for node in ${serverlist} ; do
++        manage_service "stop" ${node}
++    done
++}
+ 
+ setup_cluster()
+ {
+@@ -191,6 +198,8 @@ setup_cluster()
+     pcs cluster setup ${RHEL6_PCS_CNAME_OPTION} ${name} --transport udpu ${servers}
+     if [ $? -ne 0 ]; then
+         logger "pcs cluster setup ${RHEL6_PCS_CNAME_OPTION} ${name} ${servers} failed"
++        #set up failed stop all ganesha process and clean up symlinks in cluster
++        stop_ganesha_all ${servers}
+         exit 1;
+     fi
+     pcs cluster start --all
+-- 
+1.8.3.1
+

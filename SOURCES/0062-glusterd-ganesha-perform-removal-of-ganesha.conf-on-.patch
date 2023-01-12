@@ -1,0 +1,59 @@
+From eb784a40a4f72e347945e0d66ac1a28389bb076c Mon Sep 17 00:00:00 2001
+From: Jiffin Tony Thottan <jthottan@redhat.com>
+Date: Fri, 28 Apr 2017 17:27:46 +0530
+Subject: [PATCH 062/124] glusterd/ganesha : perform removal of ganesha.conf on
+ nodes only in ganesha cluster
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I864ecd9391adf80fb1fa6ad2f9891a9ce77135e7
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://review.gluster.org/17138
+Smoke: Gluster Build System <jenkins@build.gluster.org>
+Reviewed-by: soumya k <skoduri@redhat.com>
+NetBSD-regression: NetBSD Build System <jenkins@build.gluster.org>
+CentOS-regression: Gluster Build System <jenkins@build.gluster.org>
+Reviewed-by: Kaleb KEITHLEY <kkeithle@redhat.com>
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167147
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-ganesha.c | 19 +++++++++----------
+ 1 file changed, 9 insertions(+), 10 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-ganesha.c b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+index ee8b588..b743216 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-ganesha.c
++++ b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+@@ -746,17 +746,16 @@ stop_ganesha(char **op_errstr)
+         0,
+     };
+ 
+-    runinit(&runner);
+-    runner_add_args(&runner, GANESHA_PREFIX "/ganesha-ha.sh",
+-                    "--setup-ganesha-conf-files", CONFDIR, "no", NULL);
+-    ret = runner_run(&runner);
+-    if (ret) {
+-        gf_asprintf(op_errstr,
+-                    "removal of symlink ganesha.conf "
+-                    "in /etc/ganesha failed");
+-    }
+-
+     if (check_host_list()) {
++        runinit(&runner);
++        runner_add_args(&runner, GANESHA_PREFIX "/ganesha-ha.sh",
++                        "--setup-ganesha-conf-files", CONFDIR, "no", NULL);
++        ret = runner_run(&runner);
++        if (ret) {
++            gf_asprintf(op_errstr,
++                        "removal of symlink ganesha.conf "
++                        "in /etc/ganesha failed");
++        }
+         ret = manage_service("stop");
+         if (ret)
+             gf_asprintf(op_errstr,
+-- 
+1.8.3.1
+

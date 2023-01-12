@@ -1,0 +1,46 @@
+From 6198461bce7d264b71fe91e981aa3af3a19a8abe Mon Sep 17 00:00:00 2001
+From: N Balachandran <nbalacha@redhat.com>
+Date: Tue, 4 Jun 2019 14:51:44 +0530
+Subject: [PATCH 168/169] cluster/dht: Fix directory perms during selfheal
+
+Fixed a bug in the revalidate code path that wiped out
+directory permissions if no mds subvol was found.
+
+upstream: https://review.gluster.org/#/c/glusterfs/+/22813/
+
+> Change-Id: I8b4239ffee7001493c59d4032a2d3062586ea115
+> fixes: bz#1716830
+> Signed-off-by: N Balachandran <nbalacha@redhat.com>
+
+BUG: 1716821
+Change-Id: I6d84d381d07a27d1ef9113a2104a62ceaf2110e3
+Signed-off-by: N Balachandran <nbalacha@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172622
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Mohit Agrawal <moagrawa@redhat.com>
+---
+ xlators/cluster/dht/src/dht-common.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/xlators/cluster/dht/src/dht-common.c b/xlators/cluster/dht/src/dht-common.c
+index 183872f..e1edb38 100644
+--- a/xlators/cluster/dht/src/dht-common.c
++++ b/xlators/cluster/dht/src/dht-common.c
+@@ -1739,9 +1739,11 @@ unlock:
+ 
+             if (dht_needs_selfheal(frame, this)) {
+                 if (!__is_root_gfid(local->loc.inode->gfid)) {
+-                    local->stbuf.ia_gid = local->mds_stbuf.ia_gid;
+-                    local->stbuf.ia_uid = local->mds_stbuf.ia_uid;
+-                    local->stbuf.ia_prot = local->mds_stbuf.ia_prot;
++                    if (local->mds_subvol) {
++                        local->stbuf.ia_gid = local->mds_stbuf.ia_gid;
++                        local->stbuf.ia_uid = local->mds_stbuf.ia_uid;
++                        local->stbuf.ia_prot = local->mds_stbuf.ia_prot;
++                    }
+                 } else {
+                     local->stbuf.ia_gid = local->prebuf.ia_gid;
+                     local->stbuf.ia_uid = local->prebuf.ia_uid;
+-- 
+1.8.3.1
+

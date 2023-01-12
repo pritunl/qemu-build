@@ -1,0 +1,58 @@
+From 7c2d6e82d7d3430ad8a557b6ae726765f7e874e9 Mon Sep 17 00:00:00 2001
+From: Kinglong Mee <kinglongmee@gmail.com>
+Date: Fri, 12 Apr 2019 11:35:55 +0800
+Subject: [PATCH 269/276] ec: fix truncate lock to cover the write in tuncate
+ clean
+
+ec_truncate_clean does writing under the lock granted for truncate,
+but the lock is calculated by ec_adjust_offset_up, so that,
+the write in ec_truncate_clean is out of lock.
+
+fixes: bz#1732770
+Upstream-patch: https://review.gluster.org/c/glusterfs/+/22552
+Change-Id: Idbe1fd48d26afe49c36b77db9f12e0907f5a4134
+Signed-off-by: Kinglong Mee <kinglongmee@gmail.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/177973
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/ec/src/ec-inode-write.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/cluster/ec/src/ec-inode-write.c b/xlators/cluster/ec/src/ec-inode-write.c
+index a903664..ea55140 100644
+--- a/xlators/cluster/ec/src/ec-inode-write.c
++++ b/xlators/cluster/ec/src/ec-inode-write.c
+@@ -1405,6 +1405,7 @@ int32_t
+ ec_manager_truncate(ec_fop_data_t *fop, int32_t state)
+ {
+     ec_cbk_data_t *cbk;
++    off_t offset_down;
+ 
+     switch (state) {
+         case EC_STATE_INIT:
+@@ -1416,16 +1417,19 @@ ec_manager_truncate(ec_fop_data_t *fop, int32_t state)
+             /* Fall through */
+ 
+         case EC_STATE_LOCK:
++            offset_down = fop->user_size;
++            ec_adjust_offset_down(fop->xl->private, &offset_down, _gf_true);
++
+             if (fop->id == GF_FOP_TRUNCATE) {
+                 ec_lock_prepare_inode(
+                     fop, &fop->loc[0],
+                     EC_UPDATE_DATA | EC_UPDATE_META | EC_QUERY_INFO,
+-                    fop->offset, EC_RANGE_FULL);
++                    offset_down, EC_RANGE_FULL);
+             } else {
+                 ec_lock_prepare_fd(
+                     fop, fop->fd,
+                     EC_UPDATE_DATA | EC_UPDATE_META | EC_QUERY_INFO,
+-                    fop->offset, EC_RANGE_FULL);
++                    offset_down, EC_RANGE_FULL);
+             }
+             ec_lock(fop);
+ 
+-- 
+1.8.3.1
+

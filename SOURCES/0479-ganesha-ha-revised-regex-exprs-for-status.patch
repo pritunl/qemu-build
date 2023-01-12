@@ -1,0 +1,53 @@
+From 9036c9f0fd081c83c5c4fcd1ecba858421442777 Mon Sep 17 00:00:00 2001
+From: "Kaleb S. KEITHLEY" <kkeithle@redhat.com>
+Date: Tue, 10 Nov 2020 07:39:14 -0500
+Subject: [PATCH 479/479] ganesha-ha: revised regex exprs for --status
+
+better whitespace in regex
+
+This has worked for years, but somehow no longer works on rhel8
+
+> Updates: #1000
+> Change-Id: I2c1a3537573d125608334772ba1a263c55407dd4
+> Signed-off-by: Kaleb S. KEITHLEY <kkeithle@redhat.com>
+> https://github.com/gluster/glusterfs/commit/4026fe9a956238d8e4785cf39c3b7290eae90f03
+
+BUG: 1895301
+Change-Id: I2c1a3537573d125608334772ba1a263c55407dd4
+Signed-off-by: Kaleb S. KEITHLEY <kkeithle@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/217480
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ extras/ganesha/scripts/ganesha-ha.sh | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/extras/ganesha/scripts/ganesha-ha.sh b/extras/ganesha/scripts/ganesha-ha.sh
+index 9790a71..491c61d 100644
+--- a/extras/ganesha/scripts/ganesha-ha.sh
++++ b/extras/ganesha/scripts/ganesha-ha.sh
+@@ -948,18 +948,18 @@ status()
+     # check if the VIP and port block/unblock RAs are on the expected nodes
+     for n in ${nodes[*]}; do
+ 
+-        grep -E -x "${n}-nfs_block \(ocf::heartbeat:portblock\): Started ${n}" > /dev/null 2>&1 ${scratch}
++        grep -E -x "${n}-nfs_block +\(ocf::heartbeat:portblock\): +Started ${n}" > /dev/null 2>&1 ${scratch}
+         result=$?
+         ((healthy+=${result}))
+-        grep -E -x "${n}-cluster_ip-1 \(ocf::heartbeat:IPaddr\): Started ${n}" > /dev/null 2>&1 ${scratch}
++        grep -E -x "${n}-cluster_ip-1 +\(ocf::heartbeat:IPaddr\): +Started ${n}" > /dev/null 2>&1 ${scratch}
+         result=$?
+         ((healthy+=${result}))
+-        grep -E -x "${n}-nfs_unblock \(ocf::heartbeat:portblock\): Started ${n}" > /dev/null 2>&1 ${scratch}
++        grep -E -x "${n}-nfs_unblock +\(ocf::heartbeat:portblock\): +Started ${n}" > /dev/null 2>&1 ${scratch}
+         result=$?
+         ((healthy+=${result}))
+     done
+ 
+-    grep -E "\):\ Stopped|FAILED" > /dev/null 2>&1 ${scratch}
++    grep -E "\): +Stopped|FAILED" > /dev/null 2>&1 ${scratch}
+     result=$?
+ 
+     if [ ${result} -eq 0 ]; then
+-- 
+1.8.3.1
+

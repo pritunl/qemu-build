@@ -1,0 +1,53 @@
+From a325e7b3bbe5c1f67b999f375b83d2e2f1b2c1c6 Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Tue, 9 Apr 2019 13:56:24 +0530
+Subject: [PATCH 119/124] glusterd: provide a way to detach failed node
+
+When a gluster node in trusted storage pool has failed
+due to hardware issues, volume delete operation fails
+saying "Not all peers are up" and peer detach for failed
+node fails saying "Brick(s) with peer <peer_ip> exists
+in cluster".
+
+The idea here is to use either replace-brick or remove-brick
+command to remove all the bricks hosted by failed node and
+then re-attempting the peer detach. This change adds this
+trick in peer detach error message.
+
+> upstream patch : https://review.gluster.org/22534
+
+>fixes: bz#1697866
+>Change-Id: I0c58887479d31db603ad8d6535ea9d547880ccc8
+>Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+
+BUG: 1696334
+Change-Id: I0c58887479d31db603ad8d6535ea9d547880ccc8
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/168614
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-handler.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-handler.c b/xlators/mgmt/glusterd/src/glusterd-handler.c
+index 6147995..af8a8a4 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-handler.c
++++ b/xlators/mgmt/glusterd/src/glusterd-handler.c
+@@ -4134,8 +4134,11 @@ set_deprobe_error_str(int op_ret, int op_errno, char *op_errstr, char *errstr,
+ 
+             case GF_DEPROBE_BRICK_EXIST:
+                 snprintf(errstr, len,
+-                         "Brick(s) with the peer "
+-                         "%s exist in cluster",
++                         "Peer %s hosts one or more bricks. If the peer is in "
++                         "not recoverable state then use either replace-brick "
++                         "or remove-brick command with force to remove all "
++                         "bricks from the peer and attempt the peer detach "
++                         "again.",
+                          hostname);
+                 break;
+ 
+-- 
+1.8.3.1
+

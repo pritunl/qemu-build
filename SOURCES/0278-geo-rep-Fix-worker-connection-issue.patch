@@ -1,0 +1,45 @@
+From 924a25990948c9d76001cf4134fc5a2fcbf5c02c Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Fri, 16 Aug 2019 15:38:49 +0530
+Subject: [PATCH 278/284] geo-rep: Fix worker connection issue
+
+All the workers connects to primary slave node. It should
+connect to available slave nodes in round robin fashion
+and choose different slave node if the corresponding slave
+node is down. This patch fixes the same.
+
+Thanks Aravinda for the help in root causing this.
+
+Backport of:
+ > Patch: https://review.gluster.org/23247/
+ > Change-Id: I9f8e7744f4adb8a24833cf173681d109710f98cb
+ > Signed-off-by: Kotresh HR <khiremat@redhat.com>
+ > Updates: bz#1737484
+
+Change-Id: I9f8e7744f4adb8a24833cf173681d109710f98cb
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+BUG: 1729915
+Reviewed-on: https://code.engineering.redhat.com/gerrit/178961
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ geo-replication/syncdaemon/subcmds.py | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/geo-replication/syncdaemon/subcmds.py b/geo-replication/syncdaemon/subcmds.py
+index 4ece7e0..8de7db2 100644
+--- a/geo-replication/syncdaemon/subcmds.py
++++ b/geo-replication/syncdaemon/subcmds.py
+@@ -73,7 +73,8 @@ def subcmd_worker(args):
+     Popen.init_errhandler()
+     fcntl.fcntl(args.feedback_fd, fcntl.F_SETFD, fcntl.FD_CLOEXEC)
+     local = GLUSTER("localhost", args.master)
+-    slavehost, slavevol = args.slave.split("::")
++    slavevol = args.slave.split("::")[-1]
++    slavehost = args.resource_remote
+     remote = SSH(slavehost, slavevol)
+     remote.connect_remote()
+     local.connect()
+-- 
+1.8.3.1
+

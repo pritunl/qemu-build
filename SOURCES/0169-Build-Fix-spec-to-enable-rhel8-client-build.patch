@@ -1,0 +1,62 @@
+From 2e6241a800c98ba95b3420255d8089e0271b46eb Mon Sep 17 00:00:00 2001
+From: Sunil Kumar Acharya <sheggodu@redhat.com>
+Date: Thu, 6 Jun 2019 16:18:26 +0530
+Subject: [PATCH 169/169] Build: Fix spec to enable rhel8 client build
+
+Updated the spec file with required changes to enable RHGS RHEL8
+client build. As Ganesha scripts are not python3 compatible, we
+will not be generating RHGS RHEL8 server build until the required
+changes are backported from upstream.
+
+Label : DOWNSTREAM ONLY
+
+BUG: 1717927
+Change-Id: I2a8d37d24405a8b2d5533ebf7b85327485f810d7
+Signed-off-by: Sunil Kumar Acharya <sheggodu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/172668
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ glusterfs.spec.in | 10 ++++------
+ 1 file changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index 85e75f2..9c7d7a7 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -91,7 +91,7 @@
+ 
+ # disable server components forcefully as rhel <= 6
+ %if ( 0%{?rhel} )
+-%if (!(( "%{?dist}" == ".el6rhs" ) || ( "%{?dist}" == ".el7rhs" ) || ( "%{?dist}" == ".el7rhgs" )))
++%if (!(( "%{?dist}" == ".el6rhs" ) || ( "%{?dist}" == ".el7rhs" ) || ( "%{?dist}" == ".el7rhgs" ) || ( "%{?dist}" == ".el8rhgs" )))
+ %global _without_server --without-server
+ %endif
+ %endif
+@@ -270,7 +270,7 @@ BuildRequires:    python%{_pythonver}-devel
+ %if ( 0%{?rhel} && 0%{?rhel} < 8 )
+ BuildRequires:    python-ctypes
+ %endif
+-%if ( 0%{?_with_ipv6default:1} ) || ( 0%{!?_without_libtirpc:1} )
++%if ( 0%{?_with_ipv6default:1} ) || ( 0%{!?_without_libtirpc:1} ) || ( 0%{?rhel} && ( 0%{?rhel} >= 8 ) )
+ BuildRequires:    libtirpc-devel
+ %endif
+ %if ( 0%{?fedora} && 0%{?fedora} > 27 ) || ( 0%{?rhel} && 0%{?rhel} > 7 )
+@@ -722,12 +722,10 @@ GlusterFS Events
+ 
+ %prep
+ %setup -q -n %{name}-%{version}%{?prereltag}
+-%if ( ! %{_usepython3} )
+ echo "fixing python shebangs..."
+-for f in api events extras geo-replication libglusterfs tools xlators; do
+-find $f -type f -exec sed -i 's|/usr/bin/python3|/usr/bin/python2|' {} \;
++for i in `find . -type f -exec bash -c "if file {} | grep 'Python script, ASCII text executable' >/dev/null; then echo {}; fi" ';'`; do
++    sed -i -e 's|^#!/usr/bin/python.*|#!%{__python3}|' -e 's|^#!/usr/bin/env python.*|#!%{__python3}|' $i
+ done
+-%endif
+ 
+ %build
+ 
+-- 
+1.8.3.1
+

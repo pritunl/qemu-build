@@ -1,0 +1,80 @@
+From 85a5cce40dba0393e636c0eb5af9d8f8746f2315 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Thu, 2 Jan 2020 10:23:52 +0530
+Subject: [PATCH 497/511] socket: Use AES128 cipher in SSL if AES is supported
+ by CPU
+
+SSL performance is improved after configuring AES128 cipher
+so use AES128 cipher as a default cipher on the CPU those
+enabled AES bits otherwise ssl use AES256 cipher
+
+> Change-Id: I91c50fe987cbb22ed76f8012094730c592c63506
+> Fixes: #1050
+> Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+> (Cherry pick from commit 177cc09d24515596eb51739ce0a276c26e3c52f1)
+> (Reviewed on upstream link https://review.gluster.org/#/c/glusterfs/+/23952/)
+
+Change-Id: I91c50fe987cbb22ed76f8012094730c592c63506
+Bug: 1612973
+Signed-off-by: Mohit Agrawal <moagrawal@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/220870
+Tested-by: Mohit Agrawal <moagrawa@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ rpc/rpc-transport/socket/src/socket.c | 32 ++++++++++++++++++++++++++++++++
+ 1 file changed, 32 insertions(+)
+
+diff --git a/rpc/rpc-transport/socket/src/socket.c b/rpc/rpc-transport/socket/src/socket.c
+index 54cd5df..1ee7320 100644
+--- a/rpc/rpc-transport/socket/src/socket.c
++++ b/rpc/rpc-transport/socket/src/socket.c
+@@ -4238,6 +4238,34 @@ static void __attribute__((destructor)) fini_openssl_mt(void)
+     ERR_free_strings();
+ }
+ 
++/* The function returns 0 if AES bit is enabled on the CPU */
++static int
++ssl_check_aes_bit(void)
++{
++    FILE *fp = fopen("/proc/cpuinfo", "r");
++    int ret = 1;
++    size_t len = 0;
++    char *line = NULL;
++    char *match = NULL;
++
++    GF_ASSERT(fp != NULL);
++
++    while (getline(&line, &len, fp) > 0) {
++        if (!strncmp(line, "flags", 5)) {
++            match = strstr(line, " aes");
++            if ((match != NULL) && ((match[4] == ' ') || (match[4] == 0))) {
++                ret = 0;
++                break;
++            }
++        }
++    }
++
++    free(line);
++    fclose(fp);
++
++    return ret;
++}
++
+ static int
+ ssl_setup_connection_params(rpc_transport_t *this)
+ {
+@@ -4261,6 +4289,10 @@ ssl_setup_connection_params(rpc_transport_t *this)
+         return 0;
+     }
+ 
++    if (!ssl_check_aes_bit()) {
++        cipher_list = "AES128:" DEFAULT_CIPHER_LIST;
++    }
++
+     priv->ssl_own_cert = DEFAULT_CERT_PATH;
+     if (dict_get_str(this->options, SSL_OWN_CERT_OPT, &optstr) == 0) {
+         if (!priv->ssl_enabled) {
+-- 
+1.8.3.1
+

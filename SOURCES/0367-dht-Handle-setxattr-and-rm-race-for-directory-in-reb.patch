@@ -1,0 +1,95 @@
+From aef8e51b9974603d397cc8f5301b24451d012e46 Mon Sep 17 00:00:00 2001
+From: Susant Palai <spalai@redhat.com>
+Date: Fri, 24 Apr 2020 13:32:51 +0530
+Subject: [PATCH 367/367] dht: Handle setxattr and rm race for directory in
+ rebalance
+
+Problem: Selfheal as part of directory does not return an error if
+the layout setxattr fails. This is because the actual lookup fop
+must have been successful to proceed for layout heal. Hence, we could
+not tell if fix-layout failed in rebalance.
+
+Solution: We can check this information in the layout structure that
+whether all the xlators have returned error.
+
+> fixes: #1200
+> hange-Id: I3e5f2a36c0d934c21476a73a9a5473d8e490cde7
+> Signed-off-by: Susant Palai <spalai@redhat.com>
+(backport of https://review.gluster.org/#/c/glusterfs/+/24375/)
+
+BUG: 1812789
+Change-Id: I897826c4c2e883b3085c9314deff32d649b4588e
+Signed-off-by: Susant Palai <spalai@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/198726
+Reviewed-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/cluster/dht/src/dht-common.c    | 19 +++++++++++++++++++
+ xlators/cluster/dht/src/dht-common.h    |  3 +++
+ xlators/cluster/dht/src/dht-rebalance.c | 11 +++++++++++
+ 3 files changed, 33 insertions(+)
+
+diff --git a/xlators/cluster/dht/src/dht-common.c b/xlators/cluster/dht/src/dht-common.c
+index d0b5287..7890e7a 100644
+--- a/xlators/cluster/dht/src/dht-common.c
++++ b/xlators/cluster/dht/src/dht-common.c
+@@ -11286,3 +11286,22 @@ dht_pt_fgetxattr(call_frame_t *frame, xlator_t *this, fd_t *fd, const char *key,
+                FIRST_CHILD(this)->fops->fgetxattr, fd, key, xdata);
+     return 0;
+ }
++
++/* The job of this function is to check if all the xlators have updated
++ * error in the layout. */
++int
++dht_dir_layout_error_check(xlator_t *this, inode_t *inode)
++{
++    dht_layout_t *layout = NULL;
++    int i = 0;
++
++    layout = dht_layout_get(this, inode);
++    for (i = 0; i < layout->cnt; i++) {
++        if (layout->list[i].err == 0) {
++            return 0;
++        }
++    }
++
++    /* Returning the first xlator error as all xlators have errors */
++    return layout->list[0].err;
++}
+diff --git a/xlators/cluster/dht/src/dht-common.h b/xlators/cluster/dht/src/dht-common.h
+index ce11f02..4d2aae6 100644
+--- a/xlators/cluster/dht/src/dht-common.h
++++ b/xlators/cluster/dht/src/dht-common.h
+@@ -1544,4 +1544,7 @@ dht_pt_rename(call_frame_t *frame, xlator_t *this, loc_t *oldloc, loc_t *newloc,
+ int32_t
+ dht_check_remote_fd_failed_error(dht_local_t *local, int op_ret, int op_errno);
+ 
++int
++dht_dir_layout_error_check(xlator_t *this, inode_t *inode);
++
+ #endif /* _DHT_H */
+diff --git a/xlators/cluster/dht/src/dht-rebalance.c b/xlators/cluster/dht/src/dht-rebalance.c
+index 7d9df02..33cacfe 100644
+--- a/xlators/cluster/dht/src/dht-rebalance.c
++++ b/xlators/cluster/dht/src/dht-rebalance.c
+@@ -3928,6 +3928,17 @@ gf_defrag_fix_layout(xlator_t *this, gf_defrag_info_t *defrag, loc_t *loc,
+     }
+ 
+     ret = syncop_setxattr(this, loc, fix_layout, 0, NULL, NULL);
++
++    /* In case of a race where the directory is deleted just before
++     * layout setxattr, the errors are updated in the layout structure.
++     * We can use this information to make a decision whether the directory
++     * is deleted entirely.
++     */
++    if (ret == 0) {
++        ret = dht_dir_layout_error_check(this, loc->inode);
++        ret = -ret;
++    }
++
+     if (ret) {
+         if (-ret == ENOENT || -ret == ESTALE) {
+             gf_msg(this->name, GF_LOG_INFO, -ret, DHT_MSG_LAYOUT_FIX_FAILED,
+-- 
+1.8.3.1
+

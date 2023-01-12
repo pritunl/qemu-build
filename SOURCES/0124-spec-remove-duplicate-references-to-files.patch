@@ -1,0 +1,39 @@
+From e7112224eebaa91c529397a944e94254e482f48f Mon Sep 17 00:00:00 2001
+From: Milind Changire <mchangir@redhat.com>
+Date: Thu, 25 Apr 2019 13:07:19 +0530
+Subject: [PATCH 124/124] spec: remove duplicate references to files
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I446fbeadaaab96aa215f4fd784d951f825486008
+Signed-off-by: Milind Changire <mchangir@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/168735
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ glusterfs.spec.in | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index d20b062..86a1527 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -1214,7 +1214,6 @@ exit 0
+ %endif
+ %else
+ %{_libdir}/pkgconfig/libgfchangelog.pc
+-%{_libdir}/libgfchangelog.so
+ %if ( 0%{!?_without_tiering:1} )
+ %{_libdir}/pkgconfig/libgfdb.pc
+ %endif
+@@ -1469,7 +1468,6 @@ exit 0
+ %ghost      %attr(0600,-,-) %{_sharedstatedir}/glusterd/nfs/nfs-server.vol
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/nfs/run
+ %ghost      %attr(0600,-,-) %{_sharedstatedir}/glusterd/nfs/run/nfs.pid
+-%ghost      %attr(0600,-,-) %{_sharedstatedir}/glusterd/options
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/peers
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/quotad
+ %ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/scrub
+-- 
+1.8.3.1
+

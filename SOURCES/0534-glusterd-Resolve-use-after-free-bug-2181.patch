@@ -1,0 +1,47 @@
+From b3647eb5415b2e3d9e1a11ad6c4689e520f17b39 Mon Sep 17 00:00:00 2001
+From: mohit84 <moagrawa@redhat.com>
+Date: Mon, 22 Feb 2021 10:09:34 +0530
+Subject: [PATCH 534/538] glusterd: Resolve use after free bug (#2181)
+
+In the commit 61ae58e67567ea4de8f8efc6b70a9b1f8e0f1bea
+introduced a coverity bug use object after cleanup
+the object.
+
+Cleanup memory after comeout from a critical section
+>Fixes: #2180
+
+>Change-Id: Iee2050c4883a0dd44b8523bb822b664462ab6041
+>Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Upstream Patch : https://github.com/gluster/glusterfs/pull/2181
+
+BUG: 1832306
+Change-Id: Iee2050c4883a0dd44b8523bb822b664462ab6041
+Signed-off-by: srijan-sivakumar <ssivakum@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/228578
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-utils.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-utils.c b/xlators/mgmt/glusterd/src/glusterd-utils.c
+index 9fb8eab..6d40be5 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-utils.c
++++ b/xlators/mgmt/glusterd/src/glusterd-utils.c
+@@ -122,11 +122,10 @@ glusterd_defrag_unref(glusterd_defrag_info_t *defrag)
+     LOCK(&defrag->lock);
+     {
+         refcnt = --defrag->refcnt;
+-        if (refcnt <= 0)
+-            GF_FREE(defrag);
+     }
+     UNLOCK(&defrag->lock);
+-
++    if (refcnt <= 0)
++        GF_FREE(defrag);
+ out:
+     return refcnt;
+ }
+-- 
+1.8.3.1
+

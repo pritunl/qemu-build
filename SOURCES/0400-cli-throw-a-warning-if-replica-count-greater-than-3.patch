@@ -1,0 +1,98 @@
+From 12ed9226fa24d073ab2b89692194b454a194c379 Mon Sep 17 00:00:00 2001
+From: Sanju Rakonde <srakonde@redhat.com>
+Date: Thu, 4 Jun 2020 15:14:29 +0530
+Subject: [PATCH 400/449] cli: throw a warning if replica count greater than 3
+
+As volumes with replica count greater than 3 are not
+supported, a warning message is be thrown to user
+while creating the volume with replica count greater
+than 3 or while converting a volume to replica > 3
+volume by add-brick/remove-brick operations.
+
+Label: DOWNSTREAM ONLY
+
+BUG: 1763129
+Change-Id: I5a32a5a2d99b5175fb692dfcab27396089f24b72
+Signed-off-by: Sanju Rakonde <srakonde@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202338
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-by: Ravishankar Narayanankutty <ravishankar@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ cli/src/cli-cmd-parser.c | 45 +++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 45 insertions(+)
+
+diff --git a/cli/src/cli-cmd-parser.c b/cli/src/cli-cmd-parser.c
+index ac0a263..5e7ce53 100644
+--- a/cli/src/cli-cmd-parser.c
++++ b/cli/src/cli-cmd-parser.c
+@@ -619,6 +619,23 @@ cli_cmd_volume_create_parse(struct cli_state *state, const char **words,
+                     }
+                 }
+             }
++
++            if (replica_count > 3) {
++                if (strcmp(words[wordcount - 1], "force")) {
++                    question =
++                        "Volumes with replica count greater than 3 are"
++                        "not supported. \nDo you still want to continue?\n";
++                    answer = cli_cmd_get_confirmation(state, question);
++                    if (GF_ANSWER_NO == answer) {
++                        gf_log("cli", GF_LOG_ERROR,
++                               "Volume create "
++                               "cancelled, exiting");
++                        ret = -1;
++                        goto out;
++                    }
++                }
++            }
++
+             ret = dict_set_int32(dict, "replica-count", replica_count);
+             if (ret)
+                 goto out;
+@@ -1815,6 +1832,20 @@ cli_cmd_volume_add_brick_parse(struct cli_state *state, const char **words,
+                     goto out;
+                 }
+             }
++        } else if (count > 3) {
++            if (strcmp(words[wordcount - 1], "force")) {
++                question =
++                    "Volumes with replica count greater than 3 are"
++                    "not supported. \nDo you still want to continue?\n";
++                answer = cli_cmd_get_confirmation(state, question);
++                if (GF_ANSWER_NO == answer) {
++                    gf_log("cli", GF_LOG_ERROR,
++                           "add-brick "
++                           "cancelled, exiting");
++                    ret = -1;
++                    goto out;
++                }
++            }
+         }
+     } else if ((strcmp(w, "stripe")) == 0) {
+         cli_err("stripe option not supported");
+@@ -2082,6 +2113,20 @@ cli_cmd_volume_remove_brick_parse(struct cli_state *state, const char **words,
+                     goto out;
+                 }
+             }
++        } else if (count > 3) {
++            if (strcmp(words[wordcount - 1], "force")) {
++                ques =
++                    "Volumes with replica count greater than 3 are"
++                    "not supported. \nDo you still want to continue?\n";
++                answer = cli_cmd_get_confirmation(state, ques);
++                if (GF_ANSWER_NO == answer) {
++                    gf_log("cli", GF_LOG_ERROR,
++                           "Remove-brick "
++                           "cancelled, exiting");
++                    ret = -1;
++                    goto out;
++                }
++            }
+         }
+ 
+         ret = dict_set_int32(dict, "replica-count", count);
+-- 
+1.8.3.1
+

@@ -1,0 +1,225 @@
+From ba1460a4fee0c41c7d7f7a2043bae37f7e751259 Mon Sep 17 00:00:00 2001
+From: Ravishankar N <ravishankar@redhat.com>
+Date: Fri, 15 Mar 2019 19:31:03 +0530
+Subject: [PATCH 108/124] afr: add client-pid to all gf_event() calls
+
+client-pid for glustershd is GF_CLIENT_PID_SELF_HEALD
+client-pid for glfsheal is GF_CLIENT_PID_GLFS_HEALD
+
+Patch on upstream master: https://review.gluster.org/#/c/glusterfs/+/22369/
+BUG: 1676495
+Change-Id: Ib3a863af160ff48c822a5e6b0c27c575c9887470
+Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/166460
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ heal/src/glfs-heal.c                             |  6 ++++++
+ xlators/cluster/afr/src/afr-common.c             | 12 ++++++++----
+ xlators/cluster/afr/src/afr-self-heal-common.c   | 11 +++++++----
+ xlators/cluster/afr/src/afr-self-heal-data.c     |  4 +++-
+ xlators/cluster/afr/src/afr-self-heal-entry.c    |  5 +++--
+ xlators/cluster/afr/src/afr-self-heal-metadata.c |  4 +++-
+ xlators/cluster/afr/src/afr-self-heal-name.c     |  7 ++++---
+ xlators/mgmt/glusterd/src/glusterd-shd-svc.c     | 10 ++++++++++
+ 8 files changed, 44 insertions(+), 15 deletions(-)
+
+diff --git a/heal/src/glfs-heal.c b/heal/src/glfs-heal.c
+index 6030de3..7e37e47 100644
+--- a/heal/src/glfs-heal.c
++++ b/heal/src/glfs-heal.c
+@@ -1688,6 +1688,12 @@ main(int argc, char **argv)
+         goto out;
+     }
+ 
++    ret = glfs_setfspid(fs, GF_CLIENT_PID_GLFS_HEAL);
++    if (ret) {
++        printf("Setting client pid failed, %s\n", strerror(errno));
++        goto out;
++    }
++
+     ret = glfs_init(fs);
+     if (ret < 0) {
+         ret = -errno;
+diff --git a/xlators/cluster/afr/src/afr-common.c b/xlators/cluster/afr/src/afr-common.c
+index 47a5d3a..3690b84 100644
+--- a/xlators/cluster/afr/src/afr-common.c
++++ b/xlators/cluster/afr/src/afr-common.c
+@@ -5233,7 +5233,8 @@ __afr_handle_child_up_event(xlator_t *this, xlator_t *child_xlator,
+                "Subvolume '%s' came back up; "
+                "going online.",
+                child_xlator->name);
+-        gf_event(EVENT_AFR_SUBVOL_UP, "subvol=%s", this->name);
++        gf_event(EVENT_AFR_SUBVOL_UP, "client-pid=%d; subvol=%s",
++                 this->ctx->cmd_args.client_pid, this->name);
+     } else {
+         *event = GF_EVENT_SOME_DESCENDENT_UP;
+     }
+@@ -5310,7 +5311,8 @@ __afr_handle_child_down_event(xlator_t *this, xlator_t *child_xlator, int idx,
+                "All subvolumes are down. Going "
+                "offline until at least one of them "
+                "comes back up.");
+-        gf_event(EVENT_AFR_SUBVOLS_DOWN, "subvol=%s", this->name);
++        gf_event(EVENT_AFR_SUBVOLS_DOWN, "client-pid=%d; subvol=%s",
++                 this->ctx->cmd_args.client_pid, this->name);
+     } else {
+         *event = GF_EVENT_SOME_DESCENDENT_DOWN;
+     }
+@@ -5585,12 +5587,14 @@ afr_notify(xlator_t *this, int32_t event, void *data, void *data2)
+         if (!had_quorum && has_quorum) {
+             gf_msg(this->name, GF_LOG_INFO, 0, AFR_MSG_QUORUM_MET,
+                    "Client-quorum is met");
+-            gf_event(EVENT_AFR_QUORUM_MET, "subvol=%s", this->name);
++            gf_event(EVENT_AFR_QUORUM_MET, "client-pid=%d; subvol=%s",
++                     this->ctx->cmd_args.client_pid, this->name);
+         }
+         if (had_quorum && !has_quorum) {
+             gf_msg(this->name, GF_LOG_WARNING, 0, AFR_MSG_QUORUM_FAIL,
+                    "Client-quorum is not met");
+-            gf_event(EVENT_AFR_QUORUM_FAIL, "subvol=%s", this->name);
++            gf_event(EVENT_AFR_QUORUM_FAIL, "client-pid=%d; subvol=%s",
++                     this->ctx->cmd_args.client_pid, this->name);
+         }
+     }
+ 
+diff --git a/xlators/cluster/afr/src/afr-self-heal-common.c b/xlators/cluster/afr/src/afr-self-heal-common.c
+index 2268761..595bed4 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-common.c
++++ b/xlators/cluster/afr/src/afr-self-heal-common.c
+@@ -383,11 +383,12 @@ out:
+                uuid_utoa_r(replies[src_idx].poststat.ia_gfid, g2),
+                priv->children[src_idx]->name);
+         gf_event(EVENT_AFR_SPLIT_BRAIN,
++                 "client-pid=%d;"
+                  "subvol=%s;type=gfid;file="
+                  "<gfid:%s>/%s>;count=2;child-%d=%s;gfid-%d=%s;"
+                  "child-%d=%s;gfid-%d=%s",
+-                 this->name, uuid_utoa(pargfid), bname, child_idx,
+-                 priv->children[child_idx]->name, child_idx,
++                 this->ctx->cmd_args.client_pid, this->name, uuid_utoa(pargfid),
++                 bname, child_idx, priv->children[child_idx]->name, child_idx,
+                  uuid_utoa_r(replies[child_idx].poststat.ia_gfid, g1), src_idx,
+                  priv->children[src_idx]->name, src_idx,
+                  uuid_utoa_r(replies[src_idx].poststat.ia_gfid, g2));
+@@ -2296,11 +2297,13 @@ afr_selfheal_unlocked_inspect(call_frame_t *frame, xlator_t *this, uuid_t gfid,
+                    priv->children[i]->name,
+                    uuid_utoa(replies[i].poststat.ia_gfid));
+             gf_event(EVENT_AFR_SPLIT_BRAIN,
++                     "client-pid=%d;"
+                      "subvol=%s;"
+                      "type=file;gfid=%s;"
+                      "ia_type-%d=%s;ia_type-%d=%s",
+-                     this->name, uuid_utoa(replies[i].poststat.ia_gfid),
+-                     first_idx, gf_inode_type_to_str(first.ia_type), i,
++                     this->ctx->cmd_args.client_pid, this->name,
++                     uuid_utoa(replies[i].poststat.ia_gfid), first_idx,
++                     gf_inode_type_to_str(first.ia_type), i,
+                      gf_inode_type_to_str(replies[i].poststat.ia_type));
+             ret = -EIO;
+             goto out;
+diff --git a/xlators/cluster/afr/src/afr-self-heal-data.c b/xlators/cluster/afr/src/afr-self-heal-data.c
+index d9a0ee3..18a0334 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-data.c
++++ b/xlators/cluster/afr/src/afr-self-heal-data.c
+@@ -537,9 +537,11 @@ __afr_selfheal_data_finalize_source(
+             replies, AFR_DATA_TRANSACTION);
+         if (source < 0) {
+             gf_event(EVENT_AFR_SPLIT_BRAIN,
++                     "client-pid=%d;"
+                      "subvol=%s;type=data;"
+                      "file=%s",
+-                     this->name, uuid_utoa(inode->gfid));
++                     this->ctx->cmd_args.client_pid, this->name,
++                     uuid_utoa(inode->gfid));
+             return -EIO;
+         }
+ 
+diff --git a/xlators/cluster/afr/src/afr-self-heal-entry.c b/xlators/cluster/afr/src/afr-self-heal-entry.c
+index b23ed6a..fc09b4c 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-entry.c
++++ b/xlators/cluster/afr/src/afr-self-heal-entry.c
+@@ -269,11 +269,12 @@ afr_selfheal_detect_gfid_and_type_mismatch(xlator_t *this,
+                    gf_inode_type_to_str(replies[src_idx].poststat.ia_type),
+                    priv->children[src_idx]->name);
+             gf_event(EVENT_AFR_SPLIT_BRAIN,
++                     "client-pid=%d;"
+                      "subvol=%s;type=file;"
+                      "file=<gfid:%s>/%s>;count=2;child-%d=%s;type-"
+                      "%d=%s;child-%d=%s;type-%d=%s",
+-                     this->name, uuid_utoa(pargfid), bname, i,
+-                     priv->children[i]->name, i,
++                     this->ctx->cmd_args.client_pid, this->name,
++                     uuid_utoa(pargfid), bname, i, priv->children[i]->name, i,
+                      gf_inode_type_to_str(replies[i].poststat.ia_type), src_idx,
+                      priv->children[src_idx]->name, src_idx,
+                      gf_inode_type_to_str(replies[src_idx].poststat.ia_type));
+diff --git a/xlators/cluster/afr/src/afr-self-heal-metadata.c b/xlators/cluster/afr/src/afr-self-heal-metadata.c
+index a661fcb..ba43341 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-metadata.c
++++ b/xlators/cluster/afr/src/afr-self-heal-metadata.c
+@@ -242,9 +242,11 @@ __afr_selfheal_metadata_finalize_source(call_frame_t *frame, xlator_t *this,
+ 
+         if (!priv->metadata_splitbrain_forced_heal) {
+             gf_event(EVENT_AFR_SPLIT_BRAIN,
++                     "client-pid=%d;"
+                      "subvol=%s;"
+                      "type=metadata;file=%s",
+-                     this->name, uuid_utoa(inode->gfid));
++                     this->ctx->cmd_args.client_pid, this->name,
++                     uuid_utoa(inode->gfid));
+             return -EIO;
+         }
+ 
+diff --git a/xlators/cluster/afr/src/afr-self-heal-name.c b/xlators/cluster/afr/src/afr-self-heal-name.c
+index c4df5d4..36640b5 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-name.c
++++ b/xlators/cluster/afr/src/afr-self-heal-name.c
+@@ -222,13 +222,14 @@ afr_selfheal_name_type_mismatch_check(xlator_t *this, struct afr_reply *replies,
+                        gf_inode_type_to_str(inode_type),
+                        priv->children[type_idx]->name);
+                 gf_event(EVENT_AFR_SPLIT_BRAIN,
++                         "client-pid=%d;"
+                          "subvol=%s;type=file;"
+                          "file=<gfid:%s>/%s;count=2;"
+                          "child-%d=%s;type-%d=%s;child-%d=%s;"
+                          "type-%d=%s",
+-                         this->name, uuid_utoa(pargfid), bname, i,
+-                         priv->children[i]->name, i,
+-                         gf_inode_type_to_str(inode_type1), type_idx,
++                         this->ctx->cmd_args.client_pid, this->name,
++                         uuid_utoa(pargfid), bname, i, priv->children[i]->name,
++                         i, gf_inode_type_to_str(inode_type1), type_idx,
+                          priv->children[type_idx]->name, type_idx,
+                          gf_inode_type_to_str(inode_type));
+                 return -EIO;
+diff --git a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+index 04a4b2e..19eca9f 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
++++ b/xlators/mgmt/glusterd/src/glusterd-shd-svc.c
+@@ -324,6 +324,7 @@ glusterd_new_shd_svc_start(glusterd_svc_t *svc, int flags)
+ {
+     int ret = -1;
+     char glusterd_uuid_option[PATH_MAX] = {0};
++    char client_pid[32] = {0};
+     dict_t *cmdline = NULL;
+ 
+     cmdline = dict_new();
+@@ -335,6 +336,15 @@ glusterd_new_shd_svc_start(glusterd_svc_t *svc, int flags)
+     if (ret < 0)
+         goto out;
+ 
++    ret = snprintf(client_pid, sizeof(client_pid), "--client-pid=%d",
++                   GF_CLIENT_PID_SELF_HEALD);
++    if (ret < 0)
++        goto out;
++
++    ret = dict_set_str(cmdline, "arg", client_pid);
++    if (ret < 0)
++        goto out;
++
+     /* Pass cmdline arguments as key-value pair. The key is merely
+      * a carrier and is not used. Since dictionary follows LIFO the value
+      * should be put in reverse order*/
+-- 
+1.8.3.1
+

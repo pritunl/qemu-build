@@ -1,0 +1,36 @@
+From 44f758a56c5c5ad340ebc6d6a6478e8712c2c101 Mon Sep 17 00:00:00 2001
+From: Atin Mukherjee <amukherj@redhat.com>
+Date: Mon, 21 Mar 2016 22:31:02 +0530
+Subject: [PATCH 05/52] libglusterfs/glusterd: Fix compilation errors
+
+1. Removed duplicate definition of GD_OP_VER_PERSISTENT_AFR_XATTRS introduced in
+d367a88 where GD_OP_VER_PERSISTENT_AFR_XATTRS was redfined
+
+2. Fixed incorrect op-version
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Icfa3206e8a41a11875641f57523732b80837f8f6
+Signed-off-by: Atin Mukherjee <amukherj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/70384
+Reviewed-by: Nithya Balachandran <nbalacha@redhat.com>
+---
+ xlators/mgmt/glusterd/src/glusterd-store.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xlators/mgmt/glusterd/src/glusterd-store.c b/xlators/mgmt/glusterd/src/glusterd-store.c
+index 64447e7..51ca3d1 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-store.c
++++ b/xlators/mgmt/glusterd/src/glusterd-store.c
+@@ -967,7 +967,7 @@ glusterd_volume_exclude_options_write(int fd, glusterd_volinfo_t *volinfo)
+             goto out;
+     }
+ 
+-    if (conf->op_version >= GD_OP_VERSION_RHS_3_0) {
++    if (conf->op_version >= GD_OP_VERSION_3_7_0) {
+         snprintf(buf, sizeof(buf), "%d", volinfo->disperse_count);
+         ret = gf_store_save_value(fd, GLUSTERD_STORE_KEY_VOL_DISPERSE_CNT, buf);
+         if (ret)
+-- 
+1.8.3.1
+

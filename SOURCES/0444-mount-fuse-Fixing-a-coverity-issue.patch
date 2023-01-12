@@ -1,0 +1,40 @@
+From 53a6aed98aad73ff51f884bf815bccfa337eb524 Mon Sep 17 00:00:00 2001
+From: Barak Sason <bsasonro@redhat.com>
+Date: Sun, 18 Aug 2019 17:38:09 +0300
+Subject: [PATCH 444/449] mount/fuse - Fixing a coverity issue
+
+Fixed resource leak of dict_value and newkey variables
+
+CID: 1398630
+
+Upstream patch https://review.gluster.org/c/glusterfs/+/23260
+> Updates: bz#789278
+>
+> Change-Id: I589fdc0aecaeb4f446cd29f95bad36ccd7a35beb
+> Signed-off-by: Barak Sason <bsasonro@redhat.com>
+
+BUG: 1787310
+Change-Id: Id191face7b082e2e8d6e62f60b56248688d396f6
+Signed-off-by: Csaba Henk <csaba@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202760
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mount/fuse/src/fuse-bridge.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/xlators/mount/fuse/src/fuse-bridge.c b/xlators/mount/fuse/src/fuse-bridge.c
+index d17320b..f61fa39 100644
+--- a/xlators/mount/fuse/src/fuse-bridge.c
++++ b/xlators/mount/fuse/src/fuse-bridge.c
+@@ -4165,6 +4165,7 @@ fuse_setxattr(xlator_t *this, fuse_in_header_t *finh, void *msg,
+                    "%" PRIu64 ": SETXATTR value allocation failed",
+                    finh->unique);
+             op_errno = ENOMEM;
++            GF_FREE(newkey);
+             goto done;
+         }
+         memcpy(dict_value, value, fsi->size);
+-- 
+1.8.3.1
+

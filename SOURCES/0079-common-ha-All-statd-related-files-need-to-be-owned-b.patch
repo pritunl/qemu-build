@@ -1,0 +1,93 @@
+From 7e71723a46237f13a570961054b361dc1b34ab25 Mon Sep 17 00:00:00 2001
+From: Soumya Koduri <skoduri@redhat.com>
+Date: Thu, 19 Jan 2017 15:01:12 +0530
+Subject: [PATCH 079/124] common-ha: All statd related files need to be owned
+ by rpcuser
+
+Statd service is started as rpcuser by default. Hence the
+files/directories needed by it under '/var/lib/nfs' should be
+owned by the same user.
+
+Note: This change is not in mainline as the cluster-bits
+are being moved to storehaug project -
+http://review.gluster.org/#/c/16349/
+http://review.gluster.org/#/c/16333/
+
+Label: DOWNSTREAM ONLY
+
+Upstream Reference :
+> Change-Id: I89fd06aa9700c5ce60026ac825da7c154d9f48fd
+> BUG: 1414665
+> Signed-off-by: Soumya Koduri <skoduri@redhat.com>
+> Reviewed-on: http://review.gluster.org/16433
+> Reviewed-by: jiffin tony Thottan <jthottan@redhat.com>
+> Smoke: Gluster Build System <jenkins@build.gluster.org>
+> Tested-by: Kaleb KEITHLEY <kkeithle@redhat.com>
+> NetBSD-regression: NetBSD Build System <jenkins@build.gluster.org>
+> CentOS-regression: Gluster Build System <jenkins@build.gluster.org>
+
+Change-Id: I89fd06aa9700c5ce60026ac825da7c154d9f48fd
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167164
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/ganesha/scripts/ganesha-ha.sh | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/extras/ganesha/scripts/ganesha-ha.sh b/extras/ganesha/scripts/ganesha-ha.sh
+index 4e5799f..4a98f32 100644
+--- a/extras/ganesha/scripts/ganesha-ha.sh
++++ b/extras/ganesha/scripts/ganesha-ha.sh
+@@ -756,9 +756,11 @@ setup_state_volume()
+         fi
+         if [ ! -d ${mnt}/nfs-ganesha/${dirname}/nfs/statd ]; then
+             mkdir ${mnt}/nfs-ganesha/${dirname}/nfs/statd
++            chown rpcuser:rpcuser ${mnt}/nfs-ganesha/${dirname}/nfs/statd
+         fi
+         if [ ! -e ${mnt}/nfs-ganesha/${dirname}/nfs/state ]; then
+             touch ${mnt}/nfs-ganesha/${dirname}/nfs/state
++            chown rpcuser:rpcuser ${mnt}/nfs-ganesha/${dirname}/nfs/state
+         fi
+         if [ ! -d ${mnt}/nfs-ganesha/${dirname}/nfs/ganesha/v4recov ]; then
+             mkdir ${mnt}/nfs-ganesha/${dirname}/nfs/ganesha/v4recov
+@@ -768,9 +770,11 @@ setup_state_volume()
+         fi
+         if [ ! -d ${mnt}/nfs-ganesha/${dirname}/nfs/statd/sm ]; then
+             mkdir ${mnt}/nfs-ganesha/${dirname}/nfs/statd/sm
++            chown rpcuser:rpcuser ${mnt}/nfs-ganesha/${dirname}/nfs/statd/sm
+         fi
+         if [ ! -d ${mnt}/nfs-ganesha/${dirname}/nfs/statd/sm.bak ]; then
+             mkdir ${mnt}/nfs-ganesha/${dirname}/nfs/statd/sm.bak
++            chown rpcuser:rpcuser ${mnt}/nfs-ganesha/${dirname}/nfs/statd/sm.bak
+         fi
+         if [ ! -e ${mnt}/nfs-ganesha/${dirname}/nfs/statd/state ]; then
+             touch ${mnt}/nfs-ganesha/${dirname}/nfs/statd/state
+@@ -830,9 +834,11 @@ addnode_state_volume()
+     fi
+     if [ ! -d ${mnt}/nfs-ganesha/${dirname}/nfs/statd ]; then
+         mkdir ${mnt}/nfs-ganesha/${dirname}/nfs/statd
++        chown rpcuser:rpcuser ${mnt}/nfs-ganesha/${dirname}/nfs/statd
+     fi
+     if [ ! -e ${mnt}/nfs-ganesha/${dirname}/nfs/state ]; then
+         touch ${mnt}/nfs-ganesha/${dirname}/nfs/state
++        chown rpcuser:rpcuser ${mnt}/nfs-ganesha/${dirname}/nfs/state
+     fi
+     if [ ! -d ${mnt}/nfs-ganesha/${dirname}/nfs/ganesha/v4recov ]; then
+         mkdir ${mnt}/nfs-ganesha/${dirname}/nfs/ganesha/v4recov
+@@ -842,9 +848,11 @@ addnode_state_volume()
+     fi
+     if [ ! -d ${mnt}/nfs-ganesha/${dirname}/nfs/statd/sm ]; then
+         mkdir ${mnt}/nfs-ganesha/${dirname}/nfs/statd/sm
++        chown rpcuser:rpcuser ${mnt}/nfs-ganesha/${dirname}/nfs/statd/sm
+     fi
+     if [ ! -d ${mnt}/nfs-ganesha/${dirname}/nfs/statd/sm.bak ]; then
+         mkdir ${mnt}/nfs-ganesha/${dirname}/nfs/statd/sm.bak
++        chown rpcuser:rpcuser ${mnt}/nfs-ganesha/${dirname}/nfs/statd/sm.bak
+     fi
+     if [ ! -e ${mnt}/nfs-ganesha/${dirname}/nfs/statd/state ]; then
+         touch ${mnt}/nfs-ganesha/${dirname}/nfs/statd/state
+-- 
+1.8.3.1
+

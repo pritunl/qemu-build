@@ -1,0 +1,98 @@
+From a65982755b31fb548ff7a997ee754360a516da94 Mon Sep 17 00:00:00 2001
+From: Amar Tumballi <amarts@redhat.com>
+Date: Fri, 14 Jun 2019 13:58:25 +0530
+Subject: [PATCH 187/192] gfapi: statedump_path() add proper version number
+
+An API should have the proper version number, and 'future' version
+number is just a place holder. One shouldn't be using it in the
+release versions.
+
+With the previous backport of the patch, the version remained same
+as that of 'master' branch, which is future, but as it is an API,
+it needed a fixed version number. With this patch, corrected the same.
+
+Label: DOWNSTREAM_ONLY
+
+> In upstream, this is corrected by a backport to the stable version, 6.4
+> URL: https://review.gluster.org/22864
+
+BUG: 1720461
+Change-Id: I939850689d47d4f240c9d43f6be1a11de29c4760
+Signed-off-by: Amar Tumballi <amarts@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/173475
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ api/examples/glfsxmp.c | 5 +++++
+ api/src/gfapi.aliases  | 2 +-
+ api/src/gfapi.map      | 2 +-
+ api/src/glfs.c         | 2 +-
+ api/src/glfs.h         | 2 +-
+ 5 files changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/api/examples/glfsxmp.c b/api/examples/glfsxmp.c
+index 9d96eea..33f44df 100644
+--- a/api/examples/glfsxmp.c
++++ b/api/examples/glfsxmp.c
+@@ -1573,6 +1573,11 @@ main(int argc, char *argv[])
+ 
+     ret = glfs_set_logging(fs2, "/dev/stderr", 7);
+ 
++    ret = glfs_set_statedump_path(fs2, "/tmp");
++    if (ret) {
++        fprintf(stderr, "glfs_set_statedump_path: %s\n", strerror(errno));
++    }
++
+     ret = glfs_init(fs2);
+ 
+     fprintf(stderr, "glfs_init: returned %d\n", ret);
+diff --git a/api/src/gfapi.aliases b/api/src/gfapi.aliases
+index 8fdf734..692ae13 100644
+--- a/api/src/gfapi.aliases
++++ b/api/src/gfapi.aliases
+@@ -196,4 +196,4 @@ _pub_glfs_copy_file_range _glfs_copy_file_range$GFAPI_6.0
+ _pub_glfs_fsetattr _glfs_fsetattr$GFAPI_6.0
+ _pub_glfs_setattr _glfs_setattr$GFAPI_6.0
+ 
+-_pub_glfs_set_statedump_path _glfs_set_statedump_path@GFAPI_future
++_pub_glfs_set_statedump_path _glfs_set_statedump_path@GFAPI_6.4
+diff --git a/api/src/gfapi.map b/api/src/gfapi.map
+index cf118e8..df65837 100644
+--- a/api/src/gfapi.map
++++ b/api/src/gfapi.map
+@@ -272,7 +272,7 @@ GFAPI_PRIVATE_6.1 {
+ 		glfs_setfspid;
+ } GFAPI_6.0;
+ 
+-GFAPI_future {
++GFAPI_6.4 {
+ 	global:
+ 		glfs_set_statedump_path;
+ } GFAPI_PRIVATE_6.1;
+diff --git a/api/src/glfs.c b/api/src/glfs.c
+index ba513e6..6bbb620 100644
+--- a/api/src/glfs.c
++++ b/api/src/glfs.c
+@@ -1800,4 +1800,4 @@ invalid_fs:
+     return -1;
+ }
+ 
+-GFAPI_SYMVER_PUBLIC_DEFAULT(glfs_set_statedump_path, future);
++GFAPI_SYMVER_PUBLIC_DEFAULT(glfs_set_statedump_path, 6.4);
+diff --git a/api/src/glfs.h b/api/src/glfs.h
+index a6c12e1..08b6ca0 100644
+--- a/api/src/glfs.h
++++ b/api/src/glfs.h
+@@ -1479,7 +1479,7 @@ glfs_setattr(struct glfs *fs, const char *path, struct glfs_stat *stat,
+ 
+ int
+ glfs_set_statedump_path(struct glfs *fs, const char *path) __THROW
+-    GFAPI_PUBLIC(glfs_set_statedump_path, future);
++    GFAPI_PUBLIC(glfs_set_statedump_path, 6.4);
+ 
+ __END_DECLS
+ #endif /* !_GLFS_H */
+-- 
+1.8.3.1
+

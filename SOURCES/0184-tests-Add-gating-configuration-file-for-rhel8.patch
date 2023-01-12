@@ -1,0 +1,38 @@
+From c6fdb740675999883a8a7942fbcd32f9889dc739 Mon Sep 17 00:00:00 2001
+From: Sunil Kumar Acharya <sheggodu@redhat.com>
+Date: Thu, 13 Jun 2019 21:58:43 +0530
+Subject: [PATCH 184/192] tests: Add gating configuration file for rhel8
+
+Adding configuration files to enable automatic execution
+of gating CI for glusterfs.
+
+Label: DOWNSTREAM ONLY
+
+BUG: 1720318
+Change-Id: I8b42792d93d1eea455f86acd1576c20e12eed9f0
+Signed-off-by: Sunil Kumar Acharya <sheggodu@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/173412
+Reviewed-by: Vivek Das <vdas@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+---
+ gating.yaml | 7 +++++++
+ 1 file changed, 7 insertions(+)
+ create mode 100644 gating.yaml
+
+diff --git a/gating.yaml b/gating.yaml
+new file mode 100644
+index 0000000..eeab6e9
+--- /dev/null
++++ b/gating.yaml
+@@ -0,0 +1,7 @@
++--- !Policy
++product_versions:
++  - rhel-8
++decision_context: osci_compose_gate_modules
++subject_type: redhat-module
++rules:
++  - !PassingTestCaseRule {test_case_name: manual.sst_rh_gluster_storage.glusterfs.bvt}
+-- 
+1.8.3.1
+

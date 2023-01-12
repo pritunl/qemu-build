@@ -1,0 +1,60 @@
+From 17a2a880290d2038c913c23985df620e3c9741b3 Mon Sep 17 00:00:00 2001
+From: Sunny Kumar <sunkumar@redhat.com>
+Date: Mon, 16 Mar 2020 15:17:23 +0000
+Subject: [PATCH 495/511] geo-rep: descriptive message when worker crashes due
+ to EIO
+
+With this patch now you can notice log if it is due to EIO:
+
+[2020-03-16 16:24:48.293837] E [syncdutils(worker /bricks/brick1/mbr3):348:log_raise_exception] <top>: Getting "Input/Output error" is most likely due to a. Brick is down or b. Split brain issue.
+[2020-03-16 16:24:48.293915] E [syncdutils(worker /bricks/brick1/mbr3):352:log_raise_exception] <top>: This is expected as per design to keep the consistency of the file system. Once the above issue is resolved geo-rep would automatically proceed further.
+
+>Change-Id: Ie33f2440bc96089731ce12afa8dab91d9550a7ca
+>Fixes: #1104
+>Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+>Upstream Patch : https://review.gluster.org/c/glusterfs/+/24228/
+
+BUG: 1412494
+Change-Id: Ie33f2440bc96089731ce12afa8dab91d9550a7ca
+Signed-off-by: srijan-sivakumar <ssivakum@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/220874
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ geo-replication/syncdaemon/syncdutils.py | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/geo-replication/syncdaemon/syncdutils.py b/geo-replication/syncdaemon/syncdutils.py
+index f43e13b..d5a94d4 100644
+--- a/geo-replication/syncdaemon/syncdutils.py
++++ b/geo-replication/syncdaemon/syncdutils.py
+@@ -22,7 +22,7 @@ import socket
+ from subprocess import PIPE
+ from threading import Lock, Thread as baseThread
+ from errno import EACCES, EAGAIN, EPIPE, ENOTCONN, ENOMEM, ECONNABORTED
+-from errno import EINTR, ENOENT, ESTALE, EBUSY, ENODATA, errorcode
++from errno import EINTR, ENOENT, ESTALE, EBUSY, ENODATA, errorcode, EIO
+ from signal import signal, SIGTERM
+ import select as oselect
+ from os import waitpid as owaitpid
+@@ -346,6 +346,17 @@ def log_raise_exception(excont):
+                                                         ECONNABORTED):
+             logging.error(lf('Gluster Mount process exited',
+                              error=errorcode[exc.errno]))
++        elif isinstance(exc, OSError) and exc.errno == EIO:
++            logging.error("Getting \"Input/Output error\" "
++                          "is most likely due to "
++                          "a. Brick is down or "
++                          "b. Split brain issue.")
++            logging.error("This is expected as per design to "
++                          "keep the consistency of the file system. "
++                          "Once the above issue is resolved "
++                          "geo-replication would automatically "
++                          "proceed further.")
++            logtag = "FAIL"
+         else:
+             logtag = "FAIL"
+         if not logtag and logging.getLogger().isEnabledFor(logging.DEBUG):
+-- 
+1.8.3.1
+

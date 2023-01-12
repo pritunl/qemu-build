@@ -1,0 +1,71 @@
+From 58070aa568ffbaac267b02428e974b2459ae13b0 Mon Sep 17 00:00:00 2001
+From: Susant Palai <spalai@redhat.com>
+Date: Tue, 18 Jun 2019 16:43:43 +0530
+Subject: [PATCH 197/221] :posix: fix crash in posix_cs_set_state
+
+> Fixes: bz#1721474
+> Change-Id: Ic2a53fa3d1e9e23424c6898e0986f80d52c5e3f6
+> Signed-off-by: Susant Palai <spalai@redhat.com>
+(cherry-pick of https://review.gluster.org/#/c/glusterfs/+/22892/)
+
+BUG: 1721477
+Change-Id: Ic2a53fa3d1e9e23424c6898e0986f80d52c5e3f6
+Signed-off-by: Susant Palai <spalai@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/173936
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ xlators/storage/posix/src/posix-helpers.c      | 5 +++++
+ xlators/storage/posix/src/posix-inode-fd-ops.c | 7 ++++---
+ 2 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/xlators/storage/posix/src/posix-helpers.c b/xlators/storage/posix/src/posix-helpers.c
+index aecf4f8..849db3d 100644
+--- a/xlators/storage/posix/src/posix-helpers.c
++++ b/xlators/storage/posix/src/posix-helpers.c
+@@ -3235,6 +3235,11 @@ posix_cs_set_state(xlator_t *this, dict_t **rsp, gf_cs_obj_state state,
+     char *value = NULL;
+     size_t xattrsize = 0;
+ 
++    if (!rsp) {
++        ret = -1;
++        goto out;
++    }
++
+     if (!(*rsp)) {
+         *rsp = dict_new();
+         if (!(*rsp)) {
+diff --git a/xlators/storage/posix/src/posix-inode-fd-ops.c b/xlators/storage/posix/src/posix-inode-fd-ops.c
+index 7ca4d26..b92c411 100644
+--- a/xlators/storage/posix/src/posix-inode-fd-ops.c
++++ b/xlators/storage/posix/src/posix-inode-fd-ops.c
+@@ -1028,6 +1028,7 @@ posix_glfallocate(call_frame_t *frame, xlator_t *this, fd_t *fd,
+     struct iatt statpost = {
+         0,
+     };
++    dict_t *rsp_xdata = NULL;
+ 
+ #ifdef FALLOC_FL_KEEP_SIZE
+     if (keep_size)
+@@ -1035,15 +1036,15 @@ posix_glfallocate(call_frame_t *frame, xlator_t *this, fd_t *fd,
+ #endif /* FALLOC_FL_KEEP_SIZE */
+ 
+     ret = posix_do_fallocate(frame, this, fd, flags, offset, len, &statpre,
+-                             &statpost, xdata, NULL);
++                             &statpost, xdata, &rsp_xdata);
+     if (ret < 0)
+         goto err;
+ 
+-    STACK_UNWIND_STRICT(fallocate, frame, 0, 0, &statpre, &statpost, NULL);
++    STACK_UNWIND_STRICT(fallocate, frame, 0, 0, &statpre, &statpost, rsp_xdata);
+     return 0;
+ 
+ err:
+-    STACK_UNWIND_STRICT(fallocate, frame, -1, -ret, NULL, NULL, NULL);
++    STACK_UNWIND_STRICT(fallocate, frame, -1, -ret, NULL, NULL, rsp_xdata);
+     return 0;
+ }
+ 
+-- 
+1.8.3.1
+

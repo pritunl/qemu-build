@@ -1,0 +1,229 @@
+From 2c1a83920b959a1ec170243d1eec71b1e2c074b0 Mon Sep 17 00:00:00 2001
+From: "Kaleb S. KEITHLEY" <kkeithle@redhat.com>
+Date: Fri, 7 Apr 2017 09:09:29 -0400
+Subject: [PATCH 056/124] common-ha: fixes for Debian-based systems
+
+1) Debian-based systems don't have /usr/libexec/... and there is
+a hard-coded invocation of /usr/libexec/ganesha/ganesha-ha.sh within
+ganesha-ha.sh itself.
+Fix: save $0 and use it instead for further invocations of self.
+
+2) default shell is /bin/dash (not /bin/bash). Various runner_run()
+invocations for ganesha used what amounts to
+  exec("sh /usr/$libexec/ganesha/ganesha-ha.sh ...);
+which executes the script using the default shell, but there are
+some bash-specific idioms that don't work if the shell is dash.
+Fix: change to exec("/usr/$libexec/ganesha/ganesha-ha.sh ...); so that
+the shebang forces the use of /bin/bash
+
+3) Fedora and RHEL7 have merged /bin/ and /usr/bin, /bin is a symlink
+to /usr/bin. Debian-based systems are not merged, and systemd systems
+have /bin/systemctl. The logic to find .../bin/systemctl is backwards.
+If the logic looks for /usr/bin/systemctl it will not find it on
+Debian-based systems; if it looks for /bin/systemctl it will find it
+on Fedora and RHEL by virtue of the symlink. (RHEL6 and others will
+find their respective init regardless.)
+Fix: change the logic to look for /bin/systemctl instead.
+
+4) The logic for deciding to run systemctl (or not) is a bit silly.
+Fix: simply invoke the found method via the function pointer in the
+table.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: I33681b296a73aebb078bda6ac0d3a1d3b9770a21
+Signed-off-by: Kaleb S. KEITHLEY <kkeithle@redhat.com>
+Reviewed-on: https://review.gluster.org/17013
+Smoke: Gluster Build System <jenkins@build.gluster.org>
+Reviewed-by: Niels de Vos <ndevos@redhat.com>
+NetBSD-regression: NetBSD Build System <jenkins@build.gluster.org>
+CentOS-regression: Gluster Build System <jenkins@build.gluster.org>
+Reviewed-by: jiffin tony Thottan <jthottan@redhat.com>
+Signed-off-by: Jiffin Tony Thottan <jthottan@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167141
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/ganesha/scripts/ganesha-ha.sh         | 21 +++++++++---------
+ xlators/mgmt/glusterd/src/glusterd-ganesha.c | 32 +++++++++++-----------------
+ 2 files changed, 23 insertions(+), 30 deletions(-)
+
+diff --git a/extras/ganesha/scripts/ganesha-ha.sh b/extras/ganesha/scripts/ganesha-ha.sh
+index 6b011be..4b93f95 100644
+--- a/extras/ganesha/scripts/ganesha-ha.sh
++++ b/extras/ganesha/scripts/ganesha-ha.sh
+@@ -20,6 +20,7 @@
+ # ensure that the NFS GRACE DBUS signal is sent after the VIP moves to
+ # the new host.
+ 
++GANESHA_HA_SH=$(realpath $0)
+ HA_NUM_SERVERS=0
+ HA_SERVERS=""
+ HA_VOL_NAME="gluster_shared_storage"
+@@ -68,9 +69,9 @@ function find_rhel7_conf
+          done
+ }
+ 
+-if [ -z $CONFFILE ]
++if [ -z ${CONFFILE} ]
+         then
+-        find_rhel7_conf $OPTIONS
++        find_rhel7_conf ${OPTIONS}
+ 
+ fi
+ 
+@@ -90,9 +91,9 @@ usage() {
+ 
+ determine_service_manager () {
+ 
+-        if [ -e "/usr/bin/systemctl" ];
++        if [ -e "/bin/systemctl" ];
+         then
+-                SERVICE_MAN="/usr/bin/systemctl"
++                SERVICE_MAN="/bin/systemctl"
+         elif [ -e "/sbin/invoke-rc.d" ];
+         then
+                 SERVICE_MAN="/sbin/invoke-rc.d"
+@@ -100,7 +101,7 @@ determine_service_manager () {
+         then
+                 SERVICE_MAN="/sbin/service"
+         fi
+-        if [ "$SERVICE_MAN" == "DISTRO_NOT_FOUND" ]
++        if [ "${SERVICE_MAN}" == "DISTRO_NOT_FOUND" ]
+         then
+                 echo "Service manager not recognized, exiting"
+                 exit 1
+@@ -113,21 +114,21 @@ manage_service ()
+         local new_node=${2}
+         local option=
+ 
+-        if [ "$action" == "start" ]; then
++        if [ "${action}" == "start" ]; then
+                 option="yes"
+         else
+                 option="no"
+         fi
+         ssh -oPasswordAuthentication=no -oStrictHostKeyChecking=no -i \
+-${SECRET_PEM} root@${new_node} "/usr/libexec/ganesha/ganesha-ha.sh --setup-ganesha-conf-files $HA_CONFDIR $option"
++${SECRET_PEM} root@${new_node} "${GANESHA_HA_SH} --setup-ganesha-conf-files $HA_CONFDIR $option"
+ 
+-        if [ "$SERVICE_MAN" == "/usr/bin/systemctl" ]
++        if [ "${SERVICE_MAN}" == "/bin/systemctl" ]
+         then
+                 ssh -oPasswordAuthentication=no -oStrictHostKeyChecking=no -i \
+-${SECRET_PEM} root@${new_node} "$SERVICE_MAN  ${action} nfs-ganesha"
++${SECRET_PEM} root@${new_node} "${SERVICE_MAN}  ${action} nfs-ganesha"
+         else
+                 ssh -oPasswordAuthentication=no -oStrictHostKeyChecking=no -i \
+-${SECRET_PEM} root@${new_node} "$SERVICE_MAN nfs-ganesha ${action}"
++${SECRET_PEM} root@${new_node} "${SERVICE_MAN} nfs-ganesha ${action}"
+         fi
+ }
+ 
+diff --git a/xlators/mgmt/glusterd/src/glusterd-ganesha.c b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+index fac16e6..81f794d 100644
+--- a/xlators/mgmt/glusterd/src/glusterd-ganesha.c
++++ b/xlators/mgmt/glusterd/src/glusterd-ganesha.c
+@@ -122,12 +122,9 @@ sc_service_action(struct service_command *sc, char *command)
+ static int
+ manage_service(char *action)
+ {
+-    struct stat stbuf = {
+-        0,
+-    };
+     int i = 0;
+     int ret = 0;
+-    struct service_command sc_list[] = {{.binary = "/usr/bin/systemctl",
++    struct service_command sc_list[] = {{.binary = "/bin/systemctl",
+                                          .service = "nfs-ganesha",
+                                          .action = sc_systemctl_action},
+                                         {.binary = "/sbin/invoke-rc.d",
+@@ -139,15 +136,10 @@ manage_service(char *action)
+                                         {.binary = NULL}};
+ 
+     while (sc_list[i].binary != NULL) {
+-        ret = sys_stat(sc_list[i].binary, &stbuf);
++        ret = sys_access(sc_list[i].binary, X_OK);
+         if (ret == 0) {
+             gf_msg_debug(THIS->name, 0, "%s found.", sc_list[i].binary);
+-            if (strcmp(sc_list[i].binary, "/usr/bin/systemctl") == 0)
+-                ret = sc_systemctl_action(&sc_list[i], action);
+-            else
+-                ret = sc_service_action(&sc_list[i], action);
+-
+-            return ret;
++            return sc_list[i].action(&sc_list[i], action);
+         }
+         i++;
+     }
+@@ -449,7 +441,7 @@ manage_export_config(char *volname, char *value, char **op_errstr)
+ 
+     GF_ASSERT(volname);
+     runinit(&runner);
+-    runner_add_args(&runner, "sh", GANESHA_PREFIX "/create-export-ganesha.sh",
++    runner_add_args(&runner, GANESHA_PREFIX "/create-export-ganesha.sh",
+                     CONFDIR, value, volname, NULL);
+     ret = runner_run(&runner);
+ 
+@@ -558,8 +550,8 @@ ganesha_manage_export(dict_t *dict, char *value, char **op_errstr)
+     }
+ 
+     if (check_host_list()) {
+-        runner_add_args(&runner, "sh", GANESHA_PREFIX "/dbus-send.sh", CONFDIR,
+-                        value, volname, NULL);
++        runner_add_args(&runner, GANESHA_PREFIX "/dbus-send.sh", CONFDIR, value,
++                        volname, NULL);
+         ret = runner_run(&runner);
+         if (ret) {
+             gf_asprintf(op_errstr,
+@@ -610,8 +602,8 @@ tear_down_cluster(gf_boolean_t run_teardown)
+ 
+     if (run_teardown) {
+         runinit(&runner);
+-        runner_add_args(&runner, "sh", GANESHA_PREFIX "/ganesha-ha.sh",
+-                        "teardown", CONFDIR, NULL);
++        runner_add_args(&runner, GANESHA_PREFIX "/ganesha-ha.sh", "teardown",
++                        CONFDIR, NULL);
+         ret = runner_run(&runner);
+         /* *
+          * Remove all the entries in CONFDIR expect ganesha.conf and
+@@ -685,7 +677,7 @@ setup_cluster(gf_boolean_t run_setup)
+ 
+     if (run_setup) {
+         runinit(&runner);
+-        runner_add_args(&runner, "sh", GANESHA_PREFIX "/ganesha-ha.sh", "setup",
++        runner_add_args(&runner, GANESHA_PREFIX "/ganesha-ha.sh", "setup",
+                         CONFDIR, NULL);
+         ret = runner_run(&runner);
+     }
+@@ -714,7 +706,7 @@ teardown(gf_boolean_t run_teardown, char **op_errstr)
+     }
+ 
+     runinit(&runner);
+-    runner_add_args(&runner, "sh", GANESHA_PREFIX "/ganesha-ha.sh", "cleanup",
++    runner_add_args(&runner, GANESHA_PREFIX "/ganesha-ha.sh", "cleanup",
+                     CONFDIR, NULL);
+     ret = runner_run(&runner);
+     if (ret)
+@@ -759,7 +751,7 @@ stop_ganesha(char **op_errstr)
+     };
+ 
+     runinit(&runner);
+-    runner_add_args(&runner, "sh", GANESHA_PREFIX "/ganesha-ha.sh",
++    runner_add_args(&runner, GANESHA_PREFIX "/ganesha-ha.sh",
+                     "--setup-ganesha-conf-files", CONFDIR, "no", NULL);
+     ret = runner_run(&runner);
+     if (ret) {
+@@ -828,7 +820,7 @@ start_ganesha(char **op_errstr)
+ 
+     if (check_host_list()) {
+         runinit(&runner);
+-        runner_add_args(&runner, "sh", GANESHA_PREFIX "/ganesha-ha.sh",
++        runner_add_args(&runner, GANESHA_PREFIX "/ganesha-ha.sh",
+                         "--setup-ganesha-conf-files", CONFDIR, "yes", NULL);
+         ret = runner_run(&runner);
+         if (ret) {
+-- 
+1.8.3.1
+

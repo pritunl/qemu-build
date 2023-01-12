@@ -1,0 +1,42 @@
+From e4209dfb27faeca5544a09474ac524546e5d11e0 Mon Sep 17 00:00:00 2001
+From: Hari Gowtham <hgowtham@redhat.com>
+Date: Wed, 24 Apr 2019 18:14:33 +0530
+Subject: [PATCH 121/124] spec: glusterfs-devel for client-build should not
+ depend on server
+
+Found that libgfdb.pc was included in client package.
+It was earlier removed from glusterfs-devel client package
+as a part of:
+40eb62a8872ce061416e899fb6c0784b6253ab16
+
+Made it back into downstream when tier was introduced again.
+Removing it in this patch.
+
+label: DOWNSTREAM ONLY
+
+Change-Id: I5fd5f5b0a6b06c677f8ea3693eb0392af51abaf1
+Signed-off-by: Hari Gowtham <hgowtham@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/168670
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Milind Changire <mchangir@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ glusterfs.spec.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index bf72a55..d20b062 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -1210,7 +1210,7 @@ exit 0
+ %exclude %{_libdir}/pkgconfig/libgfchangelog.pc
+ %exclude %{_libdir}/libgfchangelog.so
+ %if ( 0%{!?_without_tiering:1} )
+-%{_libdir}/pkgconfig/libgfdb.pc
++%exclude %{_libdir}/pkgconfig/libgfdb.pc
+ %endif
+ %else
+ %{_libdir}/pkgconfig/libgfchangelog.pc
+-- 
+1.8.3.1
+

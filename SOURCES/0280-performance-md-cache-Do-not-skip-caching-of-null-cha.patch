@@ -1,0 +1,153 @@
+From 2d7d9165c6a8619eef553859b4b7136b8e9ccb55 Mon Sep 17 00:00:00 2001
+From: Anoop C S <anoopcs@redhat.com>
+Date: Sat, 10 Aug 2019 10:30:26 +0530
+Subject: [PATCH 280/284] performance/md-cache: Do not skip caching of null
+ character xattr values
+
+Null character string is a valid xattr value in file system. But for
+those xattrs processed by md-cache, it does not update its entries if
+value is null('\0'). This results in ENODATA when those xattrs are
+queried afterwards via getxattr() causing failures in basic operations
+like create, copy etc in a specially configured Samba setup for Mac OS
+clients.
+
+On the other side snapview-server is internally setting empty string("")
+as value for xattrs received as part of listxattr() and are not intended
+to be cached. Therefore we try to maintain that behaviour using an
+additional dictionary key to prevent updation of entries in getxattr()
+and fgetxattr() callbacks in md-cache.
+
+Credits: Poornima G <pgurusid@redhat.com>
+
+Backport of https://review.gluster.org/c/glusterfs/+/23206
+
+Change-Id: I7859cbad0a06ca6d788420c2a495e658699c6ff7
+Fixes: bz#1732376
+Signed-off-by: Anoop C S <anoopcs@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/179048
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/md-cache/bug-1726205.t                  | 22 +++++++++++++++
+ .../features/snapview-server/src/snapview-server.c | 12 ++++++++-
+ xlators/performance/md-cache/src/md-cache.c        | 31 +++++++++-------------
+ 3 files changed, 45 insertions(+), 20 deletions(-)
+ create mode 100644 tests/bugs/md-cache/bug-1726205.t
+
+diff --git a/tests/bugs/md-cache/bug-1726205.t b/tests/bugs/md-cache/bug-1726205.t
+new file mode 100644
+index 0000000..795130e
+--- /dev/null
++++ b/tests/bugs/md-cache/bug-1726205.t
+@@ -0,0 +1,22 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++
++cleanup;
++
++TEST glusterd;
++
++TEST $CLI volume create $V0 $H0:$B0/${V0}{1,2,3};
++
++TEST $CLI volume start $V0
++
++TEST $CLI volume set $V0 group samba
++
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0
++
++TEST touch $M0/file
++TEST "setfattr -n "user.DosStream.Zone.Identifier:\$DATA" -v '\0' $M0/file"
++TEST "getfattr -n "user.DosStream.Zone.Identifier:\$DATA" -e hex $M0/file | grep -q 0x00"
++
++cleanup;
+diff --git a/xlators/features/snapview-server/src/snapview-server.c b/xlators/features/snapview-server/src/snapview-server.c
+index b4998b8..1d6a5e5 100644
+--- a/xlators/features/snapview-server/src/snapview-server.c
++++ b/xlators/features/snapview-server/src/snapview-server.c
+@@ -828,7 +828,8 @@ out:
+  * back into the dict. But to get the values for those xattrs it has to do the
+  * getxattr operation on each xattr which might turn out to be a costly
+  * operation. So for each of the xattrs present in the list, a 0 byte value
+- * ("") is set into the dict before unwinding. This can be treated as an
++ * ("") is set into the dict before unwinding. Since ("") is also a valid xattr
++ * value(in a file system) we use an extra key in the same dictionary as an
+  * indicator to other xlators which want to cache the xattrs (as of now,
+  * md-cache which caches acl and selinux related xattrs) to not to cache the
+  * values of the xattrs present in the dict.
+@@ -871,6 +872,15 @@ svs_add_xattrs_to_dict(xlator_t *this, dict_t *dict, char *list, ssize_t size)
+         list_offset += strlen(keybuffer) + 1;
+     } /* while (remaining_size > 0) */
+ 
++    /* Add an additional key to indicate that we don't need to cache these
++     * xattrs(with value "") */
++    ret = dict_set_str(dict, "glusterfs.skip-cache", "");
++    if (ret < 0) {
++        gf_msg(this->name, GF_LOG_ERROR, 0, SVS_MSG_DICT_SET_FAILED,
++               "dict set operation for the key glusterfs.skip-cache failed.");
++        goto out;
++    }
++
+     ret = 0;
+ 
+ out:
+diff --git a/xlators/performance/md-cache/src/md-cache.c b/xlators/performance/md-cache/src/md-cache.c
+index 6e0468f..a6b363f 100644
+--- a/xlators/performance/md-cache/src/md-cache.c
++++ b/xlators/performance/md-cache/src/md-cache.c
+@@ -698,25 +698,6 @@ updatefn(dict_t *dict, char *key, data_t *value, void *data)
+             }
+         }
+ 
+-        /* posix xlator as part of listxattr will send both names
+-         * and values of the xattrs in the dict. But as per man page
+-         * listxattr is mainly supposed to send names of the all the
+-         * xattrs. gfapi, as of now will put all the keys it obtained
+-         * in the dict (sent by posix) into a buffer provided by the
+-         * caller (thus the values of those xattrs are lost). If some
+-         * xlator makes gfapi based calls (ex: snapview-server), then
+-         * it has to unwind the calls by putting those names it got
+-         * in the buffer again into the dict. But now it would not be
+-         * having the values for those xattrs. So it might just put
+-         * a 0 byte value ("") into the dict for each xattr and unwind
+-         * the call. So the xlators which cache the xattrs (as of now
+-         * md-cache caches the acl and selinux related xattrs), should
+-         * not update their cache if the value of a xattr is a 0 byte
+-         * data (i.e. "").
+-         */
+-        if (value->len == 1 && value->data[0] == '\0')
+-            return 0;
+-
+         if (dict_set(u->dict, key, value) < 0) {
+             u->ret = -1;
+             return -1;
+@@ -2406,6 +2387,12 @@ mdc_getxattr_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+         goto out;
+     }
+ 
++    if (dict_get(xattr, "glusterfs.skip-cache")) {
++        gf_msg(this->name, GF_LOG_DEBUG, 0, 0,
++               "Skipping xattr update due to empty value");
++        goto out;
++    }
++
+     mdc_inode_xatt_set(this, local->loc.inode, xdata);
+ 
+ out:
+@@ -2488,6 +2475,12 @@ mdc_fgetxattr_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+         goto out;
+     }
+ 
++    if (dict_get(xattr, "glusterfs.skip-cache")) {
++        gf_msg(this->name, GF_LOG_DEBUG, 0, 0,
++               "Skipping xattr update due to empty value");
++        goto out;
++    }
++
+     mdc_inode_xatt_set(this, local->fd->inode, xdata);
+ 
+ out:
+-- 
+1.8.3.1
+

@@ -1,0 +1,131 @@
+From f38f0988eb6c0d72677abceba5ebeb51ea8d44ad Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawal@redhat.com>
+Date: Tue, 21 Jan 2020 21:09:56 +0530
+Subject: [PATCH 351/351] server: Mount fails after reboot 1/3 gluster nodes
+
+Problem: At the time of coming up one server node(1x3) after reboot
+client is unmounted.The client is unmounted because a client
+is getting AUTH_FAILED event and client call fini for the graph.The
+client is getting AUTH_FAILED because brick is not attached with a
+graph at that moment
+
+Solution: To avoid the unmounting the client graph throw ENOENT error
+          from server in case if brick is not attached with server at
+          the time of authenticate clients.
+
+> Credits: Xavi Hernandez <xhernandez@redhat.com>
+> Change-Id: Ie6fbd73cbcf23a35d8db8841b3b6036e87682f5e
+> Fixes: bz#1793852
+> Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+> (Cherry picked from commit e4f776308d5ee7ffeb07de0fd9e1edae6944030d)
+> (Reviewd on upstream link https://review.gluster.org/#/c/glusterfs/+/24053/)
+
+Change-Id: Ie6fbd73cbcf23a35d8db8841b3b6036e87682f5e
+BUG: 1793035
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/190042
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ tests/bugs/protocol/bug-1433815-auth-allow.t   |  1 +
+ xlators/protocol/client/src/client-handshake.c |  3 +-
+ xlators/protocol/server/src/server-handshake.c | 41 +++++++++++++++++---------
+ 3 files changed, 29 insertions(+), 16 deletions(-)
+
+diff --git a/tests/bugs/protocol/bug-1433815-auth-allow.t b/tests/bugs/protocol/bug-1433815-auth-allow.t
+index fa22ad8..a78c0eb 100644
+--- a/tests/bugs/protocol/bug-1433815-auth-allow.t
++++ b/tests/bugs/protocol/bug-1433815-auth-allow.t
+@@ -17,6 +17,7 @@ TEST $CLI volume create $V0 $H0:$B0/$V0
+ # Set auth.allow so it *doesn't* include ourselves.
+ TEST $CLI volume set $V0 auth.allow 1.2.3.4
+ TEST $CLI volume start $V0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" online_brick_count
+ 
+ # "System getspec" will include the username and password if the request comes
+ # from a server (which we are).  Unfortunately, this will cause authentication
+diff --git a/xlators/protocol/client/src/client-handshake.c b/xlators/protocol/client/src/client-handshake.c
+index c43756a..0002361 100644
+--- a/xlators/protocol/client/src/client-handshake.c
++++ b/xlators/protocol/client/src/client-handshake.c
+@@ -1031,8 +1031,7 @@ client_setvolume_cbk(struct rpc_req *req, struct iovec *iov, int count,
+                "SETVOLUME on remote-host failed: %s", remote_error);
+ 
+         errno = op_errno;
+-        if (remote_error &&
+-            (strcmp("Authentication failed", remote_error) == 0)) {
++        if (remote_error && (op_errno == EACCES)) {
+             auth_fail = _gf_true;
+             op_ret = 0;
+         }
+diff --git a/xlators/protocol/server/src/server-handshake.c b/xlators/protocol/server/src/server-handshake.c
+index 382f241..1d1177d 100644
+--- a/xlators/protocol/server/src/server-handshake.c
++++ b/xlators/protocol/server/src/server-handshake.c
+@@ -250,6 +250,7 @@ server_setvolume(rpcsvc_request_t *req)
+     char *subdir_mount = NULL;
+     char *client_name = NULL;
+     gf_boolean_t cleanup_starting = _gf_false;
++    gf_boolean_t xlator_in_graph = _gf_true;
+ 
+     params = dict_new();
+     reply = dict_new();
+@@ -311,8 +312,10 @@ server_setvolume(rpcsvc_request_t *req)
+     LOCK(&ctx->volfile_lock);
+     {
+         xl = get_xlator_by_name(this, name);
+-        if (!xl)
++        if (!xl) {
++            xlator_in_graph = _gf_false;
+             xl = this;
++        }
+     }
+     UNLOCK(&ctx->volfile_lock);
+     if (xl == NULL) {
+@@ -568,20 +571,30 @@ server_setvolume(rpcsvc_request_t *req)
+                          "failed to set error "
+                          "msg");
+     } else {
+-        gf_event(EVENT_CLIENT_AUTH_REJECT,
+-                 "client_uid=%s;"
+-                 "client_identifier=%s;server_identifier=%s;"
+-                 "brick_path=%s",
+-                 client->client_uid, req->trans->peerinfo.identifier,
+-                 req->trans->myinfo.identifier, name);
+-        gf_msg(this->name, GF_LOG_ERROR, EACCES, PS_MSG_AUTHENTICATE_ERROR,
+-               "Cannot authenticate client"
+-               " from %s %s",
+-               client->client_uid, (clnt_version) ? clnt_version : "old");
+-
+         op_ret = -1;
+-        op_errno = EACCES;
+-        ret = dict_set_str(reply, "ERROR", "Authentication failed");
++        if (!xlator_in_graph) {
++            gf_msg(this->name, GF_LOG_ERROR, ENOENT, PS_MSG_AUTHENTICATE_ERROR,
++                   "Cannot authenticate client"
++                   " from %s %s because brick is not attached in graph",
++                   client->client_uid, (clnt_version) ? clnt_version : "old");
++
++            op_errno = ENOENT;
++            ret = dict_set_str(reply, "ERROR", "Brick not found");
++        } else {
++            gf_event(EVENT_CLIENT_AUTH_REJECT,
++                     "client_uid=%s;"
++                     "client_identifier=%s;server_identifier=%s;"
++                     "brick_path=%s",
++                     client->client_uid, req->trans->peerinfo.identifier,
++                     req->trans->myinfo.identifier, name);
++            gf_msg(this->name, GF_LOG_ERROR, EACCES, PS_MSG_AUTHENTICATE_ERROR,
++                   "Cannot authenticate client"
++                   " from %s %s",
++                   client->client_uid, (clnt_version) ? clnt_version : "old");
++
++            op_errno = EACCES;
++            ret = dict_set_str(reply, "ERROR", "Authentication failed");
++        }
+         if (ret < 0)
+             gf_msg_debug(this->name, 0,
+                          "failed to set error "
+-- 
+1.8.3.1
+

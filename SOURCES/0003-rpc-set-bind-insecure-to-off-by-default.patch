@@ -1,0 +1,51 @@
+From 9b58731c83bc1ee9c5f2a3cd58a8f845cf09ee82 Mon Sep 17 00:00:00 2001
+From: Prasanna Kumar Kalever <prasanna.kalever@redhat.com>
+Date: Mon, 21 Mar 2016 13:54:19 +0530
+Subject: [PATCH 03/52] rpc: set bind-insecure to off by default
+
+commit 243a5b429f225acb8e7132264fe0a0835ff013d5 turn's 'ON'
+allow-insecure and bind-insecure by default.
+
+Problem:
+Now with newer versions we have bind-insecure 'ON' by default.
+So, while upgrading subset of nodes from a trusted storage pool,
+nodes which have older versions of glusterfs will expect
+connection from secure ports only (since they still have
+bind-insecure off) thus they reject connection from upgraded
+nodes which now have insecure ports.
+
+Hence we will run into connection issues between peers.
+
+Solution:
+This patch will turn bind-insecure 'OFF' by default to avoid
+problem explained above.
+
+Label: DOWNSTREAM ONLY
+
+Change-Id: Id7a19b4872399d3b019243b0857c9c7af75472f7
+Signed-off-by: Prasanna Kumar Kalever <prasanna.kalever@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/70313
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+Tested-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ rpc/rpc-lib/src/rpc-transport.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/rpc/rpc-lib/src/rpc-transport.c b/rpc/rpc-lib/src/rpc-transport.c
+index f9cbdf1..4beaaf9 100644
+--- a/rpc/rpc-lib/src/rpc-transport.c
++++ b/rpc/rpc-lib/src/rpc-transport.c
+@@ -269,8 +269,8 @@ rpc_transport_load(glusterfs_ctx_t *ctx, dict_t *options, char *trans_name)
+         else
+             trans->bind_insecure = 0;
+     } else {
+-        /* By default allow bind insecure */
+-        trans->bind_insecure = 1;
++        /* Turning off bind insecure by default*/
++        trans->bind_insecure = 0;
+     }
+ 
+     ret = dict_get_str(options, "transport-type", &type);
+-- 
+1.8.3.1
+

@@ -1,0 +1,52 @@
+From 27d69d8927a946562aef08a6edfee38b9998f96d Mon Sep 17 00:00:00 2001
+From: Anoop C S <anoopcs@redhat.com>
+Date: Wed, 12 Jun 2019 15:41:27 +0530
+Subject: [PATCH 325/335] extras/hooks: Install and package newly added post
+ add-brick hook script
+
+Previously a new SELinux hook script was added as a post add-brick
+operation to label new brick paths. But the change failed to install
+and package new script. Therefore making necessary changes to Makefile
+and spec file to get it installed and packaged.
+
+Backport of https://review.gluster.org/c/glusterfs/+/22856
+
+Change-Id: I67b8f4982c2783c34a4bc749fb4387c19a038225
+BUG: 1686800
+Signed-off-by: Anoop C S <anoopcs@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/185856
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/hook-scripts/add-brick/post/Makefile.am | 4 ++--
+ glusterfs.spec.in                              | 1 +
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/extras/hook-scripts/add-brick/post/Makefile.am b/extras/hook-scripts/add-brick/post/Makefile.am
+index bfc0c1c..9b236df 100644
+--- a/extras/hook-scripts/add-brick/post/Makefile.am
++++ b/extras/hook-scripts/add-brick/post/Makefile.am
+@@ -1,6 +1,6 @@
+-EXTRA_DIST = disabled-quota-root-xattr-heal.sh S13create-subdir-mounts.sh
++EXTRA_DIST = disabled-quota-root-xattr-heal.sh S10selinux-label-brick.sh S13create-subdir-mounts.sh
+ 
+ hookdir = $(GLUSTERD_WORKDIR)/hooks/1/add-brick/post/
+ if WITH_SERVER
+-hook_SCRIPTS = disabled-quota-root-xattr-heal.sh S13create-subdir-mounts.sh
++hook_SCRIPTS = disabled-quota-root-xattr-heal.sh S10selinux-label-brick.sh S13create-subdir-mounts.sh
+ endif
+diff --git a/glusterfs.spec.in b/glusterfs.spec.in
+index eeadb65..91180db 100644
+--- a/glusterfs.spec.in
++++ b/glusterfs.spec.in
+@@ -1447,6 +1447,7 @@ exit 0
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick/post
+             %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick/post/disabled-quota-root-xattr-heal.sh
++            %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick/post/S10selinux-label-brick.sh
+             %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick/post/S13create-subdir-mounts.sh
+        %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick/pre
+             %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick/pre/S28Quota-enable-root-xattr-heal.sh
+-- 
+1.8.3.1
+

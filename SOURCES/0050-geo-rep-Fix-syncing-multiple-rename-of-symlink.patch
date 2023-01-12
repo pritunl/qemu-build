@@ -1,0 +1,142 @@
+From 161a039f8088bf8ce7000d8175e3793219525179 Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Thu, 28 Mar 2019 07:17:16 -0400
+Subject: [PATCH 50/52] geo-rep: Fix syncing multiple rename of symlink
+
+Problem:
+Geo-rep fails to sync rename of symlink if it's
+renamed multiple times if creation and rename
+happened successively
+
+Worker crash at slave:
+Traceback (most recent call last):
+  File "/usr/libexec/glusterfs/python/syncdaemon/repce.py",  in worker
+    res = getattr(self.obj, rmeth)(*in_data[2:])
+  File "/usr/libexec/glusterfs/python/syncdaemon/resource.py", in entry_ops
+    [ESTALE, EINVAL, EBUSY])
+  File "/usr/libexec/glusterfs/python/syncdaemon/syncdutils.py", in errno_wrap
+    return call(*arg)
+  File "/usr/libexec/glusterfs/python/syncdaemon/libcxattr.py", in lsetxattr
+    cls.raise_oserr()
+  File "/usr/libexec/glusterfs/python/syncdaemon/libcxattr.py", in raise_oserr
+    raise OSError(errn, os.strerror(errn))
+OSError: [Errno 12] Cannot allocate memory
+
+Geo-rep Behaviour:
+1. SYMLINK doesn't record target path in changelog.
+   So while syncing SYMLINK, readlink is done on
+   master to get target path.
+
+2. Geo-rep will create destination if source is not
+   present while syncing RENAME. Hence while syncing
+   RENAME of SYMLINK, target path is collected from
+   destination.
+
+Cause:
+If symlink is created and renamed multiple times, creation of
+symlink is ignored, as it's no longer present on master at
+that path. While symlink is renamed multiple times at master,
+when syncing first RENAME of SYMLINK, both source and destination
+is not present, hence target path is not known.  In this case,
+while creating destination directly at slave,  regular file
+attributes were encoded into blob instead of symlink,
+causing failure in gfid-access translator while decoding
+blob.
+
+Solution:
+While syncing of RENAME of SYMLINK, when target is not known
+and when src and destination is not present on the master,
+don't create destination. Ignore the rename. It's ok to ignore.
+If it's unliked, it's fine.  If it's renamed to something else,
+it will be synced then.
+
+Backport of:
+> Patch: https://review.gluster.org/22438
+> Change-Id: Ibdfa495513b7c05b5370ab0b89c69a6802338d87
+> BUG: 1693648
+> Signed-off-by: Kotresh HR <khiremat@redhat.com>
+
+Change-Id: Ibdfa495513b7c05b5370ab0b89c69a6802338d87
+fixes: bz#1670429
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/167122
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ geo-replication/syncdaemon/resource.py   | 23 ++++++++++++++---------
+ tests/00-geo-rep/georep-basic-dr-rsync.t |  1 +
+ tests/geo-rep.rc                         | 12 ++++++++++++
+ 3 files changed, 27 insertions(+), 9 deletions(-)
+
+diff --git a/geo-replication/syncdaemon/resource.py b/geo-replication/syncdaemon/resource.py
+index a2d0b16..c290d86 100644
+--- a/geo-replication/syncdaemon/resource.py
++++ b/geo-replication/syncdaemon/resource.py
+@@ -625,15 +625,20 @@ class Server(object):
+                 # exist with different gfid.
+                 if not matching_disk_gfid(gfid, entry):
+                     if e['stat'] and not stat.S_ISDIR(e['stat']['mode']):
+-                        if stat.S_ISLNK(e['stat']['mode']) and \
+-                           e['link'] is not None:
+-                            st1 = lstat(en)
+-                            if isinstance(st1, int):
+-                                (pg, bname) = entry2pb(en)
+-                                blob = entry_pack_symlink(cls, gfid, bname,
+-                                                          e['link'], e['stat'])
+-                            elif not matching_disk_gfid(gfid, en):
+-                                collect_failure(e, EEXIST, uid, gid, True)
++                        if stat.S_ISLNK(e['stat']['mode']):
++                            # src is not present, so don't sync symlink as
++                            # we don't know target. It's ok to ignore. If
++                            # it's unliked, it's fine. If it's renamed to
++                            # something else, it will be synced then.
++                            if e['link'] is not None:
++                                st1 = lstat(en)
++                                if isinstance(st1, int):
++                                    (pg, bname) = entry2pb(en)
++                                    blob = entry_pack_symlink(cls, gfid, bname,
++                                                              e['link'],
++                                                              e['stat'])
++                                elif not matching_disk_gfid(gfid, en):
++                                    collect_failure(e, EEXIST, uid, gid, True)
+                         else:
+                             slink = os.path.join(pfx, gfid)
+                             st = lstat(slink)
+diff --git a/tests/00-geo-rep/georep-basic-dr-rsync.t b/tests/00-geo-rep/georep-basic-dr-rsync.t
+index 4a03930..8b64370 100644
+--- a/tests/00-geo-rep/georep-basic-dr-rsync.t
++++ b/tests/00-geo-rep/georep-basic-dr-rsync.t
+@@ -110,6 +110,7 @@ EXPECT_WITHIN $GEO_REP_TIMEOUT 0 chown_file_ok ${slave_mnt}/hybrid_chown_f1
+ #Check History Crawl.
+ TEST $GEOREP_CLI $master $slave stop
+ TEST create_data "history"
++TEST create_rename_symlink_case
+ TEST $GEOREP_CLI $master $slave start
+ EXPECT_WITHIN $GEO_REP_TIMEOUT  2 check_status_num_rows "Active"
+ EXPECT_WITHIN $GEO_REP_TIMEOUT  2 check_status_num_rows "Passive"
+diff --git a/tests/geo-rep.rc b/tests/geo-rep.rc
+index 396b4c4..d723129 100644
+--- a/tests/geo-rep.rc
++++ b/tests/geo-rep.rc
+@@ -19,6 +19,18 @@ function check_common_secret_file()
+     echo $?
+ }
+ 
++function create_rename_symlink_case()
++{
++    mkdir ${mastermnt}/MUL_REN_SYMLINK
++    cd ${mastermnt}/MUL_REN_SYMLINK
++    mkdir sym_dir1
++    ln -s "sym_dir1" sym1
++    mv sym1 sym2
++    mv sym2 sym3
++    mv sym3 sym4
++    cd -
++}
++
+ function create_data()
+ {
+     prefix=$1
+-- 
+1.8.3.1
+

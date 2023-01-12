@@ -1,0 +1,37 @@
+From 6895b6c67e9c29af3f966b4d9ee5cb40da763d24 Mon Sep 17 00:00:00 2001
+From: Mohit Agrawal <moagrawa@redhat.com>
+Date: Wed, 14 Apr 2021 12:38:45 +0530
+Subject: [PATCH 540/540] extras: Disable write-behind for group samba.
+
+when write-behind is enabled with Samba it could be a
+source of data corruption. The translator, while
+processing a write call, immediately returns success but continues
+writing the data to the server in the background. This can cause data
+corruption when two clients relying on Samba to provide data consistency
+are operating on the same file.
+
+> fixes: https://github.com/gluster/glusterfs/issues/2329
+
+Change-Id: I5265056ff315a5f3cd97ea11b18db0831b1b901d
+Solution: Disable write-behind for samba group
+BUG: 1948547
+Signed-off-by: Mohit Agrawal <moagrawa@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/235876
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ extras/group-samba | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/extras/group-samba b/extras/group-samba
+index eeee6e0..9611a1f 100644
+--- a/extras/group-samba
++++ b/extras/group-samba
+@@ -9,3 +9,4 @@ performance.nl-cache=on
+ performance.nl-cache-timeout=600
+ performance.readdir-ahead=on
+ performance.parallel-readdir=on
++performance.write-behind=off
+-- 
+1.8.3.1
+

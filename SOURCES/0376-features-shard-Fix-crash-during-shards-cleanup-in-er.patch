@@ -1,0 +1,70 @@
+From 341d75642ecc4e27bc6fecb56eb98a0ba03d8544 Mon Sep 17 00:00:00 2001
+From: Krutika Dhananjay <kdhananj@redhat.com>
+Date: Mon, 23 Mar 2020 11:47:10 +0530
+Subject: [PATCH 376/379] features/shard: Fix crash during shards cleanup in
+ error cases
+
+Backport of:
+> https://review.gluster.org/c/glusterfs/+/24244
+> Change-Id: I0b49f2b58becd0d8874b3d4b14ff8d92a89d02d5
+> Fixes: #1127
+> Signed-off-by: Krutika Dhananjay <kdhananj@redhat.com>
+
+A crash is seen during a reattempt to clean up shards in background
+upon remount. And this happens even on remount (which means a remount
+is no workaround for the crash).
+
+In such a situation, the in-memory base inode object will not be
+existent (new process, non-existent base shard).
+So local->resolver_base_inode will be NULL.
+
+In the event of an error (in this case, of space running out), the
+process would crash at the time of logging the error in the following line -
+
+        gf_msg(this->name, GF_LOG_ERROR, local->op_errno, SHARD_MSG_FOP_FAILED,
+               "failed to delete shards of %s",
+               uuid_utoa(local->resolver_base_inode->gfid));
+
+Fixed that by using local->base_gfid as the source of gfid when
+local->resolver_base_inode is NULL.
+
+Change-Id: I0b49f2b58becd0d8874b3d4b14ff8d92a89d02d5
+BUG: 1836233
+Signed-off-by: Krutika Dhananjay <kdhananj@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/200689
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/features/shard/src/shard.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/xlators/features/shard/src/shard.c b/xlators/features/shard/src/shard.c
+index 9ed597b..ee38ed2 100644
+--- a/xlators/features/shard/src/shard.c
++++ b/xlators/features/shard/src/shard.c
+@@ -2729,13 +2729,20 @@ int shard_unlink_shards_do(call_frame_t *frame, xlator_t *this, inode_t *inode);
+ int shard_post_lookup_shards_unlink_handler(call_frame_t *frame,
+                                             xlator_t *this) {
+   shard_local_t *local = NULL;
++    uuid_t gfid = {
++        0,
++    };
+ 
+   local = frame->local;
+ 
++    if (local->resolver_base_inode)
++        gf_uuid_copy(gfid, local->resolver_base_inode->gfid);
++    else
++        gf_uuid_copy(gfid, local->base_gfid);
++
+   if ((local->op_ret < 0) && (local->op_errno != ENOENT)) {
+     gf_msg(this->name, GF_LOG_ERROR, local->op_errno, SHARD_MSG_FOP_FAILED,
+-           "failed to delete shards of %s",
+-           uuid_utoa(local->resolver_base_inode->gfid));
++           "failed to delete shards of %s", uuid_utoa(gfid));
+     return 0;
+   }
+   local->op_ret = 0;
+-- 
+1.8.3.1
+

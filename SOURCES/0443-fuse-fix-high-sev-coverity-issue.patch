@@ -1,0 +1,55 @@
+From 3ac3312d63b9dc3c15cd8765ab8b7c601b007500 Mon Sep 17 00:00:00 2001
+From: Sunny Kumar <sunkumar@redhat.com>
+Date: Tue, 19 Mar 2019 22:51:14 +0530
+Subject: [PATCH 443/449] fuse : fix high sev coverity issue
+
+This patch fixed coverity issue in fuse-bridge.c.
+
+CID : 1398630 : Resource leak
+CID : 1399757 : Uninitialized pointer read
+
+Upstream patch https://review.gluster.org/c/glusterfs/+/22382
+> updates: bz#789278
+>
+> Change-Id: I69f8591400ee56a5d215eeac443a8e3d7777db27
+> Signed-off-by: Sunny Kumar <sunkumar@redhat.com>
+
+BUG: 1787310
+Change-Id: Ib2c9af25019ee57131b3d384fc4b557437e75d3e
+Signed-off-by: Csaba Henk <csaba@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202759
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ xlators/mount/fuse/src/fuse-bridge.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/xlators/mount/fuse/src/fuse-bridge.c b/xlators/mount/fuse/src/fuse-bridge.c
+index cfad2b4..d17320b 100644
+--- a/xlators/mount/fuse/src/fuse-bridge.c
++++ b/xlators/mount/fuse/src/fuse-bridge.c
+@@ -4174,6 +4174,7 @@ fuse_setxattr(xlator_t *this, fuse_in_header_t *finh, void *msg,
+     if (ret < 0) {
+         op_errno = -ret;
+         GF_FREE(dict_value);
++        GF_FREE(newkey);
+         goto done;
+     }
+ 
+@@ -5963,7 +5964,12 @@ fuse_thread_proc(void *data)
+     ssize_t res = 0;
+     struct iobuf *iobuf = NULL;
+     fuse_in_header_t *finh = NULL;
+-    struct iovec iov_in[2];
++    struct iovec iov_in[2] = {
++        {
++            0,
++        },
++    };
++
+     void *msg = NULL;
+     /* we need 512 extra buffer size for BATCH_FORGET fop. By tests, it is
+        found to be reduces 'REALLOC()' in the loop */
+-- 
+1.8.3.1
+

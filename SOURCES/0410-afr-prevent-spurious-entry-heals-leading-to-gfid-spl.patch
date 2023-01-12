@@ -1,0 +1,249 @@
+From 2b2eb846c49caba13ab92ec66af20292e7780fc1 Mon Sep 17 00:00:00 2001
+From: Ravishankar N <ravishankar@redhat.com>
+Date: Tue, 11 Feb 2020 14:34:48 +0530
+Subject: [PATCH 410/449] afr: prevent spurious entry heals leading to gfid
+ split-brain
+
+Problem:
+In a hyperconverged setup with granular-entry-heal enabled, if a file is
+recreated while one of the bricks is down, and an index heal is triggered
+(with the brick still down), entry-self heal was doing a spurious heal
+with just the 2 good bricks. It was doing a post-op leading to removal
+of the filename from .glusterfs/indices/entry-changes as well as
+erroneous setting of afr xattrs on the parent. When the brick came up,
+the xattrs were cleared, resulting in the renamed file not getting
+healed and leading to gfid split-brain and EIO on the mount.
+
+Fix:
+Proceed with entry heal only when shd can connect to all bricks of the replica,
+just like in data and metadata heal.
+
+BUG: 1804164
+
+> Upstream patch:https://review.gluster.org/#/c/glusterfs/+/24109/
+> fixes: bz#1801624
+> Change-Id: I916ae26ad1fabf259bc6362da52d433b7223b17e
+> Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+
+Change-Id: I23f57e543cff1e3f35eb8dbc60a2babfae6838c7
+Signed-off-by: Ravishankar N <ravishankar@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202395
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ .../bug-1433571-undo-pending-only-on-up-bricks.t   | 18 ++-----
+ tests/bugs/replicate/bug-1801624-entry-heal.t      | 58 ++++++++++++++++++++++
+ xlators/cluster/afr/src/afr-common.c               |  4 +-
+ xlators/cluster/afr/src/afr-self-heal-common.c     |  8 +--
+ xlators/cluster/afr/src/afr-self-heal-entry.c      |  6 +--
+ xlators/cluster/afr/src/afr-self-heal-name.c       |  2 +-
+ xlators/cluster/afr/src/afr-self-heal.h            |  2 -
+ 7 files changed, 69 insertions(+), 29 deletions(-)
+ create mode 100644 tests/bugs/replicate/bug-1801624-entry-heal.t
+
+diff --git a/tests/bugs/replicate/bug-1433571-undo-pending-only-on-up-bricks.t b/tests/bugs/replicate/bug-1433571-undo-pending-only-on-up-bricks.t
+index 0767f47..10ce013 100644
+--- a/tests/bugs/replicate/bug-1433571-undo-pending-only-on-up-bricks.t
++++ b/tests/bugs/replicate/bug-1433571-undo-pending-only-on-up-bricks.t
+@@ -49,25 +49,15 @@ TEST $CLI volume start $V0 force
+ EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 0
+ EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 2
+ 
+-#Kill brick 0 and turn on the client side heal and do ls to trigger the heal.
+-#The pending xattrs on bricks 1 & 2 should have pending entry on brick 0.
+-TEST kill_brick $V0 $H0 $B0/${V0}0
++# We were killing one brick and checking that entry heal does not reset the
++# pending xattrs for the down brick. Now that we need all bricks to be up for
++# entry heal, I'm removing that test from the .t
++
+ TEST $CLI volume set $V0 cluster.data-self-heal on
+ TEST $CLI volume set $V0 cluster.metadata-self-heal on
+ TEST $CLI volume set $V0 cluster.entry-self-heal on
+ 
+ TEST ls $M0
+-EXPECT "000000000000000000000001" get_hex_xattr trusted.afr.$V0-client-0 $B0/${V0}1
+-EXPECT "000000000000000000000001" get_hex_xattr trusted.afr.$V0-client-0 $B0/${V0}2
+-EXPECT_WITHIN $HEAL_TIMEOUT "000000000000000000000000" get_hex_xattr trusted.afr.$V0-client-2 $B0/${V0}1
+-EXPECT_WITHIN $HEAL_TIMEOUT "000000000000000000000000" get_hex_xattr trusted.afr.$V0-client-1 $B0/${V0}2
+-
+-#Bring back all the bricks and trigger the heal again by doing ls. Now the
+-#pending xattrs on all the bricks should be 0.
+-TEST $CLI volume start $V0 force
+-EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status $V0 0
+-TEST ls $M0
+-
+ TEST cat $M0/f1
+ TEST cat $M0/f2
+ TEST cat $M0/f3
+diff --git a/tests/bugs/replicate/bug-1801624-entry-heal.t b/tests/bugs/replicate/bug-1801624-entry-heal.t
+new file mode 100644
+index 0000000..94b4651
+--- /dev/null
++++ b/tests/bugs/replicate/bug-1801624-entry-heal.t
+@@ -0,0 +1,58 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++cleanup;
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 replica 3 $H0:$B0/brick{0,1,2}
++TEST $CLI volume set $V0 heal-timeout 5
++TEST $CLI volume start $V0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 0
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 1
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 2
++TEST $CLI volume heal $V0 granular-entry-heal enable
++
++TEST glusterfs --volfile-id=/$V0 --volfile-server=$H0 $M0 --attribute-timeout=0 --entry-timeout=0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 2
++echo "Data">$M0/FILE
++ret=$?
++TEST [ $ret -eq 0 ]
++
++# Re-create the file when a brick is down.
++TEST kill_brick $V0 $H0 $B0/brick1
++TEST rm $M0/FILE
++echo "New Data">$M0/FILE
++ret=$?
++TEST [ $ret -eq 0 ]
++EXPECT_WITHIN $HEAL_TIMEOUT "4" get_pending_heal_count $V0
++
++# Launching index heal must not reset parent dir afr xattrs or remove granular entry indices.
++$CLI volume heal $V0 # CLI will fail but heal is launched anyway.
++TEST sleep 5 # give index heal a chance to do one run.
++brick0_pending=$(get_hex_xattr trusted.afr.$V0-client-1 $B0/brick0/)
++brick2_pending=$(get_hex_xattr trusted.afr.$V0-client-1 $B0/brick2/)
++TEST [ $brick0_pending -eq "000000000000000000000002" ]
++TEST [ $brick2_pending -eq "000000000000000000000002" ]
++EXPECT "FILE" ls $B0/brick0/.glusterfs/indices/entry-changes/00000000-0000-0000-0000-000000000001/
++EXPECT "FILE" ls $B0/brick2/.glusterfs/indices/entry-changes/00000000-0000-0000-0000-000000000001/
++
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" brick_up_status $V0 $H0 $B0/brick1
++EXPECT_WITHIN $CHILD_UP_TIMEOUT "1" afr_child_up_status_in_shd $V0 1
++$CLI volume heal $V0
++EXPECT_WITHIN $HEAL_TIMEOUT "0" get_pending_heal_count $V0
++
++# No gfid-split-brain (i.e. EIO) must be seen. Try on fresh mount to avoid cached values.
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
++TEST glusterfs --volfile-id=/$V0 --volfile-server=$H0 $M0 --attribute-timeout=0 --entry-timeout=0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 0
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT "1" afr_child_up_status $V0 2
++TEST cat $M0/FILE
++
++EXPECT_WITHIN $UMOUNT_TIMEOUT "Y" force_umount $M0
++cleanup;
+diff --git a/xlators/cluster/afr/src/afr-common.c b/xlators/cluster/afr/src/afr-common.c
+index 32127c6..5806556 100644
+--- a/xlators/cluster/afr/src/afr-common.c
++++ b/xlators/cluster/afr/src/afr-common.c
+@@ -6629,7 +6629,7 @@ afr_fav_child_reset_sink_xattrs(void *opaque)
+         ret = afr_selfheal_inodelk(heal_frame, this, inode, this->name, 0, 0,
+                                    locked_on);
+         {
+-            if (ret < AFR_SH_MIN_PARTICIPANTS)
++            if (ret < priv->child_count)
+                 goto data_unlock;
+             ret = __afr_selfheal_data_prepare(
+                 heal_frame, this, inode, locked_on, sources, sinks,
+@@ -6646,7 +6646,7 @@ afr_fav_child_reset_sink_xattrs(void *opaque)
+         ret = afr_selfheal_inodelk(heal_frame, this, inode, this->name,
+                                    LLONG_MAX - 1, 0, locked_on);
+         {
+-            if (ret < AFR_SH_MIN_PARTICIPANTS)
++            if (ret < priv->child_count)
+                 goto mdata_unlock;
+             ret = __afr_selfheal_metadata_prepare(
+                 heal_frame, this, inode, locked_on, sources, sinks,
+diff --git a/xlators/cluster/afr/src/afr-self-heal-common.c b/xlators/cluster/afr/src/afr-self-heal-common.c
+index 81ef38a..ce1ea50 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-common.c
++++ b/xlators/cluster/afr/src/afr-self-heal-common.c
+@@ -1575,7 +1575,6 @@ afr_selfheal_find_direction(call_frame_t *frame, xlator_t *this,
+     char *accused = NULL;      /* Accused others without any self-accusal */
+     char *pending = NULL;      /* Have pending operations on others */
+     char *self_accused = NULL; /* Accused itself */
+-    int min_participants = -1;
+ 
+     priv = this->private;
+ 
+@@ -1599,12 +1598,7 @@ afr_selfheal_find_direction(call_frame_t *frame, xlator_t *this,
+         }
+     }
+ 
+-    if (type == AFR_DATA_TRANSACTION || type == AFR_METADATA_TRANSACTION) {
+-        min_participants = priv->child_count;
+-    } else {
+-        min_participants = AFR_SH_MIN_PARTICIPANTS;
+-    }
+-    if (afr_success_count(replies, priv->child_count) < min_participants) {
++    if (afr_success_count(replies, priv->child_count) < priv->child_count) {
+         /* Treat this just like locks not being acquired */
+         return -ENOTCONN;
+     }
+diff --git a/xlators/cluster/afr/src/afr-self-heal-entry.c b/xlators/cluster/afr/src/afr-self-heal-entry.c
+index 3ce882e..40be898 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-entry.c
++++ b/xlators/cluster/afr/src/afr-self-heal-entry.c
+@@ -597,7 +597,7 @@ afr_selfheal_entry_dirent(call_frame_t *frame, xlator_t *this, fd_t *fd,
+     ret = afr_selfheal_entrylk(frame, this, fd->inode, this->name, NULL,
+                                locked_on);
+     {
+-        if (ret < AFR_SH_MIN_PARTICIPANTS) {
++        if (ret < priv->child_count) {
+             gf_msg_debug(this->name, 0,
+                          "%s: Skipping "
+                          "entry self-heal as only %d sub-volumes "
+@@ -991,7 +991,7 @@ __afr_selfheal_entry(call_frame_t *frame, xlator_t *this, fd_t *fd,
+     ret = afr_selfheal_entrylk(frame, this, fd->inode, this->name, NULL,
+                                data_lock);
+     {
+-        if (ret < AFR_SH_MIN_PARTICIPANTS) {
++        if (ret < priv->child_count) {
+             gf_msg_debug(this->name, 0,
+                          "%s: Skipping "
+                          "entry self-heal as only %d sub-volumes could "
+@@ -1115,7 +1115,7 @@ afr_selfheal_entry(call_frame_t *frame, xlator_t *this, inode_t *inode)
+     ret = afr_selfheal_tie_breaker_entrylk(frame, this, inode, priv->sh_domain,
+                                            NULL, locked_on);
+     {
+-        if (ret < AFR_SH_MIN_PARTICIPANTS) {
++        if (ret < priv->child_count) {
+             gf_msg_debug(this->name, 0,
+                          "%s: Skipping "
+                          "entry self-heal as only %d sub-volumes could "
+diff --git a/xlators/cluster/afr/src/afr-self-heal-name.c b/xlators/cluster/afr/src/afr-self-heal-name.c
+index 36640b5..7d4f208 100644
+--- a/xlators/cluster/afr/src/afr-self-heal-name.c
++++ b/xlators/cluster/afr/src/afr-self-heal-name.c
+@@ -514,7 +514,7 @@ afr_selfheal_name_do(call_frame_t *frame, xlator_t *this, inode_t *parent,
+     ret = afr_selfheal_entrylk(frame, this, parent, this->name, bname,
+                                locked_on);
+     {
+-        if (ret < AFR_SH_MIN_PARTICIPANTS) {
++        if (ret < priv->child_count) {
+             ret = -ENOTCONN;
+             goto unlock;
+         }
+diff --git a/xlators/cluster/afr/src/afr-self-heal.h b/xlators/cluster/afr/src/afr-self-heal.h
+index 6555ec5..8234cec 100644
+--- a/xlators/cluster/afr/src/afr-self-heal.h
++++ b/xlators/cluster/afr/src/afr-self-heal.h
+@@ -11,8 +11,6 @@
+ #ifndef _AFR_SELFHEAL_H
+ #define _AFR_SELFHEAL_H
+ 
+-#define AFR_SH_MIN_PARTICIPANTS 2
+-
+ /* Perform fop on all UP subvolumes and wait for all callbacks to return */
+ 
+ #define AFR_ONALL(frame, rfn, fop, args...)                                    \
+-- 
+1.8.3.1
+

@@ -1,0 +1,179 @@
+From 5946a6ec18976c0f52162fe0f47e9b5171af87ec Mon Sep 17 00:00:00 2001
+From: Soumya Koduri <skoduri@redhat.com>
+Date: Mon, 6 Apr 2020 12:36:44 +0530
+Subject: [PATCH 503/511] gfapi: Suspend synctasks instead of blocking them
+
+There are certain conditions which blocks the current
+execution thread (like waiting on mutex lock or condition
+variable or I/O response). In such cases, if it is a
+synctask thread, we should suspend the task instead
+of blocking it (like done in SYNCOP using synctask_yield)
+
+This is to avoid deadlock like the one mentioned below -
+
+1) synctaskA sets fs->migration_in_progress to 1 and
+   does I/O (LOOKUP)
+2) Other synctask threads wait for fs->migration_in_progress
+  to be reset to 0 by synctaskA and hence blocked
+3) but synctaskA cannot resume as all synctask threads are blocked
+   on (2).
+
+Note: this same approach is already used by few other components
+like syncbarrier etc.
+
+>Change-Id: If90f870d663bb242c702a5b86ac52eeda67c6f0d
+>Fixes: #1146
+>Signed-off-by: Soumya Koduri <skoduri@redhat.com>
+Upstream patch: https://review.gluster.org/c/glusterfs/+/24276
+
+BUG: 1779238
+Change-Id: If90f870d663bb242c702a5b86ac52eeda67c6f0d
+Signed-off-by: nik-redhat <nladha@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/221081
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Soumya Koduri <skoduri@redhat.com>
+---
+ api/src/glfs-internal.h | 34 ++++++++++++++++++++++++++++++++--
+ api/src/glfs-resolve.c  |  9 +++++++++
+ api/src/glfs.c          |  9 +++++++++
+ 3 files changed, 50 insertions(+), 2 deletions(-)
+
+diff --git a/api/src/glfs-internal.h b/api/src/glfs-internal.h
+index 55401b2..15cf0ee 100644
+--- a/api/src/glfs-internal.h
++++ b/api/src/glfs-internal.h
+@@ -16,6 +16,7 @@
+ #include <glusterfs/upcall-utils.h>
+ #include "glfs-handles.h"
+ #include <glusterfs/refcount.h>
++#include <glusterfs/syncop.h>
+ 
+ #define GLFS_SYMLINK_MAX_FOLLOW 2048
+ 
+@@ -207,6 +208,7 @@ struct glfs {
+     glfs_upcall_cbk up_cbk; /* upcall cbk function to be registered */
+     void *up_data;          /* Opaque data provided by application
+                              * during upcall registration */
++    struct list_head waitq; /* waiting synctasks */
+ };
+ 
+ /* This enum is used to maintain the state of glfd. In case of async fops
+@@ -442,6 +444,34 @@ glfs_process_upcall_event(struct glfs *fs, void *data)
+         THIS = glfd->fd->inode->table->xl->ctx->master;                        \
+     } while (0)
+ 
++#define __GLFS_LOCK_WAIT(fs)                                                   \
++    do {                                                                       \
++        struct synctask *task = NULL;                                          \
++                                                                               \
++        task = synctask_get();                                                 \
++                                                                               \
++        if (task) {                                                            \
++            list_add_tail(&task->waitq, &fs->waitq);                           \
++            pthread_mutex_unlock(&fs->mutex);                                  \
++            synctask_yield(task, NULL);                                              \
++            pthread_mutex_lock(&fs->mutex);                                    \
++        } else {                                                               \
++            /* non-synctask */                                                 \
++            pthread_cond_wait(&fs->cond, &fs->mutex);                          \
++        }                                                                      \
++    } while (0)
++
++#define __GLFS_SYNCTASK_WAKE(fs)                                               \
++    do {                                                                       \
++        struct synctask *waittask = NULL;                                      \
++                                                                               \
++        while (!list_empty(&fs->waitq)) {                                      \
++            waittask = list_entry(fs->waitq.next, struct synctask, waitq);     \
++            list_del_init(&waittask->waitq);                                   \
++            synctask_wake(waittask);                                           \
++        }                                                                      \
++    } while (0)
++
+ /*
+   By default all lock attempts from user context must
+   use glfs_lock() and glfs_unlock(). This allows
+@@ -466,10 +496,10 @@ glfs_lock(struct glfs *fs, gf_boolean_t wait_for_migration)
+     pthread_mutex_lock(&fs->mutex);
+ 
+     while (!fs->init)
+-        pthread_cond_wait(&fs->cond, &fs->mutex);
++        __GLFS_LOCK_WAIT(fs);
+ 
+     while (wait_for_migration && fs->migration_in_progress)
+-        pthread_cond_wait(&fs->cond, &fs->mutex);
++        __GLFS_LOCK_WAIT(fs);
+ 
+     return 0;
+ }
+diff --git a/api/src/glfs-resolve.c b/api/src/glfs-resolve.c
+index 062b7dc..58b6ace 100644
+--- a/api/src/glfs-resolve.c
++++ b/api/src/glfs-resolve.c
+@@ -65,6 +65,9 @@ __glfs_first_lookup(struct glfs *fs, xlator_t *subvol)
+     fs->migration_in_progress = 0;
+     pthread_cond_broadcast(&fs->cond);
+ 
++    /* wake up other waiting tasks */
++    __GLFS_SYNCTASK_WAKE(fs);
++
+     return ret;
+ }
+ 
+@@ -154,6 +157,9 @@ __glfs_refresh_inode(struct glfs *fs, xlator_t *subvol, inode_t *inode,
+     fs->migration_in_progress = 0;
+     pthread_cond_broadcast(&fs->cond);
+ 
++    /* wake up other waiting tasks */
++    __GLFS_SYNCTASK_WAKE(fs);
++
+     return newinode;
+ }
+ 
+@@ -841,6 +847,9 @@ __glfs_migrate_fd(struct glfs *fs, xlator_t *newsubvol, struct glfs_fd *glfd)
+     fs->migration_in_progress = 0;
+     pthread_cond_broadcast(&fs->cond);
+ 
++    /* wake up other waiting tasks */
++    __GLFS_SYNCTASK_WAKE(fs);
++
+     return newfd;
+ }
+ 
+diff --git a/api/src/glfs.c b/api/src/glfs.c
+index f36616d..ae994fa 100644
+--- a/api/src/glfs.c
++++ b/api/src/glfs.c
+@@ -740,6 +740,7 @@ glfs_new_fs(const char *volname)
+ 
+     INIT_LIST_HEAD(&fs->openfds);
+     INIT_LIST_HEAD(&fs->upcall_list);
++    INIT_LIST_HEAD(&fs->waitq);
+ 
+     PTHREAD_MUTEX_INIT(&fs->mutex, NULL, fs->pthread_flags, GLFS_INIT_MUTEX,
+                        err);
+@@ -1228,6 +1229,7 @@ pub_glfs_fini(struct glfs *fs)
+     call_pool_t *call_pool = NULL;
+     int fs_init = 0;
+     int err = -1;
++    struct synctask *waittask = NULL;
+ 
+     DECLARE_OLD_THIS;
+ 
+@@ -1249,6 +1251,13 @@ pub_glfs_fini(struct glfs *fs)
+ 
+     call_pool = fs->ctx->pool;
+ 
++    /* Wake up any suspended synctasks */
++    while (!list_empty(&fs->waitq)) {
++        waittask = list_entry(fs->waitq.next, struct synctask, waitq);
++        list_del_init(&waittask->waitq);
++        synctask_wake(waittask);
++    }
++
+     while (countdown--) {
+         /* give some time for background frames to finish */
+         pthread_mutex_lock(&fs->mutex);
+-- 
+1.8.3.1
+

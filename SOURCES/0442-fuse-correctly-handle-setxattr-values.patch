@@ -1,0 +1,139 @@
+From 56c8ef4a64506c64aeb95d5a2c38d7107f90ac3a Mon Sep 17 00:00:00 2001
+From: Xavi Hernandez <xhernandez@redhat.com>
+Date: Tue, 5 Feb 2019 16:57:52 +0100
+Subject: [PATCH 442/449] fuse: correctly handle setxattr values
+
+The setxattr function receives a pointer to raw data, which may not be
+null-terminated. When this data needs to be interpreted as a string, an
+explicit null termination needs to be added before using the value.
+
+Upstream patch https://review.gluster.org/#/c/glusterfs/+/22157
+> Change-Id: Id110f9b215b22786da5782adec9449ce38d0d563
+> updates: bz#1193929
+> Signed-off-by: Xavi Hernandez <xhernandez@redhat.com>
+
+Note: this change is not addressing the issue of bz 1787310,
+indeed it is prerequisite for other changes that do.
+
+BUG: 1787310
+Change-Id: I56417b130eb2a1f388108456c905a577eb658793
+Signed-off-by: Csaba Henk <csaba@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/202758
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ libglusterfs/src/glusterfs/xlator.h  |  2 +-
+ libglusterfs/src/xlator.c            | 28 +++++++++++++++++++++++++---
+ xlators/mount/fuse/src/fuse-bridge.c | 20 ++++++++++++++++----
+ 3 files changed, 42 insertions(+), 8 deletions(-)
+
+diff --git a/libglusterfs/src/glusterfs/xlator.h b/libglusterfs/src/glusterfs/xlator.h
+index db04c4d..8650ccc 100644
+--- a/libglusterfs/src/glusterfs/xlator.h
++++ b/libglusterfs/src/glusterfs/xlator.h
+@@ -1043,7 +1043,7 @@ xlator_mem_acct_init(xlator_t *xl, int num_types);
+ void
+ xlator_mem_acct_unref(struct mem_acct *mem_acct);
+ int
+-is_gf_log_command(xlator_t *trans, const char *name, char *value);
++is_gf_log_command(xlator_t *trans, const char *name, char *value, size_t size);
+ int
+ glusterd_check_log_level(const char *value);
+ int
+diff --git a/libglusterfs/src/xlator.c b/libglusterfs/src/xlator.c
+index 6bd4f09..108b96a 100644
+--- a/libglusterfs/src/xlator.c
++++ b/libglusterfs/src/xlator.c
+@@ -1278,8 +1278,21 @@ xlator_destroy(xlator_t *xl)
+     return 0;
+ }
+ 
++static int32_t
++gf_bin_to_string(char *dst, size_t size, void *src, size_t len)
++{
++    if (len >= size) {
++        return EINVAL;
++    }
++
++    memcpy(dst, src, len);
++    dst[len] = 0;
++
++    return 0;
++}
++
+ int
+-is_gf_log_command(xlator_t *this, const char *name, char *value)
++is_gf_log_command(xlator_t *this, const char *name, char *value, size_t size)
+ {
+     xlator_t *trav = NULL;
+     char key[1024] = {
+@@ -1291,7 +1304,11 @@ is_gf_log_command(xlator_t *this, const char *name, char *value)
+     glusterfs_ctx_t *ctx = NULL;
+ 
+     if (!strcmp("trusted.glusterfs.syslog", name)) {
+-        ret = gf_string2boolean(value, &syslog_flag);
++        ret = gf_bin_to_string(key, sizeof(key), value, size);
++        if (ret != 0) {
++            goto out;
++        }
++        ret = gf_string2boolean(key, &syslog_flag);
+         if (ret) {
+             ret = EOPNOTSUPP;
+             goto out;
+@@ -1307,7 +1324,12 @@ is_gf_log_command(xlator_t *this, const char *name, char *value)
+     if (fnmatch("trusted.glusterfs*set-log-level", name, FNM_NOESCAPE))
+         goto out;
+ 
+-    log_level = glusterd_check_log_level(value);
++    ret = gf_bin_to_string(key, sizeof(key), value, size);
++    if (ret != 0) {
++        goto out;
++    }
++
++    log_level = glusterd_check_log_level(key);
+     if (log_level == -1) {
+         ret = EOPNOTSUPP;
+         goto out;
+diff --git a/xlators/mount/fuse/src/fuse-bridge.c b/xlators/mount/fuse/src/fuse-bridge.c
+index 2e7584c..cfad2b4 100644
+--- a/xlators/mount/fuse/src/fuse-bridge.c
++++ b/xlators/mount/fuse/src/fuse-bridge.c
+@@ -4112,7 +4112,7 @@ fuse_setxattr(xlator_t *this, fuse_in_header_t *finh, void *msg,
+ 
+     /* Check if the command is for changing the log
+        level of process or specific xlator */
+-    ret = is_gf_log_command(this, name, value);
++    ret = is_gf_log_command(this, name, value, fsi->size);
+     if (ret >= 0) {
+         op_errno = ret;
+         goto done;
+@@ -4159,11 +4159,23 @@ fuse_setxattr(xlator_t *this, fuse_in_header_t *finh, void *msg,
+          * fixups to make sure that's the case.  To avoid nasty
+          * surprises, allocate an extra byte and add a NUL here.
+          */
+-        dict_value = memdup(value, fsi->size + 1);
++        dict_value = GF_MALLOC(fsi->size + 1, gf_common_mt_char);
++        if (dict_value == NULL) {
++            gf_log("glusterfs-fuse", GF_LOG_ERROR,
++                   "%" PRIu64 ": SETXATTR value allocation failed",
++                   finh->unique);
++            op_errno = ENOMEM;
++            goto done;
++        }
++        memcpy(dict_value, value, fsi->size);
+         dict_value[fsi->size] = '\0';
+     }
+-    dict_set(state->xattr, newkey,
+-             data_from_dynptr((void *)dict_value, fsi->size));
++    ret = dict_set_dynptr(state->xattr, newkey, dict_value, fsi->size);
++    if (ret < 0) {
++        op_errno = -ret;
++        GF_FREE(dict_value);
++        goto done;
++    }
+ 
+     state->flags = fsi->flags;
+     state->name = newkey;
+-- 
+1.8.3.1
+

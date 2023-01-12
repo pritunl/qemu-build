@@ -1,0 +1,52 @@
+From 4a04e1b5540921db22f1894f71eb30342127192d Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Tue, 12 Nov 2019 21:53:20 +0530
+Subject: [PATCH 315/316] geo-rep: Fix py2/py3 compatibility in repce
+
+Geo-rep fails to start on python2 only machine like
+centos6. It fails with "ImportError no module named _io".
+This patch fixes the same.
+
+Backport of:
+ > Patch: https://review.gluster.org/23702
+ > fixes: bz#1771577
+ > Change-Id: I8228458a853a230546f9faf29a0e9e0f23b3efec
+ > Signed-off-by: Kotresh HR <khiremat@redhat.com>
+
+BUG: 1771524
+Change-Id: I8228458a853a230546f9faf29a0e9e0f23b3efec
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/185377
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunny Kumar <sunkumar@redhat.com>
+---
+ geo-replication/syncdaemon/repce.py | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/geo-replication/syncdaemon/repce.py b/geo-replication/syncdaemon/repce.py
+index 6065b82..c622afa 100644
+--- a/geo-replication/syncdaemon/repce.py
++++ b/geo-replication/syncdaemon/repce.py
+@@ -8,7 +8,6 @@
+ # cases as published by the Free Software Foundation.
+ #
+ 
+-import _io
+ import os
+ import sys
+ import time
+@@ -58,9 +57,9 @@ def recv(inf):
+     """load an object from input stream
+     python2 and python3 compatibility, inf is sys.stdin
+     and is opened as text stream by default. Hence using the
+-    buffer attribute
++    buffer attribute in python3
+     """
+-    if isinstance(inf, _io.TextIOWrapper):
++    if hasattr(inf, "buffer"):
+         return pickle.load(inf.buffer)
+     else:
+         return pickle.load(inf)
+-- 
+1.8.3.1
+

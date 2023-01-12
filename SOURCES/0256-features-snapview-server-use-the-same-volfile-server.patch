@@ -1,0 +1,117 @@
+From f90df1167bc70c634ba33c181232321da6770709 Mon Sep 17 00:00:00 2001
+From: Raghavendra Bhat <raghavendra@redhat.com>
+Date: Tue, 25 Jun 2019 10:51:33 -0400
+Subject: [PATCH 256/261] features/snapview-server: use the same volfile server
+ for gfapi options
+
+snapview server xlator makes use of "localhost" as the volfile server while
+initing the new glfs instance to talk to a snapshot. While localhost is fine,
+better use the same volfile server that was used to start the snapshot
+daemon containing the snapview-server xlator.
+
+Upstream Patch:
+>Change-Id: I4485d39b0e3d066f481adc6958ace53ea33237f7
+>fixes: bz#1725211
+>Signed-off-by: Raghavendra Bhat <raghavendra@redhat.com>
+> patch: https://review.gluster.org/#/c/glusterfs/+/22974/
+
+BUG: 1722757
+Change-Id: I4485d39b0e3d066f481adc6958ace53ea33237f7
+Signed-off-by: Raghavendra Bhat <raghavendra@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/175984
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Sunil Kumar Heggodu Gopala Acharya <sheggodu@redhat.com>
+---
+ .../snapview-server/src/snapview-server-helpers.c  | 44 ++++++++++++++++++++--
+ .../snapview-server/src/snapview-server-messages.h |  2 +-
+ 2 files changed, 42 insertions(+), 4 deletions(-)
+
+diff --git a/xlators/features/snapview-server/src/snapview-server-helpers.c b/xlators/features/snapview-server/src/snapview-server-helpers.c
+index 5514a54..62c1dda 100644
+--- a/xlators/features/snapview-server/src/snapview-server-helpers.c
++++ b/xlators/features/snapview-server/src/snapview-server-helpers.c
+@@ -476,6 +476,7 @@ __svs_initialise_snapshot_volume(xlator_t *this, const char *name,
+     char logfile[PATH_MAX] = {
+         0,
+     };
++    char *volfile_server = NULL;
+ 
+     GF_VALIDATE_OR_GOTO("snapview-server", this, out);
+     GF_VALIDATE_OR_GOTO(this->name, this->private, out);
+@@ -512,14 +513,50 @@ __svs_initialise_snapshot_volume(xlator_t *this, const char *name,
+         goto out;
+     }
+ 
+-    ret = glfs_set_volfile_server(fs, "tcp", "localhost", 24007);
++    /*
++     * Before, localhost was used as the volfile server. But, with that
++     * method, accessing snapshots started giving ENOENT error if a
++     * specific bind address is mentioned in the glusterd volume file.
++     * Check the bug https://bugzilla.redhat.com/show_bug.cgi?id=1725211.
++     * So, the new method is tried below, where, snapview-server first
++     * uses the volfile server used by the snapd (obtained from the
++     * command line arguments saved in the global context of the process).
++     * If the volfile server in global context is NULL, then localhost
++     * is tried (like before).
++     */
++    if (this->ctx->cmd_args.volfile_server) {
++        volfile_server = gf_strdup(this->ctx->cmd_args.volfile_server);
++        if (!volfile_server) {
++            gf_msg(this->name, GF_LOG_WARNING, ENOMEM,
++                   SVS_MSG_VOLFILE_SERVER_GET_FAIL,
++                   "failed to copy volfile server %s. ",
++                   this->ctx->cmd_args.volfile_server);
++            ret = -1;
++            goto out;
++        }
++    } else {
++        gf_msg(this->name, GF_LOG_WARNING, ENOMEM,
++               SVS_MSG_VOLFILE_SERVER_GET_FAIL,
++               "volfile server is NULL in cmd args. "
++               "Trying with localhost");
++        volfile_server = gf_strdup("localhost");
++        if (!volfile_server) {
++            gf_msg(this->name, GF_LOG_WARNING, ENOMEM,
++                   SVS_MSG_VOLFILE_SERVER_GET_FAIL,
++                   "failed to copy volfile server localhost.");
++            ret = -1;
++            goto out;
++        }
++    }
++
++    ret = glfs_set_volfile_server(fs, "tcp", volfile_server, 24007);
+     if (ret) {
+         gf_msg(this->name, GF_LOG_ERROR, local_errno,
+                SVS_MSG_SET_VOLFILE_SERVR_FAILED,
+                "setting the "
+-               "volfile server for snap volume %s "
++               "volfile server %s for snap volume %s "
+                "failed",
+-               dirent->name);
++               volfile_server, dirent->name);
+         goto out;
+     }
+ 
+@@ -561,6 +598,7 @@ out:
+         dirent->fs = fs;
+     }
+ 
++    GF_FREE(volfile_server);
+     return fs;
+ }
+ 
+diff --git a/xlators/features/snapview-server/src/snapview-server-messages.h b/xlators/features/snapview-server/src/snapview-server-messages.h
+index 8548015..f634ab5 100644
+--- a/xlators/features/snapview-server/src/snapview-server-messages.h
++++ b/xlators/features/snapview-server/src/snapview-server-messages.h
+@@ -49,6 +49,6 @@ GLFS_MSGID(SNAPVIEW_SERVER, SVS_MSG_NO_MEMORY, SVS_MSG_MEM_ACNT_FAILED,
+            SVS_MSG_CLOSEDIR_FAILED, SVS_MSG_CLOSE_FAILED,
+            SVS_MSG_GFID_GEN_FAILED, SVS_MSG_GLFS_NEW_FAILED,
+            SVS_MSG_SET_VOLFILE_SERVR_FAILED, SVS_MSG_SET_LOGGING_FAILED,
+-           SVS_MSG_GLFS_INIT_FAILED);
++           SVS_MSG_VOLFILE_SERVER_GET_FAIL, SVS_MSG_GLFS_INIT_FAILED);
+ 
+ #endif /* !_SNAPVIEW_CLIENT_MESSAGES_H_ */
+-- 
+1.8.3.1
+

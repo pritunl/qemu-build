@@ -1,0 +1,448 @@
+From 9d10b1fd102dc2d5bfa71891ded52b7a8f5e08d8 Mon Sep 17 00:00:00 2001
+From: Kotresh HR <khiremat@redhat.com>
+Date: Thu, 6 Jun 2019 12:54:04 +0530
+Subject: [PATCH 225/255] tests/utils: Fix py2/py3 util python scripts
+
+Following files are fixed.
+
+tests/bugs/distribute/overlap.py
+tests/utils/changelogparser.py
+tests/utils/create-files.py
+tests/utils/gfid-access.py
+tests/utils/libcxattr.py
+
+> upstream patch link : https://review.gluster.org/#/c/glusterfs/+/22829/
+
+>Change-Id: I3db857cc19e19163d368d913eaec1269fbc37140
+>updates: bz#1193929
+>Signed-off-by: Kotresh HR <khiremat@redhat.com>
+
+Change-Id: I3db857cc19e19163d368d913eaec1269fbc37140
+BUG: 1704562
+Signed-off-by: Kotresh HR <khiremat@redhat.com>
+Reviewed-on: https://code.engineering.redhat.com/gerrit/175483
+Tested-by: RHGS Build Bot <nigelb@redhat.com>
+Reviewed-by: Atin Mukherjee <amukherj@redhat.com>
+---
+ tests/bugs/distribute/overlap.py  |   2 +-
+ tests/bugs/glusterfs/bug-902610.t |   2 +-
+ tests/utils/changelogparser.py    |   5 +-
+ tests/utils/create-files.py       |   9 +-
+ tests/utils/gfid-access.py        |  62 +++++++++----
+ tests/utils/libcxattr.py          |  22 +++--
+ tests/utils/py2py3.py             | 186 ++++++++++++++++++++++++++++++++++++++
+ 7 files changed, 258 insertions(+), 30 deletions(-)
+ create mode 100644 tests/utils/py2py3.py
+
+diff --git a/tests/bugs/distribute/overlap.py b/tests/bugs/distribute/overlap.py
+index 0941d37..2813979 100755
+--- a/tests/bugs/distribute/overlap.py
++++ b/tests/bugs/distribute/overlap.py
+@@ -17,7 +17,7 @@ def calculate_one (ov, nv):
+ 
+ def calculate_all (values):
+     total = 0
+-    nv_index = len(values) / 2
++    nv_index = len(values) // 2
+     for old_val in values[:nv_index]:
+         new_val = values[nv_index]
+         nv_index += 1
+diff --git a/tests/bugs/glusterfs/bug-902610.t b/tests/bugs/glusterfs/bug-902610.t
+index b45e92b..112c947 100755
+--- a/tests/bugs/glusterfs/bug-902610.t
++++ b/tests/bugs/glusterfs/bug-902610.t
+@@ -28,7 +28,7 @@ function get_layout()
+ 	fi
+ 
+ 	# Figure out where the join point is.
+-	target=$( $PYTHON -c "print '%08x' % (0x$layout1_e + 1)")
++	target=$( $PYTHON -c "print('%08x' % (0x$layout1_e + 1))")
+ 	#echo "target for layout2 = $target" > /dev/tty
+ 
+ 	# The second layout should cover everything that the first doesn't.
+diff --git a/tests/utils/changelogparser.py b/tests/utils/changelogparser.py
+index e8e252d..3b8f81d 100644
+--- a/tests/utils/changelogparser.py
++++ b/tests/utils/changelogparser.py
+@@ -125,7 +125,10 @@ class Record(object):
+             return repr(self.__dict__)
+ 
+     def __str__(self):
+-        return unicode(self).encode('utf-8')
++        if sys.version_info >= (3,):
++            return self.__unicode__()
++        else:
++            return unicode(self).encode('utf-8')
+ 
+ 
+ def get_num_tokens(data, tokens, version=Version.V11):
+diff --git a/tests/utils/create-files.py b/tests/utils/create-files.py
+index b2a1961..04736e9 100755
+--- a/tests/utils/create-files.py
++++ b/tests/utils/create-files.py
+@@ -19,6 +19,11 @@ import argparse
+ datsiz = 0
+ timr = 0
+ 
++def get_ascii_upper_alpha_digits():
++    if sys.version_info > (3,0):
++        return string.ascii_uppercase+string.digits
++    else:
++        return string.uppercase+string.digits
+ 
+ def setLogger(filename):
+     global logger
+@@ -111,7 +116,7 @@ def create_tar_file(fil, size, mins, maxs, rand):
+ 
+ def get_filename(flen):
+     size = flen
+-    char = string.uppercase+string.digits
++    char = get_ascii_upper_alpha_digits()
+     st = ''.join(random.choice(char) for i in range(size))
+     ti = str((hex(int(str(time.time()).split('.')[0])))[2:])
+     return ti+"%%"+st
+@@ -175,7 +180,7 @@ def tar_files(files, file_count, inter, size, mins, maxs,
+ 
+ 
+ def setxattr_files(files, randname, dir_path):
+-    char = string.uppercase+string.digits
++    char = get_ascii_upper_alpha_digits()
+     if not randname:
+         for k in range(files):
+             v = ''.join(random.choice(char) for i in range(10))
+diff --git a/tests/utils/gfid-access.py b/tests/utils/gfid-access.py
+index 556d2b4..c35c122 100755
+--- a/tests/utils/gfid-access.py
++++ b/tests/utils/gfid-access.py
+@@ -33,23 +33,51 @@ def _fmt_mkdir(l):
+ def _fmt_symlink(l1, l2):
+     return "!II%dsI%ds%ds" % (37, l1+1, l2+1)
+ 
+-def entry_pack_reg(gf, bn, mo, uid, gid):
+-    blen = len(bn)
+-    return struct.pack(_fmt_mknod(blen),
+-                       uid, gid, gf, mo, bn,
+-                       stat.S_IMODE(mo), 0, umask())
+-
+-def entry_pack_dir(gf, bn, mo, uid, gid):
+-    blen = len(bn)
+-    return struct.pack(_fmt_mkdir(blen),
+-                       uid, gid, gf, mo, bn,
+-                       stat.S_IMODE(mo), umask())
+-
+-def entry_pack_symlink(gf, bn, lnk, mo, uid, gid):
+-    blen = len(bn)
+-    llen = len(lnk)
+-    return struct.pack(_fmt_symlink(blen, llen),
+-                       uid, gid, gf, mo, bn, lnk)
++
++if sys.version_info > (3,):
++    def entry_pack_reg(gf, bn, mo, uid, gid):
++        bn_encoded = bn.encode()
++        blen = len(bn_encoded)
++        return struct.pack(_fmt_mknod(blen),
++                           uid, gid, gf.encode(), mo, bn_encoded,
++                           stat.S_IMODE(mo), 0, umask())
++
++    # mkdir
++    def entry_pack_dir(gf, bn, mo, uid, gid):
++        bn_encoded = bn.encode()
++        blen = len(bn_encoded)
++        return struct.pack(_fmt_mkdir(blen),
++                           uid, gid, gf.encode(), mo, bn_encoded,
++                           stat.S_IMODE(mo), umask())
++    # symlink
++    def entry_pack_symlink(gf, bn, lnk, st):
++        bn_encoded = bn.encode()
++        blen = len(bn_encoded)
++        lnk_encoded = lnk.encode()
++        llen = len(lnk_encoded)
++        return struct.pack(_fmt_symlink(blen, llen),
++                           st['uid'], st['gid'],
++                           gf.encode(), st['mode'], bn_encoded,
++                           lnk_encoded)
++
++else:
++    def entry_pack_reg(gf, bn, mo, uid, gid):
++        blen = len(bn)
++        return struct.pack(_fmt_mknod(blen),
++                           uid, gid, gf, mo, bn,
++                           stat.S_IMODE(mo), 0, umask())
++
++    def entry_pack_dir(gf, bn, mo, uid, gid):
++        blen = len(bn)
++        return struct.pack(_fmt_mkdir(blen),
++                           uid, gid, gf, mo, bn,
++                           stat.S_IMODE(mo), umask())
++
++    def entry_pack_symlink(gf, bn, lnk, mo, uid, gid):
++        blen = len(bn)
++        llen = len(lnk)
++        return struct.pack(_fmt_symlink(blen, llen),
++                           uid, gid, gf, mo, bn, lnk)
+ 
+ if __name__ == '__main__':
+     if len(sys.argv) < 9:
+diff --git a/tests/utils/libcxattr.py b/tests/utils/libcxattr.py
+index fd0b083..3f3ed1f 100644
+--- a/tests/utils/libcxattr.py
++++ b/tests/utils/libcxattr.py
+@@ -10,7 +10,9 @@
+ 
+ import os
+ import sys
+-from ctypes import CDLL, c_int, create_string_buffer
++from ctypes import CDLL, c_int
++from py2py3 import bytearray_to_str, gr_create_string_buffer
++from py2py3 import gr_query_xattr, gr_lsetxattr, gr_lremovexattr
+ 
+ 
+ class Xattr(object):
+@@ -47,20 +49,23 @@ class Xattr(object):
+     @classmethod
+     def _query_xattr(cls, path, siz, syscall, *a):
+         if siz:
+-            buf = create_string_buffer('\0' * siz)
++            buf = gr_create_string_buffer(siz)
+         else:
+             buf = None
+         ret = getattr(cls.libc, syscall)(*((path,) + a + (buf, siz)))
+         if ret == -1:
+             cls.raise_oserr()
+         if siz:
+-            return buf.raw[:ret]
++            # py2 and py3 compatibility. Convert bytes array
++            # to string
++            result = bytearray_to_str(buf.raw)
++            return result[:ret]
+         else:
+             return ret
+ 
+     @classmethod
+     def lgetxattr(cls, path, attr, siz=0):
+-        return cls._query_xattr(path, siz, 'lgetxattr', attr)
++        return gr_query_xattr(cls, path, siz, 'lgetxattr', attr)
+ 
+     @classmethod
+     def lgetxattr_buf(cls, path, attr):
+@@ -74,20 +79,21 @@ class Xattr(object):
+ 
+     @classmethod
+     def llistxattr(cls, path, siz=0):
+-        ret = cls._query_xattr(path, siz, 'llistxattr')
++        ret = gr_query_xattr(cls, path, siz, 'llistxattr')
+         if isinstance(ret, str):
+-            ret = ret.split('\0')
++            ret = ret.strip('\0')
++            ret = ret.split('\0') if ret else []
+         return ret
+ 
+     @classmethod
+     def lsetxattr(cls, path, attr, val):
+-        ret = cls.libc.lsetxattr(path, attr, val, len(val), 0)
++        ret = gr_lsetxattr(cls, path, attr, val)
+         if ret == -1:
+             cls.raise_oserr()
+ 
+     @classmethod
+     def lremovexattr(cls, path, attr):
+-        ret = cls.libc.lremovexattr(path, attr)
++        ret = gr_lremovexattr(cls, path, attr)
+         if ret == -1:
+             cls.raise_oserr()
+ 
+diff --git a/tests/utils/py2py3.py b/tests/utils/py2py3.py
+new file mode 100644
+index 0000000..63aca10
+--- /dev/null
++++ b/tests/utils/py2py3.py
+@@ -0,0 +1,186 @@
++#
++# Copyright (c) 2018 Red Hat, Inc. <http://www.redhat.com>
++# This file is part of GlusterFS.
++
++# This file is licensed to you under your choice of the GNU Lesser
++# General Public License, version 3 or any later version (LGPLv3 or
++# later), or the GNU General Public License, version 2 (GPLv2), in all
++# cases as published by the Free Software Foundation.
++#
++
++# All python2/python3 compatibility routines
++
++import sys
++import os
++import stat
++import struct
++from ctypes import create_string_buffer
++
++def umask():
++    return os.umask(0)
++
++if sys.version_info >= (3,):
++    def pipe():
++        (r, w) = os.pipe()
++        os.set_inheritable(r, True)
++        os.set_inheritable(w, True)
++        return (r, w)
++
++    # Raw conversion of bytearray to string. Used in the cases where
++    # buffer is created by create_string_buffer which is a 8-bit char
++    # array and passed to syscalls to fetch results. Using encode/decode
++    # doesn't work as it converts to string altering the size.
++    def bytearray_to_str(byte_arr):
++        return ''.join([chr(b) for b in byte_arr])
++
++    # Raw conversion of string to bytes. This is required to convert
++    # back the string into bytearray(c char array) to use in struc
++    # pack/unpacking. Again encode/decode can't be used as it
++    # converts it alters size.
++    def str_to_bytearray(string):
++        return bytes([ord(c) for c in string])
++
++    def gr_create_string_buffer(size):
++        return create_string_buffer(b'\0', size)
++
++    def gr_query_xattr(cls, path, size, syscall, attr=None):
++        if attr:
++            return cls._query_xattr(path.encode(), size, syscall,
++                                    attr.encode())
++        else:
++            return cls._query_xattr(path.encode(), size, syscall)
++
++    def gr_lsetxattr(cls, path, attr, val):
++        return cls.libc.lsetxattr(path.encode(), attr.encode(), val,
++                                  len(val), 0)
++
++    def gr_lremovexattr(cls, path, attr):
++        return cls.libc.lremovexattr(path.encode(), attr.encode())
++
++    def gr_cl_register(cls, brick, path, log_file, log_level, retries):
++        return cls._get_api('gf_changelog_register')(brick.encode(),
++                                                     path.encode(),
++                                                     log_file.encode(),
++                                                     log_level, retries)
++
++    def gr_cl_done(cls, clfile):
++        return cls._get_api('gf_changelog_done')(clfile.encode())
++
++    def gr_cl_history_changelog(cls, changelog_path, start, end, num_parallel,
++                                actual_end):
++        return cls._get_api('gf_history_changelog')(changelog_path.encode(),
++                                                    start, end, num_parallel,
++                                                    actual_end)
++
++    def gr_cl_history_done(cls, clfile):
++        return cls._get_api('gf_history_changelog_done')(clfile.encode())
++
++    # regular file
++
++    def entry_pack_reg(cls, gf, bn, mo, uid, gid):
++        bn_encoded = bn.encode()
++        blen = len(bn_encoded)
++        return struct.pack(cls._fmt_mknod(blen),
++                           uid, gid, gf.encode(), mo, bn_encoded,
++                           stat.S_IMODE(mo), 0, umask())
++
++    def entry_pack_reg_stat(cls, gf, bn, st):
++        bn_encoded = bn.encode()
++        blen = len(bn_encoded)
++        mo = st['mode']
++        return struct.pack(cls._fmt_mknod(blen),
++                           st['uid'], st['gid'],
++                           gf.encode(), mo, bn_encoded,
++                           stat.S_IMODE(mo), 0, umask())
++    # mkdir
++
++    def entry_pack_mkdir(cls, gf, bn, mo, uid, gid):
++        bn_encoded = bn.encode()
++        blen = len(bn_encoded)
++        return struct.pack(cls._fmt_mkdir(blen),
++                           uid, gid, gf.encode(), mo, bn_encoded,
++                           stat.S_IMODE(mo), umask())
++    # symlink
++
++    def entry_pack_symlink(cls, gf, bn, lnk, st):
++        bn_encoded = bn.encode()
++        blen = len(bn_encoded)
++        lnk_encoded = lnk.encode()
++        llen = len(lnk_encoded)
++        return struct.pack(cls._fmt_symlink(blen, llen),
++                           st['uid'], st['gid'],
++                           gf.encode(), st['mode'], bn_encoded,
++                           lnk_encoded)
++else:
++    def pipe():
++        (r, w) = os.pipe()
++        return (r, w)
++
++    # Raw conversion of bytearray to string
++    def bytearray_to_str(byte_arr):
++        return byte_arr
++
++    # Raw conversion of string to bytearray
++    def str_to_bytearray(string):
++        return string
++
++    def gr_create_string_buffer(size):
++        return create_string_buffer('\0', size)
++
++    def gr_query_xattr(cls, path, size, syscall, attr=None):
++        if attr:
++            return cls._query_xattr(path, size, syscall, attr)
++        else:
++            return cls._query_xattr(path, size, syscall)
++
++    def gr_lsetxattr(cls, path, attr, val):
++        return cls.libc.lsetxattr(path, attr, val, len(val), 0)
++
++    def gr_lremovexattr(cls, path, attr):
++        return cls.libc.lremovexattr(path, attr)
++
++    def gr_cl_register(cls, brick, path, log_file, log_level, retries):
++        return cls._get_api('gf_changelog_register')(brick, path, log_file,
++                                                     log_level, retries)
++
++    def gr_cl_done(cls, clfile):
++        return cls._get_api('gf_changelog_done')(clfile)
++
++    def gr_cl_history_changelog(cls, changelog_path, start, end, num_parallel,
++                                actual_end):
++        return cls._get_api('gf_history_changelog')(changelog_path, start, end,
++                                                    num_parallel, actual_end)
++
++    def gr_cl_history_done(cls, clfile):
++        return cls._get_api('gf_history_changelog_done')(clfile)
++
++    # regular file
++
++    def entry_pack_reg(cls, gf, bn, mo, uid, gid):
++        blen = len(bn)
++        return struct.pack(cls._fmt_mknod(blen),
++                           uid, gid, gf, mo, bn,
++                           stat.S_IMODE(mo), 0, umask())
++
++    def entry_pack_reg_stat(cls, gf, bn, st):
++        blen = len(bn)
++        mo = st['mode']
++        return struct.pack(cls._fmt_mknod(blen),
++                           st['uid'], st['gid'],
++                           gf, mo, bn,
++                           stat.S_IMODE(mo), 0, umask())
++    # mkdir
++
++    def entry_pack_mkdir(cls, gf, bn, mo, uid, gid):
++        blen = len(bn)
++        return struct.pack(cls._fmt_mkdir(blen),
++                           uid, gid, gf, mo, bn,
++                           stat.S_IMODE(mo), umask())
++    # symlink
++
++    def entry_pack_symlink(cls, gf, bn, lnk, st):
++        blen = len(bn)
++        llen = len(lnk)
++        return struct.pack(cls._fmt_symlink(blen, llen),
++                           st['uid'], st['gid'],
++                           gf, st['mode'], bn, lnk)
+-- 
+1.8.3.1
+
