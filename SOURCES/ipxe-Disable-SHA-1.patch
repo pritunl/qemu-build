@@ -1,0 +1,33 @@
+From e50ff50417dca26223b771d2a93cf57d4f627104 Mon Sep 17 00:00:00 2001
+From: Gerd Hoffmann <kraxel@redhat.com>
+Date: Thu, 22 Jul 2021 15:49:51 +0200
+Subject: [PATCH 1/4] Disable SHA-1
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RH-Author: Gerd Hoffmann <kraxel@redhat.com>
+RH-MergeRequest: 5: Disable SHA-1
+RH-Commit: [1/1] 23f1cca1f3ac86958088c41e0f8122dde74c72cf (kraxel/ipxe)
+RH-Bugzilla: 1935932
+RH-Acked-by: Daniel P. Berrangé <berrange@redhat.com>
+RH-Acked-by: Philippe Mathieu-Daudé <philmd@redhat.com>
+
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ src/config/local/crypto.h | 2 ++
+ 1 file changed, 2 insertions(+)
+ create mode 100644 src/config/local/crypto.h
+
+diff --git a/src/config/local/crypto.h b/src/config/local/crypto.h
+new file mode 100644
+index 00000000..ff4a5b7f
+--- /dev/null
++++ b/src/config/local/crypto.h
+@@ -0,0 +1,2 @@
++/** disable SHA-1 digest algorithm */
++#undef CRYPTO_DIGEST_SHA1
+-- 
+2.27.0
+

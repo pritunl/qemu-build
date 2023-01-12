@@ -1,0 +1,64 @@
+diff --git a/ArmVirtPkg/ArmVirt.dsc.inc b/ArmVirtPkg/ArmVirt.dsc.inc
+index 5a1598d..2961eef 100644
+--- a/ArmVirtPkg/ArmVirt.dsc.inc
++++ b/ArmVirtPkg/ArmVirt.dsc.inc
+@@ -230,21 +230,25 @@
+   DxeCoreEntryPoint|MdePkg/Library/DxeCoreEntryPoint/DxeCoreEntryPoint.inf
+   ExtractGuidedSectionLib|MdePkg/Library/DxeExtractGuidedSectionLib/DxeExtractGuidedSectionLib.inf
+   PerformanceLib|MdeModulePkg/Library/DxeCorePerformanceLib/DxeCorePerformanceLib.inf
++  DebugLib|MdePkg/Library/BaseDebugLibSerialPort/BaseDebugLibSerialPortOracle.inf
+ 
+ [LibraryClasses.common.DXE_DRIVER]
+   SecurityManagementLib|MdeModulePkg/Library/DxeSecurityManagementLib/DxeSecurityManagementLib.inf
+   PerformanceLib|MdeModulePkg/Library/DxePerformanceLib/DxePerformanceLib.inf
+   MemoryAllocationLib|MdePkg/Library/UefiMemoryAllocationLib/UefiMemoryAllocationLib.inf
++  DebugLib|MdePkg/Library/BaseDebugLibSerialPort/BaseDebugLibSerialPortOracle.inf
+ 
+ [LibraryClasses.common.UEFI_APPLICATION]
+   PerformanceLib|MdeModulePkg/Library/DxePerformanceLib/DxePerformanceLib.inf
+   MemoryAllocationLib|MdePkg/Library/UefiMemoryAllocationLib/UefiMemoryAllocationLib.inf
+   HiiLib|MdeModulePkg/Library/UefiHiiLib/UefiHiiLib.inf
++  DebugLib|MdePkg/Library/BaseDebugLibSerialPort/BaseDebugLibSerialPortOracle.inf
+ 
+ [LibraryClasses.common.UEFI_DRIVER]
+   ExtractGuidedSectionLib|MdePkg/Library/DxeExtractGuidedSectionLib/DxeExtractGuidedSectionLib.inf
+   PerformanceLib|MdeModulePkg/Library/DxePerformanceLib/DxePerformanceLib.inf
+   MemoryAllocationLib|MdePkg/Library/UefiMemoryAllocationLib/UefiMemoryAllocationLib.inf
++  DebugLib|MdePkg/Library/BaseDebugLibSerialPort/BaseDebugLibSerialPortOracle.inf
+ 
+ [LibraryClasses.common.DXE_RUNTIME_DRIVER]
+   MemoryAllocationLib|MdePkg/Library/UefiMemoryAllocationLib/UefiMemoryAllocationLib.inf
+diff --git a/ArmVirtPkg/ArmVirtQemu.dsc b/ArmVirtPkg/ArmVirtQemu.dsc
+index 84c28b0..459baac 100644
+--- a/ArmVirtPkg/ArmVirtQemu.dsc
++++ b/ArmVirtPkg/ArmVirtQemu.dsc
+@@ -140,8 +140,8 @@
+ 
+   gArmPlatformTokenSpaceGuid.PcdCPUCoresStackBase|0x4007c000
+   gArmPlatformTokenSpaceGuid.PcdCPUCorePrimaryStackSize|0x4000
+-  gEfiMdeModulePkgTokenSpaceGuid.PcdMaxVariableSize|0x2000
+-  gEfiMdeModulePkgTokenSpaceGuid.PcdMaxAuthVariableSize|0x2800
++  gEfiMdeModulePkgTokenSpaceGuid.PcdMaxVariableSize|0x8400
++  gEfiMdeModulePkgTokenSpaceGuid.PcdMaxAuthVariableSize|0x8400
+ !if $(NETWORK_TLS_ENABLE) == TRUE
+   #
+   # The cumulative and individual VOLATILE variable size limits should be set
+@@ -190,6 +190,10 @@
+   gEfiMdeModulePkgTokenSpaceGuid.PcdResetOnMemoryTypeInformationChange|FALSE
+   gEfiMdeModulePkgTokenSpaceGuid.PcdBootManagerMenuFile|{ 0x21, 0xaa, 0x2c, 0x46, 0x14, 0x76, 0x03, 0x45, 0x83, 0x6e, 0x8a, 0xb6, 0xf4, 0x66, 0x23, 0x31 }
+ 
++!if $(TPM2_ENABLE) == TRUE
++  gEfiSecurityPkgTokenSpaceGuid.PcdTpmPlatformClass|0x1
++!endif
++
+   #
+   # The maximum physical I/O addressability of the processor, set with
+   # BuildCpuHob().
+@@ -367,7 +371,6 @@
+ !endif
+   }
+   SecurityPkg/VariableAuthenticated/SecureBootConfigDxe/SecureBootConfigDxe.inf
+-  OvmfPkg/EnrollDefaultKeys/EnrollDefaultKeys.inf
+ !else
+   MdeModulePkg/Universal/SecurityStubDxe/SecurityStubDxe.inf
+ !endif

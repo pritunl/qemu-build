@@ -1,19 +1,17 @@
-From a35645ca4985b8fdd4f4d8c4d87ae05001061c53 Mon Sep 17 00:00:00 2001
+From d1e13b6d631a45882471efcbe367c690e1698b42 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Volker=20R=C3=BCmelin?= <vr_qemu@t-online.de>
 Date: Sat, 2 Apr 2022 20:28:38 +0200
-Subject: [PATCH 2/3] pci: refactor the pci_config_*() functions
+Subject: [PATCH 1/2] pci: refactor the pci_config_*() functions
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
 RH-Author: Gerd Hoffmann <kraxel@redhat.com>
-RH-MergeRequest: 7: pci: fix reset for q35 and tcg
-RH-Commit: [1/2] 7607f8f3296435a2884902f650ce060c6be07bd1
-RH-Bugzilla: 2083884
-RH-Acked-by: Pawel Polawski <ppolawsk@redhat.com>
+RH-MergeRequest: 4: reset: force standard PCI configuration access
+RH-Commit: [1/2] 49093312e6cdddd301766fcfb91cf80260be3f05 (kraxel/centos-seabios)
+RH-Bugzilla: 2086407
+RH-Acked-by: Miroslav Rezanina <mrezanin@redhat.com>
 RH-Acked-by: Oliver Steffen <osteffen@redhat.com>
-RH-Acked-by: Igor Mammedov <imammedo@redhat.com>
-RH-Acked-by: Laszlo Ersek <lersek@redhat.com>
 
 Split out the Standard PCI Configuration Access Mechanism
 pci_ioconfig_*() functions from the pci_config_*() functions.
@@ -170,5 +168,5 @@ index 01c51f70..ee6acafc 100644
  void pci_reboot(void);
  
 -- 
-2.35.3
+2.31.1
 

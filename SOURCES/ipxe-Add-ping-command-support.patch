@@ -1,0 +1,36 @@
+From 4d004e6a535c4f102c7b91c2f4d259cebaf1fb69 Mon Sep 17 00:00:00 2001
+From: Miroslav Rezanina <mrezanin@redhat.com>
+Date: Mon, 2 Aug 2021 08:11:12 -0400
+Subject: [PATCH 1/5] Add ping command support
+
+RH-Author: Miroslav Rezanina <mrezanin@redhat.com>
+RH-MergeRequest: 6: Forwardport  missing RHEL 8 downsteream changes
+RH-Commit: [1/5] f95713f55d7af7970d39462c94b866f833eedca1 (mrezanin/centos-src-ipxe)
+RH-Bugzilla: 1985658
+
+To allow trouble shooting ipxe issues, ping command were added to
+RHEL 8 (see BZ 1913719).
+
+Adding this command to RHEL 9 to prevent regression from RHEL 8 functionality.
+
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ src/config/general.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/config/general.h b/src/config/general.h
+index 3c14a2cd..5adf6a35 100644
+--- a/src/config/general.h
++++ b/src/config/general.h
+@@ -148,7 +148,7 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
+ //#define PCI_CMD		/* PCI commands */
+ //#define PARAM_CMD		/* Form parameter commands */
+ //#define NEIGHBOUR_CMD		/* Neighbour management commands */
+-//#define PING_CMD		/* Ping command */
++#define PING_CMD		/* Ping command */
+ //#define CONSOLE_CMD		/* Console command */
+ //#define IPSTAT_CMD		/* IP statistics commands */
+ //#define PROFSTAT_CMD		/* Profiling commands */
+-- 
+2.27.0
+

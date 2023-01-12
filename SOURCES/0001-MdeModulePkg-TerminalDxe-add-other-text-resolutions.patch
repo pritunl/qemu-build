@@ -1,0 +1,52 @@
+diff --git a/MdeModulePkg/Universal/Console/TerminalDxe/Terminal.c b/MdeModulePkg/Universal/Console/TerminalDxe/Terminal.c
+index e2d779c..dfd9c96 100644
+--- a/MdeModulePkg/Universal/Console/TerminalDxe/Terminal.c
++++ b/MdeModulePkg/Universal/Console/TerminalDxe/Terminal.c
+@@ -112,9 +112,44 @@ TERMINAL_DEV  mTerminalDevTemplate = {
+ };
+ 
+ TERMINAL_CONSOLE_MODE_DATA  mTerminalConsoleModeData[] = {
+-  { 80,  25 },
+-  { 80,  50 },
+-  { 100, 31 },
++  {   80,  25 }, // from graphics resolution  640 x  480
++  {   80,  50 }, // from graphics resolution  640 x  960
++  {  100,  25 }, // from graphics resolution  800 x  480
++  {  100,  31 }, // from graphics resolution  800 x  600
++  {  104,  32 }, // from graphics resolution  832 x  624
++  {  120,  33 }, // from graphics resolution  960 x  640
++  {  128,  31 }, // from graphics resolution 1024 x  600
++  {  128,  40 }, // from graphics resolution 1024 x  768
++  {  144,  45 }, // from graphics resolution 1152 x  864
++  {  144,  45 }, // from graphics resolution 1152 x  870
++  {  160,  37 }, // from graphics resolution 1280 x  720
++  {  160,  40 }, // from graphics resolution 1280 x  760
++  {  160,  40 }, // from graphics resolution 1280 x  768
++  {  160,  42 }, // from graphics resolution 1280 x  800
++  {  160,  50 }, // from graphics resolution 1280 x  960
++  {  160,  53 }, // from graphics resolution 1280 x 1024
++  {  170,  40 }, // from graphics resolution 1360 x  768
++  {  170,  40 }, // from graphics resolution 1366 x  768
++  {  175,  55 }, // from graphics resolution 1400 x 1050
++  {  180,  47 }, // from graphics resolution 1440 x  900
++  {  200,  47 }, // from graphics resolution 1600 x  900
++  {  200,  63 }, // from graphics resolution 1600 x 1200
++  {  210,  55 }, // from graphics resolution 1680 x 1050
++  {  240,  56 }, // from graphics resolution 1920 x 1080
++  {  240,  63 }, // from graphics resolution 1920 x 1200
++  {  240,  75 }, // from graphics resolution 1920 x 1440
++  {  250, 105 }, // from graphics resolution 2000 x 2000
++  {  256,  80 }, // from graphics resolution 2048 x 1536
++  {  256, 107 }, // from graphics resolution 2048 x 2048
++  {  320,  75 }, // from graphics resolution 2560 x 1440
++  {  320,  84 }, // from graphics resolution 2560 x 1600
++  {  320, 107 }, // from graphics resolution 2560 x 2048
++  {  350, 110 }, // from graphics resolution 2800 x 2100
++  {  400, 126 }, // from graphics resolution 3200 x 2400
++  {  480, 113 }, // from graphics resolution 3840 x 2160
++  {  512, 113 }, // from graphics resolution 4096 x 2160
++  {  960, 227 }, // from graphics resolution 7680 x 4320
++  { 1024, 227 }, // from graphics resolution 8192 x 4320
+   //
+   // New modes can be added here.
+   //

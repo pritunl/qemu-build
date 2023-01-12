@@ -1,0 +1,34 @@
+From 2a9170ed88dc55d601a70d34f2d93157dc30e307 Mon Sep 17 00:00:00 2001
+From: Miroslav Rezanina <mrezanin@redhat.com>
+Date: Mon, 2 Aug 2021 08:33:47 -0400
+Subject: [PATCH 2/5] Add VLAN tagging support
+
+RH-Author: Miroslav Rezanina <mrezanin@redhat.com>
+RH-MergeRequest: 6: Forwardport  missing RHEL 8 downsteream changes
+RH-Commit: [2/5] 3359f0d96c8743abefdf1b81857c84f4e7312f9d (mrezanin/centos-src-ipxe)
+RH-Bugzilla: 1985658
+
+RHEL 8 added support for VLAN tagging. We need to add it to RHEL 9
+so we are not regressing.
+
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ src/config/general.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/config/general.h b/src/config/general.h
+index 5adf6a35..a6df71b5 100644
+--- a/src/config/general.h
++++ b/src/config/general.h
+@@ -140,7 +140,7 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
+ //#define TIME_CMD		/* Time commands */
+ //#define DIGEST_CMD		/* Image crypto digest commands */
+ //#define LOTEST_CMD		/* Loopback testing commands */
+-//#define VLAN_CMD		/* VLAN commands */
++#define VLAN_CMD		/* VLAN commands */
+ //#define PXE_CMD		/* PXE commands */
+ //#define REBOOT_CMD		/* Reboot command */
+ //#define POWEROFF_CMD		/* Power off command */
+-- 
+2.27.0
+

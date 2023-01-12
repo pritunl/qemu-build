@@ -1,0 +1,195 @@
+From ff3a5af3d7f78577899626b2f8b612369e051916 Mon Sep 17 00:00:00 2001
+From: Miroslav Rezanina <mrezanin@redhat.com>
+Date: Mon, 2 Aug 2021 08:32:33 -0400
+Subject: [PATCH 3/5] [netdevice] Strip 802.Q VLAN 0 priority tags
+
+RH-Author: Miroslav Rezanina <mrezanin@redhat.com>
+RH-MergeRequest: 6: Forwardport  missing RHEL 8 downsteream changes
+RH-Commit: [3/5] 440560659da2028f365a71b4ed4991955022dce5 (mrezanin/centos-src-ipxe)
+RH-Bugzilla: 1985658
+
+iPXE was unable to receive priority tagged packets specified in
+the 802.1Q standard and supported by all major networking stacks.
+
+This commit adds a new function net_pull_tags which is called by
+all consumers of incoming packets after stripping their link-layer
+headers.
+
+Upstream patch:
+http://lists.ipxe.org/pipermail/ipxe-devel/2016-July/005099.html
+
+Downstream changes:
+Upstream commit fe680c822856 made vlan_find static. This prevents
+it's usage int this patch. Reverting changes adding static for
+vlan_find.
+
+Signed-off-by: Ladi Prosek <lprosek@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ src/arch/x86/interface/pxe/pxe_undi.c |  6 +++
+ src/include/ipxe/netdevice.h          |  2 +
+ src/include/ipxe/vlan.h               |  2 +
+ src/interface/efi/efi_snp.c           |  7 ++++
+ src/net/netdevice.c                   | 57 +++++++++++++++++++++++++++
+ src/net/vlan.c                        |  2 +-
+ 6 files changed, 75 insertions(+), 1 deletion(-)
+
+diff --git a/src/arch/x86/interface/pxe/pxe_undi.c b/src/arch/x86/interface/pxe/pxe_undi.c
+index 2eb68178..2ea14515 100644
+--- a/src/arch/x86/interface/pxe/pxe_undi.c
++++ b/src/arch/x86/interface/pxe/pxe_undi.c
+@@ -976,6 +976,12 @@ static PXENV_EXIT_t pxenv_undi_isr ( struct s_PXENV_UNDI_ISR *undi_isr ) {
+ 		}
+ 		ll_hlen = ( len - iob_len ( iobuf ) );
+ 
++		/* Strip link-layer-independent headers */
++		if ( ( rc = net_pull_tags ( iobuf, pxe_netdev, &net_proto ) ) != 0 ) {
++			/* Assume unknown net_proto */
++			net_proto = 0;
++		}
++
+ 		/* Determine network-layer protocol */
+ 		switch ( net_proto ) {
+ 		case htons ( ETH_P_IP ):
+diff --git a/src/include/ipxe/netdevice.h b/src/include/ipxe/netdevice.h
+index d498ab69..27dda45d 100644
+--- a/src/include/ipxe/netdevice.h
++++ b/src/include/ipxe/netdevice.h
+@@ -726,6 +726,8 @@ extern int net_tx ( struct io_buffer *iobuf, struct net_device *netdev,
+ extern int net_rx ( struct io_buffer *iobuf, struct net_device *netdev,
+ 		    uint16_t net_proto, const void *ll_dest,
+ 		    const void *ll_source, unsigned int flags );
++extern int net_pull_tags ( struct io_buffer *iobuf, struct net_device *netdev,
++			   uint16_t *net_proto );
+ extern void net_poll ( void );
+ extern struct net_device_configurator *
+ find_netdev_configurator ( const char *name );
+diff --git a/src/include/ipxe/vlan.h b/src/include/ipxe/vlan.h
+index 7f93439b..b82f3806 100644
+--- a/src/include/ipxe/vlan.h
++++ b/src/include/ipxe/vlan.h
+@@ -61,6 +61,8 @@ struct vlan_header {
+  */
+ #define VLAN_PRIORITY_IS_VALID( priority ) ( (priority) <= 7 )
+ 
++extern struct net_device * vlan_find ( struct net_device *trunk,
++                                      unsigned int tag );
+ extern unsigned int vlan_tag ( struct net_device *netdev );
+ extern int vlan_can_be_trunk ( struct net_device *trunk );
+ extern int vlan_create ( struct net_device *trunk, unsigned int tag,
+diff --git a/src/interface/efi/efi_snp.c b/src/interface/efi/efi_snp.c
+index d648700f..a8f2ac8e 100644
+--- a/src/interface/efi/efi_snp.c
++++ b/src/interface/efi/efi_snp.c
+@@ -813,6 +813,13 @@ efi_snp_receive ( EFI_SIMPLE_NETWORK_PROTOCOL *snp,
+ 		goto out_bad_ll_header;
+ 	}
+ 
++	/* Strip link-layer-independent headers */
++	if ( ( rc = net_pull_tags ( iobuf, snpdev->netdev, &iob_net_proto ) ) ) {
++		DBGC ( snpdev, "SNPDEV %p could not parse tags: %s\n",
++		       snpdev, strerror ( rc ) );
++		goto out_bad_ll_header;
++	}
++
+ 	/* Return link-layer header parameters to caller, if required */
+ 	if ( ll_header_len )
+ 		*ll_header_len = ll_protocol->ll_header_len;
+diff --git a/src/net/netdevice.c b/src/net/netdevice.c
+index 3b02e64b..95803f26 100644
+--- a/src/net/netdevice.c
++++ b/src/net/netdevice.c
+@@ -1043,6 +1043,45 @@ int net_rx ( struct io_buffer *iobuf, struct net_device *netdev,
+ 	return -ENOTSUP;
+ }
+ 
++
++/**
++ * Strip extra link-layer-independent tags from a received packet
++ *
++ * @v iobuf		I/O buffer
++ * @v netdev		Network device
++ * @v net_proto		Network-layer protocol, in network-byte order
++ * @ret rc		Return status code
++ *
++ * This function should be called after stripping link-layer headers but
++ * before inspecting the network-layer protocol.
++ */
++int net_pull_tags ( struct io_buffer *iobuf, struct net_device *netdev,
++		    uint16_t *net_proto ) {
++	struct vlan_header *vlanhdr;
++	uint16_t tag;
++
++	/* Strip 802.1Q VLAN 0 priority tags if present */
++	while ( *net_proto == htons ( ETH_P_8021Q ) ) {
++		if ( iob_len ( iobuf ) < sizeof ( *vlanhdr ) ) {
++			DBG ( "VLAN header too short at %zd bytes (min %zd bytes)\n",
++			      iob_len ( iobuf ), sizeof ( *vlanhdr ) );
++			return -EINVAL;
++		}
++		vlanhdr = ( struct vlan_header * ) iobuf->data;
++		tag = VLAN_TAG ( ntohs ( vlanhdr->tci ) );
++
++		if ( tag == 0 && ! vlan_find ( netdev, tag ) ) {
++			/* VLAN 0, strip and continue */
++			*net_proto = vlanhdr->net_proto;
++			iob_pull ( iobuf, sizeof ( *vlanhdr ) );
++		} else {
++			/* Real VLAN tag, leave it alone */
++			break;
++		}
++	}
++	return 0;
++}
++
+ /**
+  * Poll the network stack
+  *
+@@ -1094,6 +1133,12 @@ void net_poll ( void ) {
+ 				continue;
+ 			}
+ 
++			/* Remove link-layer-independent headers */
++			if ( ( rc = net_pull_tags ( iobuf, netdev, &net_proto ) ) ) {
++				free_iob ( iobuf );
++				continue;
++			}
++
+ 			/* Hand packet to network layer */
+ 			if ( ( rc = net_rx ( iob_disown ( iobuf ), netdev,
+ 					     net_proto, ll_dest,
+@@ -1125,6 +1170,18 @@ __weak unsigned int vlan_tag ( struct net_device *netdev __unused ) {
+ 	return 0;
+ }
+ 
++/**
++ * Identify VLAN device (when VLAN support is not present)
++ *
++ * @v netdev           Network device
++ * @v tag              VLAN tag, or zero
++ * @v iobuf            I/O buffer
++ */
++__weak struct net_device * vlan_find ( struct net_device *trunk __unused,
++                                      unsigned int tag __unused ) {
++       return NULL;
++}
++
+ /**
+  * Add VLAN tag-stripped packet to queue (when VLAN support is not present)
+  *
+diff --git a/src/net/vlan.c b/src/net/vlan.c
+index 90f2934d..0f234ea5 100644
+--- a/src/net/vlan.c
++++ b/src/net/vlan.c
+@@ -199,7 +199,7 @@ static void vlan_sync ( struct net_device *netdev ) {
+  * @v tag		VLAN tag
+  * @ret netdev		VLAN device, if any
+  */
+-static struct net_device * vlan_find ( struct net_device *trunk,
++struct net_device * vlan_find ( struct net_device *trunk,
+ 				       unsigned int tag ) {
+ 	struct net_device *netdev;
+ 	struct vlan_device *vlan;
+-- 
+2.27.0
+

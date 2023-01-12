@@ -1,6 +1,6 @@
 Name:           capstone
 Version:        4.0.2
-Release:        5%{?dist}
+Release:        9%{?dist}
 Summary:        A lightweight multi-platform, multi-architecture disassembly framework
 
 %global         gituser         aquynh
@@ -232,6 +232,18 @@ make check LD_LIBRARY_PATH="`pwd`"
 %{_javadir}/
 
 %changelog
+* Sat Feb 05 2022 Jiri Vanek <jvanek@redhat.com> - 4.0.2-9
+- Rebuilt for java-17-openjdk as system jdk
+
+* Wed Jan 19 2022 Fedora Release Engineering <releng@fedoraproject.org> - 4.0.2-8
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_36_Mass_Rebuild
+
+* Wed Jul 21 2021 Fedora Release Engineering <releng@fedoraproject.org> - 4.0.2-7
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_35_Mass_Rebuild
+
+* Fri Jun 04 2021 Python Maint <python-maint@redhat.com> - 4.0.2-6
+- Rebuilt for Python 3.10
+
 * Fri May 14 2021 Michal Ambroz <rebus AT_ seznam.cz> - 4.0.2-5
 - modernize specfile, using with bcond and py*_build macros
 

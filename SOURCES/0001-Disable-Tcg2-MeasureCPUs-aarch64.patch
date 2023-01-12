@@ -1,0 +1,112 @@
+diff --git a/SecurityPkg/Tcg/Tcg2Dxe/Tcg2Dxe.c b/SecurityPkg/Tcg/Tcg2Dxe/Tcg2Dxe.c
+index f6ea8b2..8aab70e 100644
+--- a/SecurityPkg/Tcg/Tcg2Dxe/Tcg2Dxe.c
++++ b/SecurityPkg/Tcg/Tcg2Dxe/Tcg2Dxe.c
+@@ -44,6 +44,7 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
+ #include <Library/PerformanceLib.h>
+ #include <Library/ReportStatusCodeLib.h>
+ #include <Library/Tcg2PhysicalPresenceLib.h>
++#include <Library/QemuFwCfgSimpleParserLib.h>
+ 
+ #define PERF_ID_TCG2_DXE  0x3120
+ 
+@@ -1935,6 +1936,14 @@ MeasureHandoffTables (
+   EFI_HANDOFF_TABLE_POINTERS  HandoffTables;
+   UINTN                       ProcessorNum;
+   EFI_CPU_PHYSICAL_LOCATION   *ProcessorLocBuf;
++  UINT8                             FwCfg_OciEnable = 0;
++
++  // Check for OCI-ENABLE fw-cfg option - which is set only in OCI env.
++  // Skip this for OCI since it causes inconsistent PCR  measurements
++  // upon vCPU config changes.
++  Status = QemuFwCfgParseUint8("opt/ovmf/OCI-ENABLE", TRUE, &FwCfg_OciEnable);
++  if (Status == EFI_SUCCESS && FwCfg_OciEnable)
++    return EFI_SUCCESS;
+ 
+   ProcessorLocBuf = NULL;
+   Status          = EFI_SUCCESS;
+diff --git a/SecurityPkg/Tcg/Tcg2Dxe/Tcg2Dxe.inf b/SecurityPkg/Tcg/Tcg2Dxe/Tcg2Dxe.inf
+index 7dc7a26..af1a570 100644
+--- a/SecurityPkg/Tcg/Tcg2Dxe/Tcg2Dxe.inf
++++ b/SecurityPkg/Tcg/Tcg2Dxe/Tcg2Dxe.inf
+@@ -45,6 +45,7 @@
+   MdeModulePkg/MdeModulePkg.dec
+   SecurityPkg/SecurityPkg.dec
+   CryptoPkg/CryptoPkg.dec
++  OvmfPkg/OvmfPkg.dec
+ 
+ [LibraryClasses]
+   MemoryAllocationLib
+@@ -64,6 +65,7 @@
+   ReportStatusCodeLib
+   Tcg2PhysicalPresenceLib
+   PeCoffLib
++  QemuFwCfgSimpleParserLib
+ 
+ [Guids]
+   ## SOMETIMES_CONSUMES     ## Variable:L"SecureBoot"
+diff --git a/SecurityPkg/Tcg/Tcg2Pei/Tcg2Pei.c b/SecurityPkg/Tcg/Tcg2Pei/Tcg2Pei.c
+index a97a4e7..066d439 100644
+--- a/SecurityPkg/Tcg/Tcg2Pei/Tcg2Pei.c
++++ b/SecurityPkg/Tcg/Tcg2Pei/Tcg2Pei.c
+@@ -40,6 +40,7 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
+ #include <Library/ReportStatusCodeLib.h>
+ #include <Library/ResetSystemLib.h>
+ #include <Library/PrintLib.h>
++#include <Library/QemuFwCfgSimpleParserLib.h>
+ 
+ #define PERF_ID_TCG2_PEI  0x3080
+ 
+@@ -940,6 +941,9 @@ PeimEntryMP (
+   )
+ {
+   EFI_STATUS  Status;
++#ifdef nodef
++  UINT8                FwCfg_OciEnable = 0;
++#endif
+ 
+   //
+   // install Tcg Services
+@@ -951,10 +955,19 @@ PeimEntryMP (
+     Status = MeasureCRTMVersion ();
+   }
+ 
+-  Status = MeasureMainBios ();
+-  if (EFI_ERROR (Status)) {
+-    return Status;
++// Currently, there is no QemuFwCfgLib defined for PEIM, so we just ifdef it out for now - TBD
++#ifdef nodef
++  // Check for OCI-ENABLE fw-cfg option - which is set only in OCI env.
++  // Do not do MeasureMainBios() for OCI since it causes inconsistent PCR
++  // measurements when the vCPU config changes.
++  Status = QemuFwCfgParseUint8("opt/ovmf/OCI-ENABLE", TRUE, &FwCfg_OciEnable);
++  if (Status != EFI_SUCCESS || !FwCfg_OciEnable) {
++    Status = MeasureMainBios ();
++    if (EFI_ERROR(Status)) {
++      return Status;
++    }
+   }
++#endif
+ 
+   //
+   // Post callbacks:
+diff --git a/SecurityPkg/Tcg/Tcg2Pei/Tcg2Pei.inf b/SecurityPkg/Tcg/Tcg2Pei/Tcg2Pei.inf
+index 06c26a2..77b40ac 100644
+--- a/SecurityPkg/Tcg/Tcg2Pei/Tcg2Pei.inf
++++ b/SecurityPkg/Tcg/Tcg2Pei/Tcg2Pei.inf
+@@ -39,6 +39,7 @@
+   MdePkg/MdePkg.dec
+   MdeModulePkg/MdeModulePkg.dec
+   SecurityPkg/SecurityPkg.dec
++  OvmfPkg/OvmfPkg.dec
+ 
+ [LibraryClasses]
+   HobLib
+@@ -55,6 +56,7 @@
+   ReportStatusCodeLib
+   ResetSystemLib
+   PrintLib
++#  QemuFwCfgSimpleParserLib   ## include once we get a PEIM instance for QemuFwCfgLib for aarch64
+ 
+ [Guids]
+   gTcgEventEntryHobGuid                                                ## PRODUCES               ## HOB

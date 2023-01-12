@@ -310,7 +310,7 @@ Obsoletes: %{name}-system-unicore32-core <= %{epoch}:%{version}-%{release}
 %endif
 
 # To prevent rpmdev-bumpspec breakage
-%global baserelease 1
+%global baserelease 3
 
 Summary: QEMU is a FAST! processor emulator
 Name: qemu
@@ -336,7 +336,9 @@ Source36: README.tests
 # Fix SGX assert
 Patch: 0001-target-i386-the-sgx_epc_get_section-stub-is-reachabl.patch
 Patch: 0001-tests-Disable-pci_virtio_vga-for-ppc64.patch
-Patch: 0010-Skip-iotests-entirely.patch
+# Fix compat with kernel-headers >= 6.1
+Patch: 0003-Revert-linux-user-add-more-compat-ioctl-definitions.patch
+Patch: 0004-Revert-linux-user-fix-compat-with-glibc-2.36-sys-mou.patch
 
 BuildRequires: meson >= %{meson_version}
 BuildRequires: zlib-devel
@@ -2744,6 +2746,13 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 
 %changelog
+* Tue Jan 10 2023 Daniel P. Berrangé <berrange@redhat.com> - 7.2.0-3
+- Fix compat with linux > 6.1 headers
+- Re-enable iotests
+
+* Tue Jan 03 2023 Richard W.M. Jones <rjones@redhat.com> - 2:7.2.0-2
+- Rebuild for xen-4.17.0
+
 * Mon Dec 19 2022 Eduardo Lima (Etrunko) <etrunko@redhat.com> - 7.2.0-1
 - Rebase to qemu 7.2.0
 
@@ -2945,125 +2954,3 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 * Mon Jan 11 2021 Paolo Bonzini <pbonzini@redhat.com> - 2:5.2.0-5
 - Use symlink for qemu-kvm.
 - Fix make check on bash 5.1.
-
-* Fri Dec 11 2020 Richard W.M. Jones <rjones@redhat.com> - 2:5.2.0-4
-- qemu-char-spice not qemu-chardev-spice.
-
-* Thu Dec 10 2020 Mohan Boddu <mboddu@bhujji.com> - 5.2.0-2
-- Fixing the ISA Dependencies
-
-* Wed Dec 09 2020 Cole Robinson <aintdiscole@gmail.com> - 5.2.0-1
-- Rebase to qemu-5.2.0 GA
-- Fix spice and GL UI module deps (bz 1904603)
-
-* Thu Dec 03 2020 Richard W.M. Jones <rjones@redhat.com> - 5.2.0-0.9.rc4
-- Enable qemu-kvm-core package on riscv64.
-
-* Thu Dec 03 2020 Cole Robinson <aintdiscole@gmail.com> - 5.2.0-0.8.rc4
-- Rebase to qemu-5.2.0-rc4
-
-* Tue Nov 24 2020 Cole Robinson <aintdiscole@gmail.com> - 5.2.0-0.7.rc2
-- Fix running 9p tests in copr
-
-* Thu Nov 19 2020 Paolo Bonzini <pbonzini@redhat.com> - 5.2.0-0.6.rc2
-- Remove --python=... to force use of system meson
-
-* Thu Nov 19 2020 Daniel P. Berrangé <berrange@redhat.com> - 5.2.0-0.5.rc2
-- Re-enable systemtap tracing
-
-* Wed Nov 18 2020 Cole Robinson <aintdiscole@gmail.com> - 5.2.0-0.4.rc2
-- Rebase to qemu-5.2.0-rc2
-
-* Fri Nov 13 2020 Daniel P. Berrangé <berrange@redhat.com> - 5.2.0-0.3.rc1
-- Disable user mode static builds in ELN
-
-* Wed Nov 11 2020 Cole Robinson <aintdiscole@gmail.com> - 5.2.0-0.2.rc1
-- Rebase to qemu-5.2.0-rc1
-
-* Sun Nov 08 2020 Cole Robinson <aintdiscole@gmail.com> - 5.2.0-0.1.rc0
-- Rebase to qemu-5.2.0-rc0
-
-* Thu Nov  5 2020 Daniel P. Berrangé <berrange@redhat.com> - 5.1.0-7
-- Disable LTO again. Tests were not passing, we were ignoring failures.
-
-* Mon Oct 26 2020 Daniel P. Berrangé <berrange@redhat.com> - 5.1.0-6
-- Re-enable LTO since tests now pass without asserts
-
-* Fri Sep  4 2020 Daniel P. Berrangé <berrange@redhat.com> - 5.1.0-5
-- Drop conditions for ppc, ppc64, mips64 and s390 arches
-- Fix host qemu binary path for aarch64
-- Re-enable kernel BR for QEMU sanity check
-- Fix conditionals for enabling QEMU sanity check
-- Check whether emulator works before doing sanity check
-- Provide explicit kernel path for QEMU sanity check
-- Make QEMU sanity check a build blocker
-
-* Thu Sep  3 2020 Daniel P. Berrangé <berrange@redhat.com> - 5.1.0-4
-- Add btrfs ioctls to linux-user (rhbz #1872918)
-
-* Tue Aug 18 2020 Tom Stellard <tstellar@redhat.com> - 5.1.0-3
-- Add BuildRequires: gcc
-- https://fedoraproject.org/wiki/Packaging:C_and_C%2B%2B#BuildRequires_and_Requires
-
-* Mon Aug 17 2020 Cole Robinson <aintdiscole@gmail.com> - 5.1.0-2
-- Disable dtrace generation to fix use of modules (bz 1869339)
-
-* Tue Aug 11 2020 Cole Robinson <crobinso@redhat.com> - 5.1.0-1
-- Update to version 5.1.0
-
-* Fri Aug 07 2020 Cole Robinson <crobinso@redhat.com> - 5.1.0-0.3.rc3
-- Update to version 5.1.0-rc3
-
-* Thu Aug 06 2020 Merlin Mathesius <mmathesi@redhat.com> - 5.1.0-0.2.rc2
-- Use new %%{kernel_arches} macro to determine when a full kernel is available
-
-* Wed Aug 05 2020 Cole Robinson <aintdiscole@gmail.com> - 5.1.0-0.2.rc2
-- Pull in new modules by default, like we do for others
-
-* Tue Aug 04 2020 Cole Robinson <aintdiscole@gmail.com> - 5.1.0-0.1.rc2
-- Update to qemu 5.1.0 rc2
-
-* Fri Jul 31 2020 Daniel P. Berrangé <berrange@redhat.com> - 5.0.0-6
-- Remove obsolete Fedora conditionals (PR#9)
-
-* Thu Jul 30 2020 Richard W.M. Jones <rjones@redhat.com> - 5.0.0-5
-- Disable LTO as it caused many strange assert failures.
-
-* Wed Jul 29 2020 Richard W.M. Jones <rjones@redhat.com> - 5.0.0-4
-- Backport Dan's upstream patch to fix insecure cert in test suite.
-
-* Mon Jul 27 2020 Kevin Fenzi <kevin@scrye.com> - 5.0.0-3
-- Rebuild for new xen
-
-* Wed May 13 2020 Cole Robinson <crobinso@redhat.com> - 5.0.0-2
-- Fix iouring hang (bz #1823751)
-
-* Wed May 06 2020 Cole Robinson <crobinso@redhat.com> - 5.0.0-1
-- Update to version 5.0.0
-
-* Thu Apr 16 2020 Cole Robinson <aintdiscole@gmail.com> - 5.0.0-0.3.rc3
-- Update to qemu 5.0.0 rc3
-
-* Thu Apr 09 2020 Cole Robinson <aintdiscole@gmail.com> - 5.0.0-0.3.rc2
-- Update to qemu 5.0.0 rc2
-
-* Wed Apr 08 2020 Adam Williamson <awilliam@redhat.com> - 2:5.0.0-0.2.rc0
-- Rebuild for new brltty
-
-* Wed Mar 25 2020 Cole Robinson <crobinso@redhat.com> - 2:5.0.0-0.1.rc0
-- Update to qemu-5.0.0-rc0
-
-* Tue Mar 17 2020 Fabiano Fidêncio <fidencio@redhat.com> - 2:4.2.0-7
-- Fix segfault with SR-IOV hot-{plug,unplug} (bz #1814017)
-
-* Tue Feb 25 2020 Cole Robinson <crobinso@redhat.com> - 2:4.2.0-6
-- Rebuild for libiscsi soname bump
-
-* Sat Feb 15 2020 Cole Robinson <crobinso@redhat.com> - 2:4.2.0-5
-- Fix ppc shutdown issue (bz #1784961)
-
-* Tue Jan 28 2020 Cole Robinson <crobinso@redhat.com> - 2:4.2.0-4
-- virtio-fs support
-
-* Sat Jan 25 2020 Richard W.M. Jones <rjones@redhat.com> - 4.2.0-3
-- Add miscellaneous fixes for RISC-V (RHBZ#1794902).

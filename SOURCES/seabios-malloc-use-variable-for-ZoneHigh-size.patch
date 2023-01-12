@@ -1,0 +1,69 @@
+From 1c38dda9009b11aa935b9cd32043338c250f4de2 Mon Sep 17 00:00:00 2001
+From: Gerd Hoffmann <kraxel@redhat.com>
+Date: Mon, 25 Apr 2022 09:20:02 +0200
+Subject: [PATCH 1/2] malloc: use variable for ZoneHigh size
+
+RH-Author: Gerd Hoffmann <kraxel@redhat.com>
+RH-MergeRequest: 3: malloc: use large ZoneHigh when there is enough memory
+RH-Commit: [1/2] 4265a009c535ebb7a592cc610266ba02546ec77d (kraxel/centos-seabios)
+RH-Bugzilla: 2004662
+RH-Acked-by: Miroslav Rezanina <mrezanin@redhat.com>
+RH-Acked-by: Oliver Steffen <osteffen@redhat.com>
+
+Use the variable highram_size instead of the BUILD_MAX_HIGHTABLE #define
+for the ZoneHigh size. Initialize the new variable with the old #define,
+so behavior does not change.
+
+This allows to easily adjust the ZoneHigh size at runtime in a followup
+patch.
+
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+(cherry picked from commit 3b91e8e9fe93d5ff7edf17f984c401f9e6ba55fe)
+---
+ src/malloc.c | 15 ++++++++-------
+ 1 file changed, 8 insertions(+), 7 deletions(-)
+
+diff --git a/src/malloc.c b/src/malloc.c
+index 3733855c..ecd8c9ac 100644
+--- a/src/malloc.c
++++ b/src/malloc.c
+@@ -422,7 +422,8 @@ malloc_preinit(void)
+     e820_add(BUILD_BIOS_ADDR, BUILD_BIOS_SIZE, E820_RESERVED);
+ 
+     // Populate temp high ram
+-    u32 highram = 0;
++    u32 highram_start = 0;
++    u32 highram_size = BUILD_MAX_HIGHTABLE;
+     int i;
+     for (i=e820_count-1; i>=0; i--) {
+         struct e820entry *en = &e820_list[i];
+@@ -432,10 +433,10 @@ malloc_preinit(void)
+         if (en->type != E820_RAM || end > 0xffffffff)
+             continue;
+         u32 s = en->start, e = end;
+-        if (!highram) {
+-            u32 newe = ALIGN_DOWN(e - BUILD_MAX_HIGHTABLE, MALLOC_MIN_ALIGN);
++        if (!highram_start) {
++            u32 newe = ALIGN_DOWN(e - highram_size, MALLOC_MIN_ALIGN);
+             if (newe <= e && newe >= s) {
+-                highram = newe;
++                highram_start = newe;
+                 e = newe;
+             }
+         }
+@@ -444,9 +445,9 @@ malloc_preinit(void)
+ 
+     // Populate regions
+     alloc_add(&ZoneTmpLow, BUILD_STACK_ADDR, BUILD_EBDA_MINIMUM);
+-    if (highram) {
+-        alloc_add(&ZoneHigh, highram, highram + BUILD_MAX_HIGHTABLE);
+-        e820_add(highram, BUILD_MAX_HIGHTABLE, E820_RESERVED);
++    if (highram_start) {
++        alloc_add(&ZoneHigh, highram_start, highram_start + highram_size);
++        e820_add(highram_start, highram_size, E820_RESERVED);
+     }
+ }
+ 
+-- 
+2.31.1
+

@@ -1,0 +1,70 @@
+From f8c75c66a29fae7ff1e3bf23f382cd8f04e695a1 Mon Sep 17 00:00:00 2001
+From: Gerd Hoffmann <kraxel@redhat.com>
+Date: Mon, 25 Apr 2022 09:25:31 +0200
+Subject: [PATCH 2/2] malloc: use large ZoneHigh when there is enough memory
+
+RH-Author: Gerd Hoffmann <kraxel@redhat.com>
+RH-MergeRequest: 3: malloc: use large ZoneHigh when there is enough memory
+RH-Commit: [2/2] 93b15659b39b9772c7620ddfbf558e11008bb8f9 (kraxel/centos-seabios)
+RH-Bugzilla: 2004662
+RH-Acked-by: Miroslav Rezanina <mrezanin@redhat.com>
+RH-Acked-by: Oliver Steffen <osteffen@redhat.com>
+
+In case there is enough memory installed use a large ZoneHigh.
+
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+(cherry picked from commit dc88f9b72df52b22c35b127b80c487e0b6fca4af)
+---
+ src/config.h |  3 ++-
+ src/malloc.c | 14 +++++++++-----
+ 2 files changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/src/config.h b/src/config.h
+index 93c8dbc2..9abe355b 100644
+--- a/src/config.h
++++ b/src/config.h
+@@ -17,7 +17,8 @@
+ // Maximum number of map entries in the e820 map
+ #define BUILD_MAX_E820 32
+ // Space to reserve in high-memory for tables
+-#define BUILD_MAX_HIGHTABLE (256*1024)
++#define BUILD_MIN_HIGHTABLE (256*1024)
++#define BUILD_MAX_HIGHTABLE (16*1024*1024)
+ // Largest supported externaly facing drive id
+ #define BUILD_MAX_EXTDRIVE 16
+ // Number of bytes the smbios may be and still live in the f-segment
+diff --git a/src/malloc.c b/src/malloc.c
+index ecd8c9ac..da840980 100644
+--- a/src/malloc.c
++++ b/src/malloc.c
+@@ -423,7 +423,7 @@ malloc_preinit(void)
+ 
+     // Populate temp high ram
+     u32 highram_start = 0;
+-    u32 highram_size = BUILD_MAX_HIGHTABLE;
++    u32 highram_size = 0;
+     int i;
+     for (i=e820_count-1; i>=0; i--) {
+         struct e820entry *en = &e820_list[i];
+@@ -434,10 +434,14 @@ malloc_preinit(void)
+             continue;
+         u32 s = en->start, e = end;
+         if (!highram_start) {
+-            u32 newe = ALIGN_DOWN(e - highram_size, MALLOC_MIN_ALIGN);
+-            if (newe <= e && newe >= s) {
+-                highram_start = newe;
+-                e = newe;
++            u32 new_max = ALIGN_DOWN(e - BUILD_MAX_HIGHTABLE, MALLOC_MIN_ALIGN);
++            u32 new_min = ALIGN_DOWN(e - BUILD_MIN_HIGHTABLE, MALLOC_MIN_ALIGN);
++            if (new_max <= e && new_max >= s + BUILD_MAX_HIGHTABLE) {
++                highram_start = e = new_max;
++                highram_size = BUILD_MAX_HIGHTABLE;
++            } else if (new_min <= e && new_min >= s) {
++                highram_start = e = new_min;
++                highram_size = BUILD_MIN_HIGHTABLE;
+             }
+         }
+         alloc_add(&ZoneTmpHigh, s, e);
+-- 
+2.31.1
+

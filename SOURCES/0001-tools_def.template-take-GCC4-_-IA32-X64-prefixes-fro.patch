@@ -1,0 +1,46 @@
+From afbd2b005b00cb7e8d35f98a2fec09decf4fcfb6 Mon Sep 17 00:00:00 2001
+From: Laszlo Ersek <lersek@redhat.com>
+Date: Wed, 29 Jan 2014 13:13:11 +0100
+Subject: [PATCH] tools_def.template: take GCC4?_(IA32|X64) prefixes from the
+ environment
+
+The default BaseTools compiler configuration hard-codes the prefix for gcc
+(== /usr/bin). While this matches the gcc-4.x installation path on most
+distributions, it prevents users from specifying gcc-4.x binaries in
+different locations.
+
+Replace the hard-coded prefixes with environment variables. Users can set
+the prefixes explicitly, or leave the variables unset, in which case PATH
+will be searched as usual.
+
+A practical use case for this patch is distcc, installed in "masquerade
+mode". edk2 supports parallel builds, and distcc can greatly speed it up.
+
+Signed-off-by: Laszlo Ersek <lersek@redhat.com>
+---
+ BaseTools/Conf/tools_def.template | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/BaseTools/Conf/tools_def.template b/BaseTools/Conf/tools_def.template
+index 4d74816837..e93cbf2ab7 100755
+--- a/BaseTools/Conf/tools_def.template
++++ b/BaseTools/Conf/tools_def.template
+@@ -187,11 +187,11 @@ DEFINE CYGWIN_BIN              = c:/cygwin/bin
+ DEFINE CYGWIN_BINIA32          = c:/cygwin/opt/tiano/i386-tiano-pe/i386-tiano-pe/bin/
+ DEFINE CYGWIN_BINX64           = c:/cygwin/opt/tiano/x86_64-pc-mingw64/x86_64-pc-mingw64/bin/
+ 
+-DEFINE GCC48_IA32_PREFIX       = ENV(GCC48_BIN)
+-DEFINE GCC48_X64_PREFIX        = ENV(GCC48_BIN)
++DEFINE GCC48_IA32_PREFIX       = ENV(GCC48_BIN)ENV(GCC48_IA32_PREFIX)
++DEFINE GCC48_X64_PREFIX        = ENV(GCC48_BIN)ENV(GCC48_X64_PREFIX)
+ 
+-DEFINE GCC49_IA32_PREFIX       = ENV(GCC49_BIN)
+-DEFINE GCC49_X64_PREFIX        = ENV(GCC49_BIN)
++DEFINE GCC49_IA32_PREFIX       = ENV(GCC49_BIN)ENV(GCC49_IA32_PREFIX)
++DEFINE GCC49_X64_PREFIX        = ENV(GCC49_BIN)ENV(GCC49_X64_PREFIX)
+ 
+ DEFINE GCC5_IA32_PREFIX        = ENV(GCC5_BIN)
+ DEFINE GCC5_X64_PREFIX         = ENV(GCC5_BIN)
+-- 
+2.9.3
+

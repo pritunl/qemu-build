@@ -1,0 +1,13 @@
+diff --git a/BaseTools/Source/C/DevicePath/GNUmakefile b/BaseTools/Source/C/DevicePath/GNUmakefile
+index b05d2bd..c84a022 100644
+--- a/BaseTools/Source/C/DevicePath/GNUmakefile
++++ b/BaseTools/Source/C/DevicePath/GNUmakefile
+@@ -14,7 +14,7 @@ OBJECTS = DevicePath.o UefiDevicePathLib.o DevicePathFromText.o  DevicePathUtili
+ include $(MAKEROOT)/Makefiles/app.makefile
+ 
+ # gcc 12 trips over device path handling
+-BUILD_CFLAGS += -Wno-error=stringop-overflow
++#BUILD_CFLAGS += -Wno-error=stringop-overflow
+ 
+ LIBS = -lCommon
+ ifeq ($(CYGWIN), CYGWIN)

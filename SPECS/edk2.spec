@@ -1,954 +1,424 @@
-# https://fedoraproject.org/wiki/Changes/SetBuildFlagsBuildCheck
-# breaks cross-building
-%undefine _auto_set_build_flags
+            #GIT_CMT=63d08c648e2a0cf096573f3113c37b850a884fd5
+%global debug_package %{nil}
+%global python_ver python3
 
-# actual firmware builds support cross-compiling.  edk2-tools
-# in theory should build everywhere without much trouble, but
-# in practice the edk2 build system barfs on archs it doesn't know
-# (such as ppc), so lets limit things to the known-good ones.
-ExclusiveArch: x86_64 aarch64
+#
+# Example ARCHIVE Generation:
+# export COMMIT=b6e48ec6
+# export VERSION=20191205
+# export RELEASE=1.el9
+# rpmdev-setuptree
+# git-archive-all --prefix edk2-${VERSION}/ ~/rpmbuild/SOURCES/edk2-${RELEASE}.tar.gz
+#
+# Copy over patches/files:
+# cp buildrpm/ol9/* ~/rpmbuild/SOURCES
+#
+# Build the RPMs:
+# rpmbuild -ba buildrpm/ol9/edk2.spec
+#
+Name:		edk2
+Version:	20220628
+Release:    1.el9
+Epoch:		30
+Summary:	UEFI Firmware for 64-bit virtual machines
 
-# edk2-stable202205
-%define GITDATE        20221117
-%define GITCOMMIT      fff6d81270b5
-%define TOOLCHAIN      GCC5
-%define OPENSSL_VER    1.1.1k
+Group:		Applications/Emulators
+License:	BSD and OpenSSL
+URL:		http://www.tianocore.org
+Source0: edk2-20220628.tar.bz2
+Source3:	OpenSSL-1.1.1n-d82e959e621a3d597f1e0d50ff8c2d8b96915fd7.tgz
+Source4:	BaseTools-BrotliCompress-f4153a09f87cbb9c826d8fc12c74642bb2d879ea.tgz
+Source5:	MdeModulePkg-BrotliCustomDecompressLib-f4153a09f87cbb9c826d8fc12c74642bb2d879ea.tgz
+Source6:	nasm
 
-%if %{defined rhel}
-%define build_ovmf 0
-%define build_aarch64 0
-%ifarch x86_64
-  %define build_ovmf 1
-%endif
-%ifarch aarch64
-  %define build_aarch64 1
-%endif
-%else
-%define build_ovmf 1
-%define build_aarch64 1
-%endif
+Patch4:		0001-MdeModulePkg-TerminalDxe-add-other-text-resolutions.patch
+Patch5:		0002-EXCLUDE_SHELL_FROM_FD.patch
 
-%global softfloat_version 20180726-gitb64af41
-%define cross %{defined fedora}
-%define disable_werror %{defined fedora}
+#Patch10:	0001-OvmfPkg-SmbiosPlatformDxe-install-legacy-QEMU-tables.patch
+#Patch11:	0002-OvmfPkg-SmbiosPlatformDxe-install-patch-default-lega.patch
+#Patch12:	0003-OvmfPkg-SmbiosPlatformDxe-install-patch-default-lega.patch
+Patch13:	0004-OvmfPkg-SmbiosPlatformDxe-install-legacy-QEMU-tables.patch
 
+Patch30:	0001-tools_def.template-take-GCC4-_-IA32-X64-prefixes-fro.patch
 
-Name:       edk2
-Version:    %{GITDATE}git%{GITCOMMIT}
-Release:    9%{?dist}
-Summary:    UEFI firmware for 64-bit virtual machines
-License:    BSD-2-Clause-Patent and OpenSSL and MIT
-URL:        http://www.tianocore.org
+Patch40:	0001-MdeModulePkg-silence-image-start-error.patch
+Patch50:	0002-OvmfPkgX64-DSC-Updates.patch
+Patch51:	0001-ArmVirtPkg-DSC-Updates.patch
+Patch60:	0002-Smbios-ovmf-version-update.patch
+Patch70:	0001-Bug31156337-Connect-MassStorage-WAR.patch
+#Patch80:	0001-Silence-BootOption-Load-Errors.patch
+Patch85:	0001-BaseTools-GCC12-Compile-error1-fix1.patch
+Patch105:	0001-ArmPlatformPkg-NorFlashDxe-Allow_Readonly.patch
+Patch110:	0001-SecurityPkg-Disable-Secureboot-User-Config.patch
+Patch111:	0001-Disable-Tcg2-MeasureCPUs-x86_64.patch
+Patch112:	0001-Disable-Tcg2-MeasureCPUs-aarch64.patch
+Patch120:	0001-SecureBoot-Logging1.patch
+Patch121:	0001-Serial-Console-Output1.patch
+Patch125:	0001-Serial-Console-Debug.patch
+Patch126:	0001-Assert-On-Serial-Port.patch
+Patch130:	0001-Bug33117114-SevResetLoop-WAR.patch
 
-# The source tarball is created using following commands:
-# COMMIT=bb1bba3d7767
-# git archive --format=tar --prefix=edk2-$COMMIT/ $COMMIT \
-# | xz -9ev >/tmp/edk2-$COMMIT.tar.xz
-Source0: edk2-%{GITCOMMIT}.tar.xz
-Source1: ovmf-whitepaper-c770f8c.txt
-Source2: openssl-rhel-740e53ace8f6771c205bf84780e26bcd7a3275df.tar.xz
-Source3: softfloat-%{softfloat_version}.tar.xz
-
-# json description files
-Source10: 50-edk2-aarch64.json
-Source11: 51-edk2-aarch64-verbose.json
-
-Source20: 50-edk2-arm-verbose.json
-
-Source30: 30-edk2-ovmf-ia32-sb-enrolled.json
-Source31: 40-edk2-ovmf-ia32-sb.json
-Source32: 50-edk2-ovmf-ia32-nosb.json
-
-Source40: 30-edk2-ovmf-x64-sb-enrolled.json
-Source41: 40-edk2-ovmf-x64-sb.json
-Source42: 50-edk2-ovmf-x64-microvm.json
-Source43: 50-edk2-ovmf-x64-nosb.json
-Source44: 60-edk2-ovmf-x64-amdsev.json
-Source45: 60-edk2-ovmf-x64-inteltdx.json
-
-# https://gitlab.com/kraxel/edk2-build-config
-Source80: edk2-build.py
-Source81: edk2-build.fedora
-Source82: edk2-build.rhel-9
-
-Source90: DBXUpdate-20200729.x64.bin
-
-Patch0001: 0001-BaseTools-do-not-build-BrotliCompress-RH-only.patch
-Patch0002: 0002-MdeModulePkg-remove-package-private-Brotli-include-p.patch
-#Patch0003: 0003-MdeModulePkg-TerminalDxe-add-other-text-resolutions-.patch
-Patch0004: 0004-MdeModulePkg-TerminalDxe-set-xterm-resolution-on-mod.patch
-Patch0005: 0005-OvmfPkg-take-PcdResizeXterm-from-the-QEMU-command-li.patch
-Patch0006: 0006-ArmVirtPkg-take-PcdResizeXterm-from-the-QEMU-command.patch
-Patch0007: 0007-OvmfPkg-enable-DEBUG_VERBOSE-RHEL-only.patch
-Patch0008: 0008-OvmfPkg-silence-DEBUG_VERBOSE-0x00400000-in-QemuVide.patch
-Patch0009: 0009-ArmVirtPkg-silence-DEBUG_VERBOSE-0x00400000-in-QemuR.patch
-Patch0010: 0010-OvmfPkg-QemuRamfbDxe-Do-not-report-DXE-failure-on-Aa.patch
-Patch0011: 0011-OvmfPkg-silence-EFI_D_VERBOSE-0x00400000-in-NvmExpre.patch
-Patch0012: 0012-CryptoPkg-OpensslLib-list-RHEL8-specific-OpenSSL-fil.patch
-Patch0013: 0013-OvmfPkg-QemuKernelLoaderFsDxe-suppress-error-on-no-k.patch
-Patch0014: 0014-SecurityPkg-Tcg2Dxe-suppress-error-on-no-swtpm-in-si.patch
-Patch0015: 0015-Tweak-the-tools_def-to-support-cross-compiling.patch
-Patch0016: 0016-tools_def-add-fno-omit-frame-pointer-to-GCC48_-IA32-.patch
-Patch0017: 0017-Revert-ArmVirtPkg-make-EFI_LOADER_DATA-non-executabl.patch
-Patch0018: 0018-Revert-OvmfPkg-PlatformDxe-Handle-all-requests-in-Ex.patch
-Patch0019: 0019-OvmfPkg-SmbiosPlatformDxe-use-PcdFirmware.patch
-Patch0020: 0020-OvmfPkg-PlatformPei-AmdSev-stop-using-mPlatformInfoH.patch
-Patch0021: 0021-OvmfPkg-PlatformPei-PeiFv-stop-using-mPlatformInfoHo.patch
-Patch0022: 0022-OvmfPkg-PlatformPei-Q35-SMM-helpers-stop-using-mPlat.patch
-Patch0023: 0023-OvmfPkg-PlatformPei-PeiMemory-stop-using-mPlatformIn.patch
-Patch0024: 0024-OvmfPkg-PlatformPei-MemTypeInfo-stop-using-mPlatform.patch
-Patch0025: 0025-OvmfPkg-PlatformPei-NoExec-stop-using-mPlatformInfoH.patch
-Patch0026: 0026-OvmfPkg-PlatformPei-Verification-stop-using-mPlatfor.patch
-Patch0027: 0027-OvmfPkg-PlatformPei-remove-mPlatformInfoHob.patch
-Patch0028: 0028-OvmfPkg-PlatformPei-remove-mFeatureControlValue.patch
-Patch0029: 0029-OvmfPkg-DebugLibIoPort-use-Rom-version-for-PEI.patch
-Patch0030: 0030-OvmfPkg-QemuFwCfgLib-rewrite-fw_cfg-probe.patch
-Patch0031: 0031-OvmfPkg-QemuFwCfgLib-remove-mQemuFwCfgSupported-mQem.patch
-
-
-# python3-devel and libuuid-devel are required for building tools.
-# python3-devel is also needed for varstore template generation and
-# verification with "ovmf-vars-generator".
-BuildRequires:  python3-devel
-BuildRequires:  libuuid-devel
-BuildRequires:  /usr/bin/iasl
-BuildRequires:  binutils gcc git gcc-c++ make
-
-%if %{build_ovmf}
-# Only OVMF includes 80x86 assembly files (*.nasm*).
-BuildRequires:  nasm
-
-# Only OVMF includes the Secure Boot feature, for which we need to separate out
-# the UEFI shell.
-BuildRequires:  dosfstools
-BuildRequires:  mtools
-BuildRequires:  xorriso
-
-# For generating the variable store template with the default certificates
-# enrolled.
-BuildRequires:  python3-virt-firmware >= 1.7
-
-# endif build_ovmf
-%endif
-
-%if %{cross}
-BuildRequires:  gcc-aarch64-linux-gnu
-BuildRequires:  gcc-arm-linux-gnu
-BuildRequires:  gcc-x86_64-linux-gnu
-%endif
-
-
-
-%package ovmf
-Summary:    UEFI firmware for x86_64 virtual machines
-BuildArch:  noarch
-Provides:   OVMF = %{version}-%{release}
-Obsoletes:  OVMF < 20180508-100.gitee3198e672e2.el7
-
-# OVMF includes the Secure Boot and IPv6 features; it has a builtin OpenSSL
-# library.
-Provides:   bundled(openssl) = %{OPENSSL_VER}
-License:    BSD-2-Clause-Patent and OpenSSL
-
-# URL taken from the Maintainers.txt file.
-URL:        http://www.tianocore.org/ovmf/
-
-%description ovmf
-OVMF (Open Virtual Machine Firmware) is a project to enable UEFI support for
-Virtual Machines. This package contains a sample 64-bit UEFI firmware for QEMU
-and KVM.
-
-
-%package aarch64
-Summary:    UEFI firmware for aarch64 virtual machines
-BuildArch:  noarch
-Provides:   AAVMF = %{version}-%{release}
-Obsoletes:  AAVMF < 20180508-100.gitee3198e672e2.el7
-
-# No Secure Boot for AAVMF yet, but we include OpenSSL for the IPv6 stack.
-Provides:   bundled(openssl) = %{OPENSSL_VER}
-License:    BSD-2-Clause-Patent and OpenSSL
-
-# URL taken from the Maintainers.txt file.
-URL:        https://github.com/tianocore/tianocore.github.io/wiki/ArmVirtPkg
-
-%description aarch64
-AAVMF (ARM Architecture Virtual Machine Firmware) is an EFI Development Kit II
-platform that enables UEFI support for QEMU/KVM ARM Virtual Machines. This
-package contains a 64-bit build.
-
-
-%package tools
-Summary:        EFI Development Kit II Tools
-License:        BSD-2-Clause-Patent
-URL:            https://github.com/tianocore/tianocore.github.io/wiki/BaseTools
-%description tools
-This package provides tools that are needed to
-build EFI executables and ROMs using the GNU tools.
-
-%package tools-doc
-Summary:        Documentation for EFI Development Kit II Tools
-BuildArch:      noarch
-License:        BSD-2-Clause-Patent
-URL:            https://github.com/tianocore/tianocore.github.io/wiki/BaseTools
-%description tools-doc
-This package documents the tools that are needed to
-build EFI executables and ROMs using the GNU tools.
+BuildRequires:	mtools
+BuildRequires:	dosfstools
+BuildRequires:	iasl
+BuildRequires:	python3
+BuildRequires:	libuuid-devel
+BuildRequires:	git
 
 %description
-EDK II is a modern, feature-rich, cross-platform firmware development
-environment for the UEFI and PI specifications. This package contains sample
-64-bit UEFI firmware builds for QEMU and KVM.
-
-
-%if %{defined fedora}
-%package ovmf-ia32
-Summary:        Open Virtual Machine Firmware
-License:        BSD-2-Clause-Patent and OpenSSL
-Provides:       bundled(openssl)
-BuildArch:      noarch
-%description ovmf-ia32
 EFI Development Kit II
-Open Virtual Machine Firmware (ia32)
 
-%package ovmf-experimental
-Summary:        Open Virtual Machine Firmware, experimental builds
-License:        BSD-2-Clause-Patent and OpenSSL
-Provides:       bundled(openssl)
-BuildArch:      noarch
-%description ovmf-experimental
-EFI Development Kit II
-Open Virtual Machine Firmware (experimental builds)
+%package tools
+Summary:	EFI Development Kit II Tools
+%description tools
+EFI Development Kit II Tools
 
-%package arm
-Summary:        ARM Virtual Machine Firmware
-BuildArch:      noarch
-License:        BSD-2-Clause-Patent and OpenSSL
-%description arm
-EFI Development Kit II
-ARMv7 UEFI Firmware
 
-%package tools-python
-Summary:        EFI Development Kit II Tools
-Requires:       python3
+%ifarch x86_64
+%global subpkgname ovmf
+
+%package ovmf 
+Summary:	UEFI Firmware for 64-bit virtual machines
+License:	BSD and OpenSSL
 BuildArch:      noarch
 
-%description tools-python
-This package provides tools that are needed to build EFI executables
-and ROMs using the GNU tools.  You do not need to install this package;
-you probably want to install edk2-tools only.
-# endif fedora
+%description ovmf
+UEFI Firmware for 64-bit virtual machines
 %endif
 
 
+%ifarch aarch64
+%global subpkgname aarch64
+
+%package aarch64 
+Summary:	UEFI Firmware for aarch64 virtual machines
+License:	BSD
+BuildArch:      noarch
+
+%description aarch64 
+UEFI Firmware for aarch64 virtual machines
+%endif
 
 %prep
-# We needs some special git config options that %%autosetup won't give us.
-# We init the git dir ourselves, then tell %%autosetup not to blow it away.
-%setup -q -n edk2-%{GITCOMMIT}
-git init -q
-git config core.whitespace cr-at-eol
-git config am.keepcr true
-# -T is passed to %%setup to not re-extract the archive
-# -D is passed to %%setup to not delete the existing archive dir
-%autosetup -T -D -n edk2-%{GITCOMMIT} -S git_am
+%setup -q -n %{name}-%{version}
 
-cp -a -- %{SOURCE1} .
-tar -C CryptoPkg/Library/OpensslLib -a -f %{SOURCE2} -x
-# extract softfloat into place
-tar -xf %{SOURCE3} --strip-components=1 --directory ArmPkg/Library/ArmSoftFloatLib/berkeley-softfloat-3/
+%patch4 -p1
+%patch5 -p1
+#%patch10 -p1
+#%patch11 -p1
+#%patch12 -p1
+%patch13 -p1
+%patch30 -p1
+%patch40 -p1
+%patch50 -p1
+%patch51 -p1
+%patch60 -p1
+%patch70 -p1
+#%patch80 -p1
+%patch85 -p1
+%patch105 -p1
+%patch110 -p1
+%ifarch x86_64
+%patch111 -p1
+%endif
+%ifarch aarch64
+%patch112 -p1
+%endif
+%patch120 -p1
+%patch121 -p1
+%patch125 -p1
+%patch126 -p1
+%patch130 -p1
 
-# Done by %setup, but we do not use it for the auxiliary tarballs
-chmod -Rf a+rX,u+w,g-w,o-w .
+cp -a -- %{SOURCE3} .
+cp -a -- %{SOURCE4} .
+cp -a -- %{SOURCE5} .
+cp -a -- %{SOURCE6} .
 
-cp -a -- \
-   %{SOURCE10} %{SOURCE11} \
-   %{SOURCE20} \
-   %{SOURCE30} %{SOURCE31} %{SOURCE32} \
-   %{SOURCE40} %{SOURCE41} %{SOURCE42} %{SOURCE43} %{SOURCE44} %{SOURCE45} \
-   %{SOURCE80} %{SOURCE81} %{SOURCE82} \
-   %{SOURCE90} \
-   .
+tar xfz OpenSSL-1.1.1n-d82e959e621a3d597f1e0d50ff8c2d8b96915fd7.tgz -C CryptoPkg/Library/OpensslLib/
+tar xfz BaseTools-BrotliCompress-f4153a09f87cbb9c826d8fc12c74642bb2d879ea.tgz -C BaseTools/Source/C/BrotliCompress
+tar xfz MdeModulePkg-BrotliCustomDecompressLib-f4153a09f87cbb9c826d8fc12c74642bb2d879ea.tgz -C MdeModulePkg/Library/BrotliCustomDecompressLib
+
+# Patch brotli to use the -Wno-error=vla-parameter to workaround build error with GCC 11+
+sed -i '/^LIBS/a BUILD_CFLAGS += -Wno-error=vla-parameter' BaseTools/Source/C/BrotliCompress/GNUmakefile 
+sed -i '/^CFLAGS/a BUILD_CFLAGS += -Wno-error=vla-parameter' MdeModulePkg/Library/BrotliCustomDecompressLib/brotli/Makefile
 
 %build
 
-build_iso() {
-  dir="$1"
-  UEFI_SHELL_BINARY=${dir}/Shell.efi
-  ENROLLER_BINARY=${dir}/EnrollDefaultKeys.efi
-  UEFI_SHELL_IMAGE=uefi_shell.img
-  ISO_IMAGE=${dir}/UefiShell.iso
+# Build Oracle/OvmfVarsMgr utilities first (as it is used for OVMF/AAVMF build)
+cd Oracle/OvmfVarsMgr/
+%ifarch x86_64
+make ARCH=x86_64
+%endif
+%ifarch aarch64
+make ARCH=arm64
+%endif
+cd ../..
 
-  UEFI_SHELL_BINARY_BNAME=$(basename -- "$UEFI_SHELL_BINARY")
-  UEFI_SHELL_SIZE=$(stat --format=%s -- "$UEFI_SHELL_BINARY")
-  ENROLLER_SIZE=$(stat --format=%s -- "$ENROLLER_BINARY")
+# specify the proper python for use by the edk build system
+PYTHON_COMMAND=%{python_ver}
+export PYTHON_COMMAND
+source ./edksetup.sh
 
-  # add 1MB then 10% for metadata
-  UEFI_SHELL_IMAGE_KB=$((
-    (UEFI_SHELL_SIZE + ENROLLER_SIZE + 1 * 1024 * 1024) * 11 / 10 / 1024
-  ))
+# figure tools switch
+GCCVER=$(gcc --version | awk '{ print $3; exit}')
+case "$GCCVER" in
+4.4*)	CC_FLAGS="-t GCC44";;
+4.5*)	CC_FLAGS="-t GCC45";;
+4.6*)	CC_FLAGS="-t GCC46";;
+4.7*)	CC_FLAGS="-t GCC47";;
+4.8*)	CC_FLAGS="-t GCC48";;
+4.9*)	CC_FLAGS="-t GCC49";;
+5.*)	CC_FLAGS="-t GCC5";;
+6.*)	CC_FLAGS="-t GCC5";;
+7.*)	CC_FLAGS="-t GCC5";;
+8.*)	CC_FLAGS="-t GCC5";;
+9.*)	CC_FLAGS="-t GCC5";;
+1?.*)	CC_FLAGS="-t GCC5";;
+esac
 
-  # create non-partitioned FAT image
-  rm -f -- "$UEFI_SHELL_IMAGE"
-  mkdosfs -C "$UEFI_SHELL_IMAGE" -n UEFI_SHELL -- "$UEFI_SHELL_IMAGE_KB"
+# parallel builds
+SMP_MFLAGS="%{?_smp_mflags}"
+if [[ x"$SMP_MFLAGS" = x-j* ]]; then
+	CC_FLAGS="$CC_FLAGS -n ${SMP_MFLAGS#-j}"
+elif [ -n "%{?jobs}" ]; then
+	CC_FLAGS="$CC_FLAGS -n %{?jobs}"
+fi
 
-  # copy the shell binary into the FAT image
-  export MTOOLS_SKIP_CHECK=1
-  mmd   -i "$UEFI_SHELL_IMAGE"                       ::efi
-  mmd   -i "$UEFI_SHELL_IMAGE"                       ::efi/boot
-  mcopy -i "$UEFI_SHELL_IMAGE"  "$UEFI_SHELL_BINARY" ::efi/boot/bootx64.efi
-  mcopy -i "$UEFI_SHELL_IMAGE"  "$ENROLLER_BINARY"   ::
-  mdir  -i "$UEFI_SHELL_IMAGE"  -/                   ::
+# prepare
+make -C BaseTools
 
-  # build ISO with FAT image file as El Torito EFI boot image
-  mkisofs -input-charset ASCII -J -rational-rock \
-    -e "$UEFI_SHELL_IMAGE" -no-emul-boot \
-    -o "$ISO_IMAGE" "$UEFI_SHELL_IMAGE"
-}
+# EDK2 has many uninitialized stack variables which cause build errors on older versions of GCC. Ignore those errors.
+sed -i '/^DEFINE GCC_ALL_CC_FLAGS/s/=/& -Wno-error=maybe-uninitialized/' Conf/tools_def.txt
 
-export EXTRA_OPTFLAGS="%{optflags}"
-export EXTRA_LDFLAGS="%{__global_ldflags}"
+# Use our own nasm. EDK2 build requires a very recent nasm version.
+sed -i '/NASM_PATH/s/ENV.*/$(WORKSPACE)\/nasm/' Conf/tools_def.txt
 
-touch OvmfPkg/AmdSev/Grub/grub.efi   # dummy
+%ifarch x86_64
+# build OVMF
+for cfg in pure-efi pure-efi-debug secboot secboot-debug; do
+	OVMF_FLAGS="$CC_FLAGS -D HTTP_BOOT_ENABLE -D FD_SIZE_4MB"
 
-%if %{build_ovmf}
-%if %{defined rhel}
+	case "$cfg" in
+	pure-efi)
+		OVMF_FLAGS="$OVMF_FLAGS -D TPM2_ENABLE"
+		# nothing
+		;;
+	pure-efi-debug)
+		OVMF_FLAGS="$OVMF_FLAGS -D DEBUG_LOG_ENABLE"
+		OVMF_FLAGS="$OVMF_FLAGS -D TPM2_ENABLE"
+		;;
+	secboot)
+		OVMF_FLAGS="$OVMF_FLAGS -D SECURE_BOOT_ENABLE"
+		OVMF_FLAGS="$OVMF_FLAGS -D SMM_REQUIRE"
+		OVMF_FLAGS="$OVMF_FLAGS -D TPM2_ENABLE"
+		OVMF_FLAGS="$OVMF_FLAGS -D EXCLUDE_SHELL_FROM_FD"
+		;;
+	secboot-debug)
+		OVMF_FLAGS="$OVMF_FLAGS -D DEBUG_LOG_ENABLE"
+		OVMF_FLAGS="$OVMF_FLAGS -D SECURE_BOOT_ENABLE"
+		OVMF_FLAGS="$OVMF_FLAGS -D SMM_REQUIRE"
+		OVMF_FLAGS="$OVMF_FLAGS -D TPM2_ENABLE"
+		OVMF_FLAGS="$OVMF_FLAGS -D EXCLUDE_SHELL_FROM_FD"
+		;;
+	esac
 
-./edk2-build.py --config edk2-build.rhel-9 -m ovmf
-virt-fw-vars --input   RHEL-9/ovmf/OVMF_VARS.fd \
-             --output  RHEL-9/ovmf/OVMF_VARS.secboot.fd \
-             --set-dbx DBXUpdate-20200729.x64.bin \
-             --enroll-redhat --secure-boot
-build_iso RHEL-9/ovmf
-
-%else
-
-./edk2-build.py --config edk2-build.fedora -m ovmf
-virt-fw-vars --input   Fedora/ovmf/OVMF_VARS.fd \
-             --output  Fedora/ovmf/OVMF_VARS.secboot.fd \
-             --set-dbx DBXUpdate-20200729.x64.bin \
-             --enroll-redhat --secure-boot
-virt-fw-vars --input   Fedora/ovmf-4m/OVMF_VARS.fd \
-             --output  Fedora/ovmf-4m/OVMF_VARS.secboot.fd \
-             --set-dbx DBXUpdate-20200729.x64.bin \
-             --enroll-redhat --secure-boot
-virt-fw-vars --input   Fedora/ovmf-ia32/OVMF_VARS.fd \
-             --output  Fedora/ovmf-ia32/OVMF_VARS.secboot.fd \
-             --set-dbx DBXUpdate-20200729.x64.bin \
-             --enroll-redhat --secure-boot
-build_iso Fedora/ovmf
-build_iso Fedora/ovmf-ia32
-
-# experimental stateless builds
-virt-fw-vars --input   Fedora/experimental/OVMF.stateless.fd \
-             --output  Fedora/experimental/OVMF.stateless.secboot.fd \
-             --set-dbx DBXUpdate-20200729.x64.bin \
-             --enroll-redhat --secure-boot
+	build $OVMF_FLAGS -a IA32 -a X64 -p OvmfPkg/OvmfPkgIa32X64.dsc
+	mkdir -p "OVMF"
+	cp Build/Ovmf3264/DEBUG_*/FV/OVMF_CODE.fd OVMF/OVMF_CODE.${cfg}.fd
+	cp Build/Ovmf3264/DEBUG_*/FV/OVMF_VARS.fd OVMF/OVMF_VARS.${cfg}.fd
+	if [ "$cfg" = secboot ] || [ "$cfg" = secboot-debug ]; then
+		# Enroll the Secureboot vars into the variable store template
+		Oracle/OvmfVarsMgr/ovmf-vars-mgr --var PK --write --vars-file OVMF/OVMF_VARS.${cfg}.fd < Oracle/SB/x86_64/PK.bin
+		Oracle/OvmfVarsMgr/ovmf-vars-mgr --var KEK --write --vars-file OVMF/OVMF_VARS.${cfg}.fd < Oracle/SB/x86_64/KEK.bin
+		Oracle/OvmfVarsMgr/ovmf-vars-mgr --var db --write --vars-file OVMF/OVMF_VARS.${cfg}.fd < Oracle/SB/x86_64/db.bin
+		Oracle/OvmfVarsMgr/ovmf-vars-mgr --var dbx --write --vars-file OVMF/OVMF_VARS.${cfg}.fd < Oracle/SB/x86_64/dbxupdate_x64-04-2021.bin
+	fi
+	rm -rf Build/Ovmf3264
+done
 
 %endif
-%endif
 
-%if %{build_aarch64}
-%if %{defined rhel}
-./edk2-build.py --config edk2-build.rhel-9 -m armvirt
-%else
-./edk2-build.py --config edk2-build.fedora -m armvirt
-%endif
-%endif
+%ifarch aarch64
+# build AAVMF
+for cfg in pure-efi pure-efi-debug secboot secboot-debug; do
+	AAVMF_FLAGS="$CC_FLAGS -D HTTP_BOOT_ENABLE "
 
+	case "$cfg" in
+	pure-efi)
+		AAVMF_FLAGS="$AAVMF_FLAGS -D DEBUG_PRINT_ERROR_LEVEL=0x80000000"
+		AAVMF_FLAGS="$AAVMF_FLAGS -D TPM2_ENABLE"
+		;;
+	pure-efi-debug)
+		AAVMF_FLAGS="$AAVMF_FLAGS -D DEBUG_PRINT_ERROR_LEVEL=0x8040004F"
+		AAVMF_FLAGS="$AAVMF_FLAGS -D TPM2_ENABLE"
+		;;
+	secboot)
+		AAVMF_FLAGS="$AAVMF_FLAGS -D DEBUG_PRINT_ERROR_LEVEL=0x80000000"
+		AAVMF_FLAGS="$AAVMF_FLAGS -D SECURE_BOOT_ENABLE"
+		AAVMF_FLAGS="$AAVMF_FLAGS -D TPM2_ENABLE"
+		AAVMF_FLAGS="$AAVMF_FLAGS -D EXCLUDE_SHELL_FROM_FD"
+		;;
+	secboot-debug)
+		AAVMF_FLAGS="$AAVMF_FLAGS -D DEBUG_PRINT_ERROR_LEVEL=0x8040004F"
+		AAVMF_FLAGS="$AAVMF_FLAGS -D SECURE_BOOT_ENABLE"
+		AAVMF_FLAGS="$AAVMF_FLAGS -D TPM2_ENABLE"
+		AAVMF_FLAGS="$AAVMF_FLAGS -D EXCLUDE_SHELL_FROM_FD"
+		;;
+	esac
+
+	build $AAVMF_FLAGS -a AARCH64 -p ArmVirtPkg/ArmVirtQemu.dsc
+	mkdir -p "AAVMF"
+	cp Build/ArmVirtQemu-AARCH64/DEBUG_*/FV/QEMU_EFI.fd AAVMF
+	cp Build/ArmVirtQemu-AARCH64/DEBUG_*/FV/QEMU_VARS.fd AAVMF
+	# Pad the binaries and name them similar to the standard AAVMF package
+	cat AAVMF/QEMU_EFI.fd /dev/zero | head -c 64m > AAVMF/AAVMF_CODE.${cfg}.fd
+	cat AAVMF/QEMU_VARS.fd /dev/zero | head -c 64m > AAVMF/AAVMF_VARS.${cfg}.fd
+	rm AAVMF/QEMU_EFI.fd
+	rm AAVMF/QEMU_VARS.fd
+	if [ "$cfg" = secboot ] || [ "$cfg" = secboot-debug ] ; then
+		# Enroll the Secureboot vars into the variable store template
+		Oracle/OvmfVarsMgr/aavmf-vars-mgr --var PK --write --vars-file AAVMF/AAVMF_VARS.${cfg}.fd < Oracle/SB/aarch64/PK.bin
+		Oracle/OvmfVarsMgr/aavmf-vars-mgr --var KEK --write --vars-file AAVMF/AAVMF_VARS.${cfg}.fd < Oracle/SB/aarch64/KEK.bin
+		Oracle/OvmfVarsMgr/aavmf-vars-mgr --var db --write --vars-file AAVMF/AAVMF_VARS.${cfg}.fd < Oracle/SB/aarch64/db.bin
+		Oracle/OvmfVarsMgr/aavmf-vars-mgr --var dbx --write --vars-file AAVMF/AAVMF_VARS.${cfg}.fd < Oracle/SB/aarch64/dbxupdate_arm64-04-2021.bin
+	fi
+        # Create smaller versions
+        cat AAVMF/AAVMF_CODE.${cfg}.fd | head -c 2m > AAVMF/AAVMF_CODE_2M.${cfg}.fd
+        cat AAVMF/AAVMF_VARS.${cfg}.fd | head -c 1m > AAVMF/AAVMF_VARS_1M.${cfg}.fd
+
+	rm -rf Build/ArmVirtQemu-AARCH64
+
+done
+
+%endif
 
 %install
 
-cp -a OvmfPkg/License.txt License.OvmfPkg.txt
-cp -a CryptoPkg/Library/OpensslLib/openssl/LICENSE LICENSE.openssl
-mkdir -p %{buildroot}%{_datadir}/qemu/firmware
+mkdir -p %{buildroot}%{_bindir}
+install	--strip \
+	BaseTools/Source/C/bin/EfiRom \
+	BaseTools/Source/C/bin/VolInfo \
+	%{buildroot}%{_bindir}
 
-# install the tools
-mkdir -p %{buildroot}%{_bindir} \
-         %{buildroot}%{_datadir}/%{name}/Conf \
-         %{buildroot}%{_datadir}/%{name}/Scripts
-install BaseTools/Source/C/bin/* \
-        %{buildroot}%{_bindir}
-install BaseTools/BinWrappers/PosixLike/LzmaF86Compress \
-        %{buildroot}%{_bindir}
-install BaseTools/BuildEnv \
-        %{buildroot}%{_datadir}/%{name}
-install BaseTools/Conf/*.template \
-        %{buildroot}%{_datadir}/%{name}/Conf
-install BaseTools/Scripts/GccBase.lds \
-        %{buildroot}%{_datadir}/%{name}/Scripts
+%ifarch x86_64
+cp -a Oracle/OvmfVarsMgr/ovmf-vars-mgr %{buildroot}%{_bindir}
+cp -a Oracle/OvmfVarsMgr/ovmf-serial-debug %{buildroot}%{_bindir}
+%endif
+%ifarch aarch64
+cp -a Oracle/OvmfVarsMgr/aavmf-vars-mgr %{buildroot}%{_bindir}
+cp -a Oracle/OvmfVarsMgr/aavmf-serial-debug %{buildroot}%{_bindir}
+%endif
+cp -a Oracle/OvmfVarsMgr/efi-siglist-gen %{buildroot}%{_bindir}
 
-# install firmware images
-mkdir -p %{buildroot}%{_datadir}/%{name}
-%if %{defined rhel}
-cp -av RHEL-9/* %{buildroot}%{_datadir}/%{name}
-%else
-cp -av Fedora/* %{buildroot}%{_datadir}/%{name}
+# Install License files
+%ifarch x86_64
+mkdir -p %{buildroot}/%{_docdir}/OVMF/Licenses
+cp -a OvmfPkg/License.txt %{buildroot}/%{_docdir}/OVMF/Licenses/OvmfPkg-License.txt
+cp -a License.txt %{buildroot}/%{_docdir}/OVMF/Licenses/edk2-License.txt
+cp -a CryptoPkg/Library/OpensslLib/openssl/LICENSE %{buildroot}/%{_docdir}/OVMF/Licenses/OpensslLib-License.txt
+%endif
+%ifarch aarch64
+mkdir -p %{buildroot}/%{_docdir}/AAVMF/Licenses
+cp -a OvmfPkg/License.txt %{buildroot}/%{_docdir}/AAVMF/Licenses/OvmfPkg-License.txt
+cp -a License.txt %{buildroot}/%{_docdir}/AAVMF/Licenses/FatPkg-License.txt
+cp -a License.txt %{buildroot}/%{_docdir}/AAVMF/Licenses/IntelFrameworkModulePkg-License.txt
+cp -a License.txt %{buildroot}/%{_docdir}/AAVMF/Licenses/MdeModulePkg-License.txt
+cp -a License.txt %{buildroot}/%{_docdir}/AAVMF/Licenses/MdePkg-License.txt
+cp -a License.txt %{buildroot}/%{_docdir}/AAVMF/Licenses/OptionRomPkg-License.txt
+cp -a License.txt %{buildroot}/%{_docdir}/AAVMF/Licenses/ShellPkg-License.txt
+cp -a License.txt %{buildroot}/%{_docdir}/AAVMF/Licenses/ArmPkg-License.txt
+cp -a License.txt %{buildroot}/%{_docdir}/AAVMF/Licenses/ArmPlatformPkg-License.txt
+cp -a License.txt %{buildroot}/%{_docdir}/AAVMF/Licenses/EmbeddedPkg-License.txt
 %endif
 
-
-%if %{build_ovmf}
-
-# compat symlinks
-mkdir -p %{buildroot}%{_datadir}/OVMF
-ln -s ../%{name}/ovmf/OVMF_CODE.fd         %{buildroot}%{_datadir}/OVMF/
-ln -s ../%{name}/ovmf/OVMF_CODE.secboot.fd %{buildroot}%{_datadir}/OVMF/
-ln -s ../%{name}/ovmf/OVMF_VARS.fd         %{buildroot}%{_datadir}/OVMF/
-ln -s ../%{name}/ovmf/OVMF_VARS.secboot.fd %{buildroot}%{_datadir}/OVMF/
-ln -s ../%{name}/ovmf/UefiShell.iso        %{buildroot}%{_datadir}/OVMF/
-ln -s OVMF_CODE.fd %{buildroot}%{_datadir}/%{name}/ovmf/OVMF_CODE.cc.fd
-
-# json description files
-mkdir -p %{buildroot}%{_datadir}/qemu/firmware
-install -m 0644 \
-        30-edk2-ovmf-x64-sb-enrolled.json \
-        40-edk2-ovmf-x64-sb.json \
-        50-edk2-ovmf-x64-nosb.json \
-        60-edk2-ovmf-x64-amdsev.json \
-        60-edk2-ovmf-x64-inteltdx.json \
-        %{buildroot}%{_datadir}/qemu/firmware
-%if %{defined fedora}
-install -m 0644 \
-        50-edk2-ovmf-x64-microvm.json \
-        30-edk2-ovmf-ia32-sb-enrolled.json \
-        40-edk2-ovmf-ia32-sb.json \
-        50-edk2-ovmf-ia32-nosb.json \
-        %{buildroot}%{_datadir}/qemu/firmware
+%ifarch x86_64
+mkdir -p %{buildroot}/usr/share/OVMF
+cp -a OVMF/* %{buildroot}/usr/share/OVMF
+cp -a OvmfPkg/README %{buildroot}/%{_docdir}/OVMF
+cp -a OVMF-ol9-changelog.txt %{buildroot}/%{_docdir}/OVMF
+# JSON files
+mkdir -p %{buildroot}/usr/share/qemu/firmware
+cp -a json_files/*ovmf* %{buildroot}/usr/share/qemu/firmware
+# Include dup base files for compat with older libvirt
+cp OVMF/OVMF_CODE.pure-efi.fd  %{buildroot}/usr/share/OVMF/OVMF_CODE.fd
+cp OVMF/OVMF_VARS.pure-efi.fd  %{buildroot}/usr/share/OVMF/OVMF_VARS.fd
 %endif
-
-# endif build_ovmf
-%endif
-
-%if %{build_aarch64}
-
-# compat symlinks
-mkdir -p %{buildroot}%{_datadir}/AAVMF
-ln -s ../%{name}/aarch64/QEMU_EFI-pflash.raw \
-  %{buildroot}%{_datadir}/AAVMF/AAVMF_CODE.verbose.fd
-ln -s ../%{name}/aarch64/QEMU_EFI-silent-pflash.raw \
-  %{buildroot}%{_datadir}/AAVMF/AAVMF_CODE.fd
-ln -s ../%{name}/aarch64/vars-template-pflash.raw \
-  %{buildroot}%{_datadir}/AAVMF/AAVMF_VARS.fd
-%if %{defined fedora}
-ln -s ../%{name}/arm/QEMU_EFI-pflash.raw \
-   %{buildroot}%{_datadir}/AAVMF/AAVMF32_CODE.fd
-%endif
-
-# json description files
-install -m 0644 \
-        50-edk2-aarch64.json \
-        51-edk2-aarch64-verbose.json \
-        %{buildroot}%{_datadir}/qemu/firmware
-%if %{defined fedora}
-install -m 0644 \
-        50-edk2-arm-verbose.json \
-        %{buildroot}%{_datadir}/qemu/firmware
-%endif
-
-# endif build_aarch64
-%endif
-
-%if %{defined fedora}
-
-# edk2-tools-python install
-cp -R BaseTools/Source/Python %{buildroot}%{_datadir}/%{name}/Python
-for i in build BPDG Ecc GenDepex GenFds GenPatchPcdTable PatchPcdValue TargetTool Trim UPT; do
-echo '#!/bin/sh
-export PYTHONPATH=%{_datadir}/%{name}/Python
-exec python3 '%{_datadir}/%{name}/Python/$i/$i.py' "$@"' > %{buildroot}%{_bindir}/$i
-  chmod +x %{buildroot}%{_bindir}/$i
-done
-
-%if 0%{?py_byte_compile:1}
-# https://docs.fedoraproject.org/en-US/packaging-guidelines/Python_Appendix/#manual-bytecompilation
-%py_byte_compile %{python3} %{buildroot}%{_datadir}/edk2/Python
-%endif
-
-%endif
-
-%check
-for file in %{buildroot}%{_datadir}/%{name}/*/*VARS.secboot*; do
-    test -f "$file" || continue
-    virt-fw-vars --input $file --print | grep "SecureBootEnable.*ON" || exit 1
-done
-
-%global common_files \
-  %%license License.txt License.OvmfPkg.txt License-History.txt LICENSE.openssl \
-  %%dir %%{_datadir}/%%{name}/ \
-  %%dir %%{_datadir}/qemu \
-  %%dir %%{_datadir}/qemu/firmware
-
-%if %{build_ovmf}
-%files ovmf
-%common_files
-%doc OvmfPkg/README
-%doc ovmf-whitepaper-c770f8c.txt
-%dir %{_datadir}/OVMF/
-%{_datadir}/OVMF/OVMF_CODE.fd
-%{_datadir}/OVMF/OVMF_CODE.secboot.fd
-%{_datadir}/OVMF/OVMF_VARS.fd
-%{_datadir}/OVMF/OVMF_VARS.secboot.fd
-%{_datadir}/OVMF/UefiShell.iso
-%dir %{_datadir}/%{name}/ovmf/
-%{_datadir}/%{name}/ovmf/OVMF_CODE.fd
-%{_datadir}/%{name}/ovmf/OVMF_CODE.cc.fd
-%{_datadir}/%{name}/ovmf/OVMF_CODE.secboot.fd
-%{_datadir}/%{name}/ovmf/OVMF_VARS.fd
-%{_datadir}/%{name}/ovmf/OVMF_VARS.secboot.fd
-%{_datadir}/%{name}/ovmf/OVMF.amdsev.fd
-%{_datadir}/%{name}/ovmf/OVMF.inteltdx.fd
-%{_datadir}/%{name}/ovmf/UefiShell.iso
-%{_datadir}/%{name}/ovmf/Shell.efi
-%{_datadir}/%{name}/ovmf/EnrollDefaultKeys.efi
-%{_datadir}/qemu/firmware/30-edk2-ovmf-x64-sb-enrolled.json
-%{_datadir}/qemu/firmware/40-edk2-ovmf-x64-sb.json
-%{_datadir}/qemu/firmware/50-edk2-ovmf-x64-nosb.json
-%{_datadir}/qemu/firmware/60-edk2-ovmf-x64-amdsev.json
-%{_datadir}/qemu/firmware/60-edk2-ovmf-x64-inteltdx.json
-%if %{defined fedora}
-%{_datadir}/%{name}/ovmf/MICROVM.fd
-%{_datadir}/qemu/firmware/50-edk2-ovmf-x64-microvm.json
-%dir %{_datadir}/%{name}/ovmf-4m/
-%{_datadir}/%{name}/ovmf-4m/OVMF_CODE.fd
-%{_datadir}/%{name}/ovmf-4m/OVMF_CODE.secboot.fd
-%{_datadir}/%{name}/ovmf-4m/OVMF_VARS.fd
-%{_datadir}/%{name}/ovmf-4m/OVMF_VARS.secboot.fd
-%endif
-# endif build_ovmf
-%endif
-
-%if %{build_aarch64}
-%files aarch64
-%common_files
-%dir %{_datadir}/AAVMF/
-%{_datadir}/AAVMF/AAVMF_CODE.verbose.fd
-%{_datadir}/AAVMF/AAVMF_CODE.fd
-%{_datadir}/AAVMF/AAVMF_VARS.fd
-%dir %{_datadir}/%{name}/aarch64/
-%{_datadir}/%{name}/aarch64/QEMU_EFI-pflash.raw
-%{_datadir}/%{name}/aarch64/QEMU_EFI-silent-pflash.raw
-%{_datadir}/%{name}/aarch64/vars-template-pflash.raw
-%{_datadir}/%{name}/aarch64/QEMU_EFI.fd
-%{_datadir}/%{name}/aarch64/QEMU_EFI.silent.fd
-%{_datadir}/%{name}/aarch64/QEMU_VARS.fd
-%{_datadir}/qemu/firmware/50-edk2-aarch64.json
-%{_datadir}/qemu/firmware/51-edk2-aarch64-verbose.json
-# endif build_aarch64
+%ifarch aarch64
+mkdir -p %{buildroot}/usr/share/AAVMF
+cp -a AAVMF/* %{buildroot}/usr/share/AAVMF
+cp -a AAVMF-ol9-changelog.txt %{buildroot}/%{_docdir}/AAVMF
+# JSON files
+mkdir -p %{buildroot}/usr/share/qemu/firmware
+cp -a json_files/*aarch64* %{buildroot}/usr/share/qemu/firmware
+# Include dup base files for compat with older libvirt
+cp AAVMF/AAVMF_CODE.pure-efi.fd  %{buildroot}/usr/share/AAVMF/AAVMF_CODE.fd
+cp AAVMF/AAVMF_VARS.pure-efi.fd  %{buildroot}/usr/share/AAVMF/AAVMF_VARS.fd
 %endif
 
 %files tools
-%license License.txt
-%license License-History.txt
-%{_bindir}/DevicePath
-%{_bindir}/EfiRom
-%{_bindir}/GenCrc32
-%{_bindir}/GenFfs
-%{_bindir}/GenFv
-%{_bindir}/GenFw
-%{_bindir}/GenSec
-%{_bindir}/LzmaCompress
-%{_bindir}/LzmaF86Compress
-%{_bindir}/TianoCompress
-%{_bindir}/VfrCompile
-%{_bindir}/VolInfo
-%dir %{_datadir}/%{name}
-%{_datadir}/%{name}/BuildEnv
-%{_datadir}/%{name}/Conf
-%{_datadir}/%{name}/Scripts
+%doc BaseTools/UserManuals/EfiRom_Utility_Man_Page.rtf
+%doc BaseTools/UserManuals/VolInfo_Utility_Man_Page.rtf
+%ifarch x86_64
+%doc Oracle/OvmfVarsMgr/ovmf-vars-mgr.md
+%endif
+%ifarch aarch64
+%doc Oracle/OvmfVarsMgr/aavmf-vars-mgr.md
+%endif
+%doc Oracle/OvmfVarsMgr/efi-siglist-gen.md
+%{_bindir}/*
 
-%files tools-doc
-%doc BaseTools/UserManuals/*.rtf
+%defattr(-,root,root,-)
 
-
-%if %{defined fedora}
-%if %{build_ovmf}
-%files ovmf-ia32
-%common_files
-%dir %{_datadir}/%{name}/ovmf-ia32
-%{_datadir}/%{name}/ovmf-ia32/EnrollDefaultKeys.efi
-%{_datadir}/%{name}/ovmf-ia32/OVMF_CODE.fd
-%{_datadir}/%{name}/ovmf-ia32/OVMF_CODE.secboot.fd
-%{_datadir}/%{name}/ovmf-ia32/OVMF_VARS.fd
-%{_datadir}/%{name}/ovmf-ia32/OVMF_VARS.secboot.fd
-%{_datadir}/%{name}/ovmf-ia32/Shell.efi
-%{_datadir}/%{name}/ovmf-ia32/UefiShell.iso
-%{_datadir}/qemu/firmware/30-edk2-ovmf-ia32-sb-enrolled.json
-%{_datadir}/qemu/firmware/40-edk2-ovmf-ia32-sb.json
-%{_datadir}/qemu/firmware/50-edk2-ovmf-ia32-nosb.json
-
-%files ovmf-experimental
-%common_files
-%dir %{_datadir}/%{name}/experimental
-%{_datadir}/%{name}/experimental/*.fd
+%ifarch x86_64
+%files ovmf 
+%dir /usr/share/OVMF
+/usr/share/OVMF
 %endif
 
-%files arm
-%common_files
-%dir %{_datadir}/AAVMF/
-%{_datadir}/AAVMF/AAVMF32_CODE.fd
-%dir %{_datadir}/%{name}/arm
-%{_datadir}/%{name}/arm/QEMU_EFI-pflash.raw
-%{_datadir}/%{name}/arm/QEMU_EFI.fd
-%{_datadir}/%{name}/arm/QEMU_VARS.fd
-%{_datadir}/%{name}/arm/vars-template-pflash.raw
-%{_datadir}/qemu/firmware/50-edk2-arm-verbose.json
+%ifarch aarch64
+%files aarch64
+%dir /usr/share/AAVMF
+/usr/share/AAVMF
+%endif
 
+%dir /usr/share/qemu/firmware
+/usr/share/qemu/firmware
 
-%files tools-python
-%{_bindir}/build
-%{_bindir}/BPDG
-%{_bindir}/Ecc
-%{_bindir}/GenDepex
-%{_bindir}/GenFds
-%{_bindir}/GenPatchPcdTable
-%{_bindir}/PatchPcdValue
-%{_bindir}/TargetTool
-%{_bindir}/Trim
-%{_bindir}/UPT
-%dir %{_datadir}/%{name}
-%{_datadir}/%{name}/Python
+%ifarch x86_64
+%dir %{_docdir}/OVMF/Licenses
+%doc %{_docdir}/OVMF/Licenses/OvmfPkg-License.txt
+%doc %{_docdir}/OVMF/Licenses/OpensslLib-License.txt
+%doc %{_docdir}/OVMF/Licenses/edk2-License.txt
+%doc %{_docdir}/OVMF/README
+%doc %{_docdir}/OVMF/OVMF-ol9-changelog.txt
+%endif
 
-# endif fedora
+%ifarch aarch64
+%dir %{_docdir}/AAVMF/Licenses
+%doc %{_docdir}/AAVMF/Licenses/OvmfPkg-License.txt
+%doc %{_docdir}/AAVMF/Licenses/FatPkg-License.txt
+%doc %{_docdir}/AAVMF/Licenses/IntelFrameworkModulePkg-License.txt
+%doc %{_docdir}/AAVMF/Licenses/MdeModulePkg-License.txt
+%doc %{_docdir}/AAVMF/Licenses/MdePkg-License.txt
+%doc %{_docdir}/AAVMF/Licenses/OptionRomPkg-License.txt
+%doc %{_docdir}/AAVMF/Licenses/ArmPkg-License.txt
+%doc %{_docdir}/AAVMF/Licenses/ArmPlatformPkg-License.txt
+%doc %{_docdir}/AAVMF/Licenses/EmbeddedPkg-License.txt
+%doc %{_docdir}/AAVMF/Licenses/ShellPkg-License.txt
+%doc %{_docdir}/AAVMF/AAVMF-ol9-changelog.txt
 %endif
 
 
 %changelog
-* Mon Jan 02 2023 Gerd Hoffmann <kraxel@redhat.com> - 20221117gitfff6d81270b5-9
-- revert 'make files sparse again' (resolves: rhbz#2155673).
-- pick up compiler + linker flags from rpm
-
-* Tue Dec 20 2022 Gerd Hoffmann <kraxel@redhat.com> - 20221117gitfff6d81270b5-8
-- make files sparse again
-
-* Thu Dec 15 2022 Gerd Hoffmann <kraxel@redhat.com> - 20221117gitfff6d81270b5-7
-- backport https://github.com/tianocore/edk2/pull/3770
-
-* Mon Dec 12 2022 Gerd Hoffmann <kraxel@redhat.com> - 20221117gitfff6d81270b5-6
-- fix ovmf platform config (revert broken commit).
-- show version information in smbios (backport).
-
-* Mon Dec 05 2022 Gerd Hoffmann <kraxel@redhat.com> - 20221117gitfff6d81270b5-5
-- rename *.json files to be more consistent.
-- build script update
-
-* Fri Dec 02 2022 Gerd Hoffmann <kraxel@redhat.com> - 20221117gitfff6d81270b5-4
-- apply dbx updates
-
-* Tue Nov 29 2022 Gerd Hoffmann <kraxel@redhat.com> - 20221117gitfff6d81270b5-3
-- fix build script
-
-* Mon Nov 28 2022 Gerd Hoffmann <kraxel@redhat.com> - 20221117gitfff6d81270b5-2
-- add workaround for broken grub
-
-* Tue Sep 20 2022 Gerd Hoffmann <kraxel@redhat.com> - 20220826gitba0e0e4c6a17-1
-- update edk2 to 2022-08 stable tag.
-- update openssl bundle to rhel-8.7 level.
-- add stdvga fix.
-- add 4MB firmware builds.
-
-* Thu Aug 18 2022 Gerd Hoffmann <kraxel@redhat.com> - 20220526git16779ede2d36-5
-- comment out patch #4 (bug 2116534 workaround)
-- comment out patch #12 (bug 2114858 workaround)
-
-* Thu Jul 21 2022 Fedora Release Engineering <releng@fedoraproject.org> - 20220526git16779ede2d36-4
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_37_Mass_Rebuild
-
-* Fri Jun 10 2022 Gerd Hoffmann <kraxel@redhat.com> - 20220526git16779ede2d36-3
-- swap stack fix patch.
-
-* Wed Jun 08 2022 Gerd Hoffmann <kraxel@redhat.com> - 20220526git16779ede2d36-2
-- fix PcdResizeXterm patch.
-- minor specfile cleanup.
-- add 0021-OvmfPkg-Sec-fix-stack-switch.patch
-- Resolves rhbz#2093745
-
-* Tue May 31 2022 Gerd Hoffmann <kraxel@redhat.com> - 20220526git16779ede2d36-1
-- update to new edk2 stable tag (2022-05), refresh patches.
-- add amdsev and inteltdx builds
-- drop qosb
-
-* Tue Apr 19 2022 Gerd Hoffmann <kraxel@redhat.com> - 20220221gitb24306f15daa-4
-- switch to virt-firmware for secure boot key enrollment
-- Stop builds on armv7 too (iasl missing).
-
-* Thu Apr 07 2022 Gerd Hoffmann <kraxel@redhat.com> - 20220221gitb24306f15daa-3
-- Fix TPM build options.
-- Stop builds on i686 (iasl missing).
-- Resolves rhbz#2072827
-
-* Wed Mar 23 2022 Gerd Hoffmann <kraxel@redhat.com> - 20220221gitb24306f15daa-1
-- Update to edk2-stable202202
-
-* Thu Jan 20 2022 Fedora Release Engineering <releng@fedoraproject.org> - 20211126gitbb1bba3d7767-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_36_Mass_Rebuild
-
-* Mon Dec 6 2021 Gerd Hoffmann <kraxel@redhat.com> - 20211126gitbb1bba3d7767-1
-- Update to edk2-stable202111
-- Resolves rhbz#1978966
-- Resolves rhbz#2026744
-
-* Mon Dec  6 2021 Daniel P. Berrangé <berrange@redhat.com> - 20210527gite1999b264f1f-5
-- Drop glibc strcmp workaround
-
-* Mon Nov 29 2021 Daniel P. Berrangé <berrange@redhat.com> - 20210527gite1999b264f1f-4
-- Drop customized splash screen boot logo
-- Temporary workaround for suspected glibc strcmp bug breaking builds in koji
-
-* Wed Sep  1 2021 Daniel P. Berrangé <berrange@redhat.com> - 20210527gite1999b264f1f-3
-- Fix qemu packaging conditionals for ELN builds
-
-* Wed Jul 21 2021 Fedora Release Engineering <releng@fedoraproject.org> - 20210527gite1999b264f1f-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_35_Mass_Rebuild
-
-* Tue Jul 20 2021 Cole Robinson <crobinso@redhat.com> - 20210527gite1999b264f1f-1
-- Update to git snapshot
-- Sync with c9s packaging
-
-* Mon Jun 14 2021 Jiri Kucera <jkucera@redhat.com> - 20200801stable-5
-- Replace genisoimage with xorriso
-
-* Tue Jan 26 2021 Fedora Release Engineering <releng@fedoraproject.org> - 20200801stable-4
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_34_Mass_Rebuild
-
-* Thu Dec 03 2020 Cole Robinson <aintdiscole@gmail.com> - 20200801stable-3
-- Really fix TPM breakage (bz 1897367)
-
-* Tue Nov 24 2020 Cole Robinson <aintdiscole@gmail.com> - 20200801stable-2
-- Fix openssl usage, unbreak TPM (bz 1897367)
-
-* Wed Sep 16 2020 Cole Robinson <crobinso@redhat.com> - 20200801stable-1
-- Update to edk2 stable 202008
-
-* Sat Sep 12 2020 Peter Robinson <pbrobinson@fedoraproject.org> - 20200201stable-6
-- Tweaks for aarch64/ARMv7 builds
-- Minor cleanups
-
-* Tue Aug 04 2020 Cole Robinson <aintdiscole@gmail.com> - 20200201stable-5
-- Fix build failures on rawhide
-
-* Sat Aug 01 2020 Fedora Release Engineering <releng@fedoraproject.org> - 20200201stable-4
-- Second attempt - Rebuilt for
-  https://fedoraproject.org/wiki/Fedora_33_Mass_Rebuild
-
-* Mon Jul 27 2020 Fedora Release Engineering <releng@fedoraproject.org> - 20200201stable-3
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_33_Mass_Rebuild
-
-* Mon Jul 13 2020 Tom Stellard <tstellar@redhat.com> - 20200201stable-2
-- Use make macros
-- https://fedoraproject.org/wiki/Changes/UseMakeBuildInstallMacro
-
-* Mon Apr 13 2020 Cole Robinson <aintdiscole@gmail.com> - 20200201stable-1
-- Update to stable-202002
-
-* Tue Jan 28 2020 Fedora Release Engineering <releng@fedoraproject.org> - 20190501stable-5
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_32_Mass_Rebuild
-
-* Fri Sep 06 2019 Patrick Uiterwijk <puiterwijk@redhat.com> - 20190501stable-4
-- Updated HTTP_BOOT option to new upstream value
-
-* Wed Jul 24 2019 Fedora Release Engineering <releng@fedoraproject.org> - 20190501stable-3
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_31_Mass_Rebuild
-
-* Mon Jul 15 2019 Cole Robinson <aintdiscole@gmail.com> - 20190501stable-2
-- License is now BSD-2-Clause-Patent
-- Re-enable secureboot enrollment
-- Use qemu-ovmf-secureboot from git
-
-* Thu Jul 11 2019 Cole Robinson <crobinso@redhat.com> - 20190501stable-1
-- Update to stable-201905
-- Update to openssl-1.1.1b
-- Ship VARS file for ovmf-ia32 (bug 1688596)
-- Ship Fedora-variant JSON "firmware descriptor files"
-- Resolves rhbz#1728652
-
-* Mon Mar 18 2019 Cole Robinson <aintdiscole@gmail.com> - 20190308stable-1
-- Use YYYYMMDD versioning to fix upgrade path
-
-* Fri Mar 15 2019 Cole Robinson <aintdiscole@gmail.com> - 201903stable-1
-- Update to stable-201903
-- Update to openssl-1.1.0j
-- Move to python3 deps
-
-* Thu Jan 31 2019 Fedora Release Engineering <releng@fedoraproject.org> - 20180815gitcb5f4f45ce-6
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_30_Mass_Rebuild
-
-* Wed Nov 14 2018 Patrick Uiterwijk <puiterwijk@redhat.com> - 20180815gitcb5f4f45ce-5
-- Add -qosb dependency on python3
-
-* Fri Nov 9 2018 Paolo Bonzini <pbonzini@redhat.com> - 20180815gitcb5f4f45ce-4
-- Fix network boot via grub (bz 1648476)
-
-* Wed Sep 12 2018 Paolo Bonzini <pbonzini@redhat.com> - 20180815gitcb5f4f45ce-3
-- Explicitly compile the scripts using py_byte_compile
-
-* Fri Aug 31 2018 Cole Robinson <crobinso@redhat.com> - 20180815gitcb5f4f45ce-2
-- Fix passing through RPM build flags (bz 1540244)
-
-* Tue Aug 21 2018 Cole Robinson <crobinso@redhat.com> - 20180815gitcb5f4f45ce-1
-- Update to edk2 git cb5f4f45ce, edk2-stable201808
-- Update to qemu-ovmf-secureboot-1.1.3
-- Enable TPM2 support
-
-* Mon Jul 23 2018 Paolo Bonzini <pbonzini@redhat.com> - 20180529gitee3198e672e2-5
-- Fixes for AMD SEV on OVMF_CODE.fd
-- Add Provides for bundled OpenSSL
-
-* Wed Jul 18 2018 Paolo Bonzini <pbonzini@redhat.com> - 20180529gitee3198e672e2-4
-- Enable IPv6
-
-* Thu Jul 12 2018 Fedora Release Engineering <releng@fedoraproject.org> - 20180529gitee3198e672e2-3
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_29_Mass_Rebuild
-
-* Wed Jun 20 2018 Paolo Bonzini <pbonzini@redhat.com> - 20180529gitee3198e672e2-2
-- Backport two bug fixes from RHEL: connect again virtio-rng devices, and
-  connect consoles unconditionally in OVMF (ARM firmware already did it)
-
-* Tue May 29 2018 Paolo Bonzini <pbonzini@redhat.com> - 20180529gitee3198e672e2-1
-- Rebase to ee3198e672e2
-
-* Tue May 01 2018 Cole Robinson <crobinso@redhat.com> - 20171011git92d07e4-7
-- Bump release for new build
-
-* Fri Mar 30 2018 Patrick Uiterwijk <puiterwijk@redhat.com> - 20171011git92d07e4-6
-- Add qemu-ovmf-secureboot (qosb)
-- Generate pre-enrolled Secure Boot OVMF VARS files
-
-* Wed Mar 07 2018 Paolo Bonzini <pbonzini@redhat.com> - 20171011git92d07e4-5
-- Fix GCC 8 compilation
-- Replace dosfstools and mtools with qemu-img vvfat
-
-* Wed Feb 07 2018 Fedora Release Engineering <releng@fedoraproject.org> - 20171011git92d07e4-4
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_28_Mass_Rebuild
-
-* Fri Jan 19 2018 Paolo Bonzini <pbonzini@redhat.com> - 20170209git296153c5-3
-- Add OpenSSL patches from Fedora
-- Enable TLS_MODE
-
-* Fri Nov 17 2017 Paolo Bonzini <pbonzini@redhat.com> - 20170209git296153c5-2
-- Backport patches 19-21 from RHEL
-- Add patches 22-24 to fix SEV slowness
-- Add fedora conditionals
-
-* Tue Nov 14 2017 Paolo Bonzini <pbonzini@redhat.com> - 20171011git92d07e4-1
-- Import source and patches from RHEL version
-- Update OpenSSL to 1.1.0e
-- Refresh 0099-Tweak-the-tools_def-to-support-cross-compiling.patch
-
-* Mon Nov 13 2017 Paolo Bonzini <pbonzini@redhat.com> - 20170209git296153c5-6
-- Allow non-cross builds
-- Install /usr/share/OVMF and /usr/share/AAVMF
-
-* Wed Aug 02 2017 Fedora Release Engineering <releng@fedoraproject.org> - 20170209git296153c5-5
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_27_Binutils_Mass_Rebuild
-
-* Wed Jul 26 2017 Fedora Release Engineering <releng@fedoraproject.org> - 20170209git296153c5-4
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_27_Mass_Rebuild
-
-* Wed Mar 15 2017 Cole Robinson <crobinso@redhat.com> - 20170209git296153c5-3
-- Ship ovmf-ia32 package (bz 1424722)
-
-* Thu Feb 16 2017 Cole Robinson <crobinso@redhat.com> - 20170209git296153c5-2
-- Update EnrollDefaultKeys patch (bz #1398743)
-
-* Mon Feb 13 2017 Paolo Bonzini <pbonzini@redhat.com> - 20170209git296153c5-1
-- Rebase to git master
-- New patch 0010 fixes failure to build from source.
-
-* Fri Feb 10 2017 Fedora Release Engineering <releng@fedoraproject.org> - 20161105git3b25ca8-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_26_Mass_Rebuild
-
-* Sun Nov 06 2016 Cole Robinson <crobinso@redhat.com> - 20161105git3b25ca8-1
-- Rebase to git master
-
-* Fri Sep  9 2016 Tom Callaway <spot@fedoraproject.org> - 20160418gita8c39ba-5
-- replace legally problematic openssl source with "hobbled" tarball
-
-* Thu Jul 21 2016 Gerd Hoffmann <kraxel@redhat.com> - 20160418gita8c39ba-4
-- Also build for armv7.
-
-* Tue Jul 19 2016 Gerd Hoffmann <kraxel@redhat.com> 20160418gita8c39ba-3
-- Update EnrollDefaultKeys patch.
-
-* Fri Jul 8 2016 Paolo Bonzini <pbonzini@redhat.com> - 20160418gita8c39ba-2
-- Distribute edk2-ovmf on aarch64
-
-* Sat May 21 2016 Cole Robinson <crobinso@redhat.com> - 20160418gita8c39ba-1
-- Distribute edk2-aarch64 on x86 (bz #1338027)
-
-* Mon Apr 18 2016 Gerd Hoffmann <kraxel@redhat.com> 20160418gita8c39ba-0
-- Update to latest git.
-- Add firmware builds (FatPkg is free now).
-
-* Mon Feb 15 2016 Cole Robinson <crobinso@redhat.com> 20151127svn18975-3
-- Fix FTBFS gcc warning (bz 1307439)
-
-* Wed Feb 03 2016 Fedora Release Engineering <releng@fedoraproject.org> - 20151127svn18975-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_24_Mass_Rebuild
-
-* Fri Nov 27 2015 Paolo Bonzini <pbonzini@redhat.com> - 20151127svn18975-1
-- Rebase to 20151127svn18975-1
-- Linker script renamed to GccBase.lds
-
-* Wed Jun 17 2015 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 20150519svn17469-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_23_Mass_Rebuild
-
-* Tue May 19 2015 Paolo Bonzini <pbonzini@redhat.com> - 20150519svn17469-1
-- Rebase to 20150519svn17469-1
-- edk2-remove-tree-check.patch now upstream
-
-* Sat May 02 2015 Kalev Lember <kalevlember@gmail.com> - 20140724svn2670-6
-- Rebuilt for GCC 5 C++11 ABI change
-
-* Sat Aug 16 2014 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 20140724svn2670-5
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_21_22_Mass_Rebuild
-
-* Thu Jul 24 2014 Paolo Bonzini <pbonzini@redhat.com> - 20140724svn2670-1
-- Rebase to 20140724svn2670-1
-
-* Tue Jun 24 2014 Paolo Bonzini <pbonzini@redhat.com> - 20140624svn2649-1
-- Use standalone .tar.xz from buildtools repo
-
-* Tue Jun 24 2014 Paolo Bonzini <pbonzini@redhat.com> - 20140328svn15376-4
-- Install BuildTools/BaseEnv
-
-* Mon Jun 23 2014 Paolo Bonzini <pbonzini@redhat.com> - 20140328svn15376-3
-- Rebase to get GCC48 configuration
-- Package EDK_TOOLS_PATH as /usr/share/edk2
-- Package "build" and LzmaF86Compress too, as well as the new
-  tools Ecc and TianoCompress.
-
-* Sat Jun 07 2014 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 20131114svn14844-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_21_Mass_Rebuild
-
-* Thu Nov 14 2013 Paolo Bonzini <pbonzini@redhat.com> - 20131114svn14844-1
-- Upgrade to r14844.
-- Remove upstreamed parts of patch 1.
-
-* Fri Nov 8 2013 Paolo Bonzini <pbonzini@redhat.com> - 20130515svn14365-7
-- Make BaseTools compile on ARM.
-
-* Fri Aug 30 2013 Paolo Bonzini <pbonzini@redhat.com> - 20130515svn14365-6
-- Revert previous change; firmware packages should be noarch, and building
-  BaseTools twice is simply wrong.
-
-* Mon Aug 19 2013 Kay Sievers <kay@redhat.com> - 20130515svn14365-5
-- Add sub-package with EFI shell
-
-* Sat Aug 03 2013 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 20130515svn14365-4
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_20_Mass_Rebuild
-
-* Thu May 23 2013 Dan Horák <dan[at]danny.cz> 20130515svn14365-3
-- set ExclusiveArch
-
-* Thu May 16 2013 Paolo Bonzini <pbonzini@redhat.com> 20130515svn14365-2
-- Fix edk2-tools-python Requires
-
-* Wed May 15 2013 Paolo Bonzini <pbonzini@redhat.com> 20130515svn14365-1
-- Split edk2-tools-doc and edk2-tools-python
-- Fix Python BuildRequires
-- Remove FatBinPkg at package creation time.
-- Use fully versioned dependency.
-- Add comment on how to generate the sources.
-
-* Thu May 2 2013 Paolo Bonzini <pbonzini@redhat.com> 20130502.g732d199-1
-- Create.
+* Tue Jun 28 2022 Aaron Young <aaron.young@oracle.com>
+- Create new 20220628 release for OL9
+* Wed Jun 01 2022 Aaron Young <aaron.young@oracle.com>
+- Create new 20220601 release for OL9
+* Wed May 11 2022 Aaron Young <aaron.young@oracle.com>
+- Create new 20220511 release for OL9
+* Wed Apr 06 2022 Aaron Young <aaron.young@oracle.com>
+- Create new 20220406 release for OL9 which includes the following fixed CVEs:
+  {CVE-2022-0778}
+* Mon Feb 07 2022 Aaron Young <aaron.young@oracle.com>
+- Create new 20220207 build for OL9

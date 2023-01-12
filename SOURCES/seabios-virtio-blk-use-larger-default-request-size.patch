@@ -1,12 +1,12 @@
-From 88e527d9fbbbe8d05e45f6db8a151d22e7f973d3 Mon Sep 17 00:00:00 2001
+From 7ef00c50cafaf356b9aef5f7c7865b405de6b2f5 Mon Sep 17 00:00:00 2001
 From: Gerd Hoffmann <kraxel@redhat.com>
 Date: Thu, 30 Jun 2022 17:28:40 +0200
 Subject: [PATCH] virtio-blk: use larger default request size
 
 RH-Author: Gerd Hoffmann <kraxel@redhat.com>
-RH-MergeRequest: 8: virtio-blk: use larger default request size
-RH-Commit: [1/1] df68a35a0d02fb91f61eca9e9342ae5f13f99803
-RH-Bugzilla: 2101787
+RH-MergeRequest: 5: virtio-blk: use larger default request size
+RH-Commit: [1/1] 5b2833de23fdab9fc3c170e448e9ed07d9fb82dd (kraxel/centos-seabios)
+RH-Bugzilla: 2108555
 RH-Acked-by: Oliver Steffen <osteffen@redhat.com>
 RH-Acked-by: Pawel Polawski <ppolawsk@redhat.com>
 RH-Acked-by: Miroslav Rezanina <mrezanin@redhat.com>

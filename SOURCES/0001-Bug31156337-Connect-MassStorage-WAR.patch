@@ -1,0 +1,74 @@
+diff --git a/OvmfPkg/Library/PlatformBootManagerLib/BdsPlatform.c b/OvmfPkg/Library/PlatformBootManagerLib/BdsPlatform.c
+index 5feadc5..4665caf 100644
+--- a/OvmfPkg/Library/PlatformBootManagerLib/BdsPlatform.c
++++ b/OvmfPkg/Library/PlatformBootManagerLib/BdsPlatform.c
+@@ -1475,6 +1475,52 @@ ConnectRecursivelyIfPciMassStorage (
+   return EFI_SUCCESS;
+ }
+ 
++EFI_STATUS
++EFIAPI
++ConnectRecursivelyIfPciIDE (
++  IN EFI_HANDLE           Handle,
++  IN EFI_PCI_IO_PROTOCOL  *Instance,
++  IN PCI_TYPE00           *PciHeader
++  )
++{
++  EFI_STATUS                Status;
++  EFI_DEVICE_PATH_PROTOCOL  *DevicePath;
++  CHAR16                    *DevPathStr;
++
++  //
++  // Recognize PCI IDE/SATA devices
++  //
++  if (IS_PCI_IDE(PciHeader) || IS_PCI_SATADPA (PciHeader)) {
++    DevicePath = NULL;
++    Status = gBS->HandleProtocol (
++                    Handle,
++                    &gEfiDevicePathProtocolGuid,
++                    (VOID*)&DevicePath
++                    );
++    if (EFI_ERROR (Status)) {
++      return Status;
++    }
++
++    //
++    // Print Device Path
++    //
++    DevPathStr = ConvertDevicePathToText (DevicePath, FALSE, FALSE);
++    if (DevPathStr != NULL) {
++      DEBUG ((DEBUG_INFO, "Found IDE/SATA device: %s\n", DevPathStr));
++      FreePool(DevPathStr);
++    }
++
++    Status = gBS->ConnectController (Handle, NULL, NULL, TRUE);
++    if (EFI_ERROR (Status)) {
++      return Status;
++    }
++
++  }
++
++  return EFI_SUCCESS;
++}
++
++
+ /**
+   This notification function is invoked when the
+   EMU Variable FVB has been changed.
+@@ -1651,6 +1697,16 @@ PlatformBootManagerAfterConsole (
+       "PlatformBdsPolicyBehavior: not restoring NvVars "
+       "from disk since flash variables appear to be supported.\n"
+       ));
++
++    // Workaround for Bug31156337. OL install iso seems to require
++    // IDE/SATA devices to be connected prior to TryRunningQemuKernel()
++    VisitAllPciInstances (ConnectRecursivelyIfPciIDE);
++    VisitAllInstancesOfProtocol (
++      &gEfiSimpleFileSystemProtocolGuid,
++      VisitingFileSystemInstance,
++      NULL
++    );
++
+   } else {
+     //
+     // Try to restore variables from the hard disk early so

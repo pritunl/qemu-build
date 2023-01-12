@@ -1,19 +1,17 @@
-From a7e5f1d8f1f874434f8b3e6d6eac784d5e3e3971 Mon Sep 17 00:00:00 2001
+From dbca6bf0626072c3b90ffe4f4c6e5db92814bd5d Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Volker=20R=C3=BCmelin?= <vr_qemu@t-online.de>
 Date: Sat, 2 Apr 2022 20:28:39 +0200
-Subject: [PATCH 3/3] reset: force standard PCI configuration access
+Subject: [PATCH 2/2] reset: force standard PCI configuration access
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
 RH-Author: Gerd Hoffmann <kraxel@redhat.com>
-RH-MergeRequest: 7: pci: fix reset for q35 and tcg
-RH-Commit: [2/2] 693fbb9148c81f344dc9f64e7a36e51b42ee1a95
-RH-Bugzilla: 2083884
-RH-Acked-by: Pawel Polawski <ppolawsk@redhat.com>
+RH-MergeRequest: 4: reset: force standard PCI configuration access
+RH-Commit: [2/2] 70fa6dd1d546a03a3b44e438f84682325f5ee029 (kraxel/centos-seabios)
+RH-Bugzilla: 2086407
+RH-Acked-by: Miroslav Rezanina <mrezanin@redhat.com>
 RH-Acked-by: Oliver Steffen <osteffen@redhat.com>
-RH-Acked-by: Igor Mammedov <imammedo@redhat.com>
-RH-Acked-by: Laszlo Ersek <lersek@redhat.com>
 
 After a reset of a QEMU -machine q35 guest, the PCI Express
 Enhanced Configuration Mechanism is disabled and the variable
@@ -155,5 +153,5 @@ index ee6acafc..b2f5baf4 100644
  // PCI configuration access using either PCI CAM or PCIe ECAM
  void pci_config_writel(u16 bdf, u32 addr, u32 val);
 -- 
-2.35.3
+2.31.1
 

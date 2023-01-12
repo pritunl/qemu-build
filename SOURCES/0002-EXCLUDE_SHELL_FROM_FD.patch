@@ -1,0 +1,74 @@
+diff --git a/ArmVirtPkg/ArmVirtQemuFvMain.fdf.inc b/ArmVirtPkg/ArmVirtQemuFvMain.fdf.inc
+index d4df6de..e5e134a 100644
+--- a/ArmVirtPkg/ArmVirtQemuFvMain.fdf.inc
++++ b/ArmVirtPkg/ArmVirtQemuFvMain.fdf.inc
+@@ -99,10 +99,12 @@ READ_LOCK_STATUS   = TRUE
+   INF OvmfPkg/VirtioScsiDxe/VirtioScsi.inf
+   INF OvmfPkg/VirtioRngDxe/VirtioRng.inf
+ 
++!ifndef $(EXCLUDE_SHELL_FROM_FD)
+   INF ShellPkg/Application/Shell/Shell.inf
+   INF ShellPkg/DynamicCommand/TftpDynamicCommand/TftpDynamicCommand.inf
+   INF ShellPkg/DynamicCommand/HttpDynamicCommand/HttpDynamicCommand.inf
+   INF OvmfPkg/LinuxInitrdDynamicShellCommand/LinuxInitrdDynamicShellCommand.inf
++!endif
+ 
+   #
+   # Bds
+diff --git a/OvmfPkg/OvmfPkgIa32.fdf b/OvmfPkg/OvmfPkgIa32.fdf
+index a6b2142..b5bc840 100644
+--- a/OvmfPkg/OvmfPkgIa32.fdf
++++ b/OvmfPkg/OvmfPkgIa32.fdf
+@@ -283,12 +283,14 @@ INF  FatPkg/EnhancedFatDxe/Fat.inf
+ INF  MdeModulePkg/Universal/Disk/UdfDxe/UdfDxe.inf
+ INF  OvmfPkg/VirtioFsDxe/VirtioFsDxe.inf
+ 
++!ifndef $(EXCLUDE_SHELL_FROM_FD)
+ !if $(TOOL_CHAIN_TAG) != "XCODE5"
+ INF  ShellPkg/DynamicCommand/TftpDynamicCommand/TftpDynamicCommand.inf
+ INF  ShellPkg/DynamicCommand/HttpDynamicCommand/HttpDynamicCommand.inf
+ INF  OvmfPkg/LinuxInitrdDynamicShellCommand/LinuxInitrdDynamicShellCommand.inf
+ !endif
+ INF  ShellPkg/Application/Shell/Shell.inf
++!endif
+ 
+ INF MdeModulePkg/Logo/LogoDxe.inf
+ 
+diff --git a/OvmfPkg/OvmfPkgIa32X64.fdf b/OvmfPkg/OvmfPkgIa32X64.fdf
+index 49266dd..f4fa19b 100644
+--- a/OvmfPkg/OvmfPkgIa32X64.fdf
++++ b/OvmfPkg/OvmfPkgIa32X64.fdf
+@@ -287,12 +287,14 @@ INF  FatPkg/EnhancedFatDxe/Fat.inf
+ INF  MdeModulePkg/Universal/Disk/UdfDxe/UdfDxe.inf
+ INF  OvmfPkg/VirtioFsDxe/VirtioFsDxe.inf
+ 
++!ifndef $(EXCLUDE_SHELL_FROM_FD)
+ !if $(TOOL_CHAIN_TAG) != "XCODE5"
+ INF  ShellPkg/DynamicCommand/TftpDynamicCommand/TftpDynamicCommand.inf
+ INF  ShellPkg/DynamicCommand/HttpDynamicCommand/HttpDynamicCommand.inf
+ INF  OvmfPkg/LinuxInitrdDynamicShellCommand/LinuxInitrdDynamicShellCommand.inf
+ !endif
+ INF  ShellPkg/Application/Shell/Shell.inf
++!endif
+ 
+ INF MdeModulePkg/Logo/LogoDxe.inf
+ 
+diff --git a/OvmfPkg/OvmfPkgX64.fdf b/OvmfPkg/OvmfPkgX64.fdf
+index ba7f26d..dfd1780 100644
+--- a/OvmfPkg/OvmfPkgX64.fdf
++++ b/OvmfPkg/OvmfPkgX64.fdf
+@@ -309,12 +309,14 @@ INF  FatPkg/EnhancedFatDxe/Fat.inf
+ INF  MdeModulePkg/Universal/Disk/UdfDxe/UdfDxe.inf
+ INF  OvmfPkg/VirtioFsDxe/VirtioFsDxe.inf
+ 
++!ifndef $(EXCLUDE_SHELL_FROM_FD)
+ !if $(TOOL_CHAIN_TAG) != "XCODE5"
+ INF  ShellPkg/DynamicCommand/TftpDynamicCommand/TftpDynamicCommand.inf
+ INF  ShellPkg/DynamicCommand/HttpDynamicCommand/HttpDynamicCommand.inf
+ INF  OvmfPkg/LinuxInitrdDynamicShellCommand/LinuxInitrdDynamicShellCommand.inf
+ !endif
+ INF  ShellPkg/Application/Shell/Shell.inf
++!endif
+ 
+ INF MdeModulePkg/Logo/LogoDxe.inf
+ 

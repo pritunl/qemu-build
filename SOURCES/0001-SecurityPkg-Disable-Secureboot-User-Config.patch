@@ -1,0 +1,36 @@
+diff --git a/SecurityPkg/VariableAuthenticated/SecureBootConfigDxe/SecureBootConfig.vfr b/SecurityPkg/VariableAuthenticated/SecureBootConfigDxe/SecureBootConfig.vfr
+index fa7e118..2810979 100644
+--- a/SecurityPkg/VariableAuthenticated/SecureBootConfigDxe/SecureBootConfig.vfr
++++ b/SecurityPkg/VariableAuthenticated/SecureBootConfigDxe/SecureBootConfig.vfr
+@@ -35,7 +35,7 @@ formset
+     //
+     // Display of Check Box: Attempt Secure Boot
+     //
+-    grayoutif ideqval SECUREBOOT_CONFIGURATION.HideSecureBoot == 1 OR NOT ideqval SECUREBOOT_CONFIGURATION.PhysicalPresent == 1;
++    grayoutif TRUE;
+     checkbox varid = SECUREBOOT_CONFIGURATION.AttemptSecureBoot,
+           questionid = KEY_SECURE_BOOT_ENABLE,
+           prompt = STRING_TOKEN(STR_SECURE_BOOT_PROMPT),
+@@ -47,6 +47,7 @@ formset
+     //
+     // Display of Oneof: 'Secure Boot Mode'
+     //
++    grayoutif TRUE;
+     oneof name = SecureBootMode,
+           questionid = KEY_SECURE_BOOT_MODE,
+           prompt = STRING_TOKEN(STR_SECURE_BOOT_MODE_PROMPT),
+@@ -55,12 +56,13 @@ formset
+           option text = STRING_TOKEN(STR_STANDARD_MODE),    value = SECURE_BOOT_MODE_STANDARD, flags = DEFAULT;
+           option text = STRING_TOKEN(STR_CUSTOM_MODE),      value = SECURE_BOOT_MODE_CUSTOM,   flags = 0;
+     endoneof;
++    endif;
+ 
+     //
+     // Display of 'Current Secure Boot Mode'
+     //
+     suppressif questionref(SecureBootMode) == SECURE_BOOT_MODE_STANDARD;
+-    grayoutif NOT ideqval SECUREBOOT_CONFIGURATION.PhysicalPresent == 1;
++    grayoutif TRUE;
+     goto FORMID_SECURE_BOOT_OPTION_FORM,
+          prompt = STRING_TOKEN(STR_SECURE_BOOT_OPTION),
+          help   = STRING_TOKEN(STR_SECURE_BOOT_OPTION_HELP),

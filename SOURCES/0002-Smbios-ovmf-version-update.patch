@@ -1,0 +1,15 @@
+diff --git a/OvmfPkg/SmbiosPlatformDxe/SmbiosPlatformDxe.c b/OvmfPkg/SmbiosPlatformDxe/SmbiosPlatformDxe.c
+index 7991a19..651ec2e 100644
+--- a/OvmfPkg/SmbiosPlatformDxe/SmbiosPlatformDxe.c
++++ b/OvmfPkg/SmbiosPlatformDxe/SmbiosPlatformDxe.c
+@@ -12,8 +12,8 @@
+ 
+ #define TYPE0_STRINGS \
+   "EFI Development Kit II / OVMF\0"     /* Vendor */ \
+-  "0.0.0\0"                             /* BiosVersion */ \
+-  "02/06/2015\0"                        /* BiosReleaseDate */
++  "1.6.3\0"                             /* BiosVersion */ \
++  "06/28/2022\0"                        /* BiosReleaseDate */
+ //
+ // Type definition and contents of the default Type 0 SMBIOS table.
+ //
