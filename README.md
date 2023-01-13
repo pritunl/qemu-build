@@ -219,9 +219,10 @@ rm ~/repo/*debugsource*
 
 rpm --resign ~/repo/*.rpm
 createrepo ~/repo
-mc mirror --remove --overwrite --md5 ~/repo repo-east/kvm-unstable
-mc mirror --remove --overwrite --md5 ~/repo repo-west/kvm-unstable
 
-mc mirror --remove --overwrite --md5 ~/repo repo-east/kvm
-mc mirror --remove --overwrite --md5 ~/repo repo-west/kvm
+mc mirror --remove --overwrite --md5 ~/repo repo-east/kvm-unstable/oraclelinux/9
+mc mirror --remove --overwrite --md5 ~/repo repo-west/kvm-unstable/oraclelinux/9
+
+mc mirror --remove --overwrite --md5 ~/repo repo-east/kvm-stable/oraclelinux/9
+mc mirror --remove --overwrite --md5 ~/repo repo-west/kvm-stable/oraclelinux/9
 ```
