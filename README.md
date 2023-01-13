@@ -70,7 +70,6 @@ wget https://yum.oracle.com/repo/OracleLinux/OL8/appstream/x86_64/getPackageSour
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/37/Everything/source/tree/Packages/c/celt051-0.5.1.3-24.fc37.src.rpm
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/37/Everything/source/tree/Packages/l/libcacard-2.8.1-3.fc37.src.rpm
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/37/Everything/source/tree/Packages/m/meson-0.63.3-1.fc37.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/37/Everything/source/tree/Packages/m/meson-0.63.3-1.fc37.src.rpm
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/v/virglrenderer-0.10.4-1.20230104git88b9fe3b.fc38.src.rpm
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/37/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-7.fc37.src.rpm
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-7.2.0-3.fc38.src.rpm
