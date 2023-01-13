@@ -1,6 +1,6 @@
 # qemu-build
 
-Build source for kvm repository
+Build source for Pritunl KVM repository, currently provides QEMU v7.2.0 for RHEL9.
 
 ```bash
 sudo tee /etc/yum.repos.d/pritunl-kvm.repo << EOF
