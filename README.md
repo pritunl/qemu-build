@@ -6,7 +6,7 @@ Build source for kvm repository
 sudo tee /etc/yum.repos.d/pritunl-kvm.repo << EOF
 [pritunl-kvm]
 name=Pritunl KVM Repository
-baseurl=https://repo.pritunl.com/kvm/
+baseurl=https://repo.pritunl.com/kvm-unstable/oraclelinux/9/
 gpgcheck=1
 enabled=1
 EOF
