@@ -72,7 +72,7 @@ wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/37/Everyt
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/37/Everything/source/tree/Packages/m/meson-0.63.3-1.fc37.src.rpm
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/v/virglrenderer-0.10.4-1.20230104git88b9fe3b.fc38.src.rpm
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/37/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-7.fc37.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-7.2.0-3.fc38.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-7.2.0-4.fc38.src.rpm
 
 
 rpm -K libepoxy-1.5.5-4.el9.src.rpm
@@ -90,7 +90,7 @@ rpm -K celt051-0.5.1.3-24.fc37.src.rpm
 rpm -K meson-0.63.3-1.fc37.src.rpm
 rpm -K virglrenderer-0.10.4-1.20230104git88b9fe3b.fc38.src.rpm
 rpm -K qemu-sanity-check-1.1.6-7.fc37.src.rpm
-rpm -K qemu-7.2.0-3.fc38.src.rpm
+rpm -K qemu-7.2.0-4.fc38.src.rpm
 
 sudo rpm -i libepoxy-1.5.5-4.el9.src.rpm
 sudo rpm -i liburing-0.7-7.el9.src.rpm
@@ -107,12 +107,14 @@ sudo rpm -i libcacard-2.8.1-3.fc37.src.rpm
 sudo rpm -i meson-0.63.3-1.fc37.src.rpm
 sudo rpm -i virglrenderer-0.10.4-1.20230104git88b9fe3b.fc38.src.rpm
 sudo rpm -i qemu-sanity-check-1.1.6-7.fc37.src.rpm
-sudo rpm -i qemu-7.2.0-3.fc38.src.rpm
+sudo rpm -i qemu-7.2.0-4.fc38.src.rpm
 
 sudo mv /root/rpmbuild ~/rpmbuild
 sudo chown -R opc:opc ~/rpmbuild
 
 
+rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
+    opc@123.123.123.123:/home/opc/*.rpm /home/cloud/git/qemu-build/SRPMS/
 rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
     opc@123.123.123.123:/home/opc/rpmbuild/SOURCES/ /home/cloud/git/qemu-build/SOURCES/
 rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
@@ -121,7 +123,7 @@ rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
 rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
     /home/cloud/git/qemu-build/SOURCES/ opc@123.123.123.123:/home/opc/rpmbuild/SOURCES/
 rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
-    /home/cloud/git/qemu-build/SPECS/  opc@123.123.123.123:/home/opc/rpmbuild/SPECS/
+    /home/cloud/git/qemu-build/SPECS/ opc@123.123.123.123:/home/opc/rpmbuild/SPECS/
 
 scp /home/cloud/git/qemu-build/SPECS/qemu.spec opc@123.123.123.123:/home/opc/rpmbuild/SPECS/qemu.spec
 scp /home/cloud/git/qemu-build/SPECS/qemu-sanity-check.spec opc@123.123.123.123:/home/opc/rpmbuild/SPECS/qemu-sanity-check.spec
