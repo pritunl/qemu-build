@@ -1,0 +1,86 @@
+From 84b2ea237d30a1c93f179d0bc44731ae7962910e Mon Sep 17 00:00:00 2001
+From: Paolo Bonzini <pbonzini@redhat.com>
+Date: Wed, 5 Oct 2022 16:40:48 +0200
+Subject: [PATCH 7/9] gnome: allow generator outputs as gdbus-codegen inputs
+Content-Type: text/plain
+
+GeneratedLists as sources to `gnome.gdbus_codegen` worked until
+version 0.60 of Meson, but broke in 0.61 because of the conversion to
+typed_pos_args and typed_kwargs.  Reinstate this by adding them to the
+decorators and annotations.
+
+Note that gdbus_codegen desugars to two custom_targets and therefore the
+generator is invoked twice.  This is not optimal, but it should not be
+an issue and can be changed later.
+
+Fixes: 53a187ba2 ("modules/gnome: use typed_pos_args for gdbus_codegen", 2021-11-01)
+Fixes: ef52e6093 ("modules/gnome: use typed_kwargs for gdbus_codegen", 2021-11-08)
+---
+ mesonbuild/modules/gnome.py                     | 6 +++---
+ test cases/frameworks/7 gnome/gdbus/meson.build | 8 ++++++++
+ test cases/frameworks/7 gnome/meson.build       | 3 +++
+ 3 files changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/mesonbuild/modules/gnome.py b/mesonbuild/modules/gnome.py
+index 00feba45c..d8669bb48 100644
+--- a/mesonbuild/modules/gnome.py
++++ b/mesonbuild/modules/gnome.py
+@@ -32,7 +32,7 @@ from .. import mesonlib
+ from .. import mlog
+ from ..build import CustomTarget, CustomTargetIndex, Executable, GeneratedList, InvalidArguments
+ from ..dependencies import Dependency, PkgConfigDependency, InternalDependency
+-from ..interpreter.type_checking import DEPENDS_KW, DEPEND_FILES_KW, INSTALL_DIR_KW, INSTALL_KW, NoneType, in_set_validator
++from ..interpreter.type_checking import DEPENDS_KW, DEPEND_FILES_KW, INSTALL_DIR_KW, INSTALL_KW, NoneType, SOURCES_KW, in_set_validator
+ from ..interpreterbase import noPosargs, noKwargs, FeatureNew, FeatureDeprecated
+ from ..interpreterbase import typed_kwargs, KwargInfo, ContainerTypeInfo
+ from ..interpreterbase.decorators import typed_pos_args
+@@ -1556,11 +1556,11 @@ class GnomeModule(ExtensionModule):
+     def gtkdoc_html_dir(self, state: 'ModuleState', args: T.Tuple[str], kwargs: 'TYPE_kwargs') -> str:
+         return os.path.join('share/gtk-doc/html', args[0])
+ 
+-    @typed_pos_args('gnome.gdbus_codegen', str, optargs=[(str, mesonlib.File, build.CustomTarget, build.CustomTargetIndex)])
++    @typed_pos_args('gnome.gdbus_codegen', str, optargs=[(str, mesonlib.File, build.CustomTarget, build.CustomTargetIndex, build.GeneratedList)])
+     @typed_kwargs(
+         'gnome.gdbus_codegen',
+         _BUILD_BY_DEFAULT.evolve(since='0.40.0'),
+-        KwargInfo('sources', ContainerTypeInfo(list, (str, mesonlib.File, build.CustomTarget, build.CustomTargetIndex)), since='0.46.0', default=[], listify=True),
++        SOURCES_KW.evolve(since='0.46.0'),
+         KwargInfo('extra_args', ContainerTypeInfo(list, str), since='0.47.0', default=[], listify=True),
+         KwargInfo('interface_prefix', (str, NoneType)),
+         KwargInfo('namespace', (str, NoneType)),
+diff --git a/test cases/frameworks/7 gnome/gdbus/meson.build b/test cases/frameworks/7 gnome/gdbus/meson.build
+index d749033e9..fdb3896ca 100644
+--- a/test cases/frameworks/7 gnome/gdbus/meson.build	
++++ b/test cases/frameworks/7 gnome/gdbus/meson.build	
+@@ -79,6 +79,14 @@ gdbus_src_cti = gnome.gdbus_codegen(
+   annotations : [],
+ )
+ 
++gdbus_src_gen = gnome.gdbus_codegen(
++  'generated-gdbus-generator-src',
++  copyfile_gen.process('data/com.example.Sample.xml'),
++  interface_prefix : 'com.example.',
++  namespace : 'Sample',
++  annotations : [],
++)
++
+ gdbus_exe = executable('gdbus-test', 'gdbusprog.c',
+   gdbus_src,
+   include_directories : includes,
+diff --git a/test cases/frameworks/7 gnome/meson.build b/test cases/frameworks/7 gnome/meson.build
+index 920bc6a82..5f438cb67 100644
+--- a/test cases/frameworks/7 gnome/meson.build	
++++ b/test cases/frameworks/7 gnome/meson.build	
+@@ -1,6 +1,9 @@
+ project('gobject-introspection', 'c')
+ 
+ copyfile = find_program('copyfile.py')
++copyfile_gen = generator(copyfile,
++  output: '@BASENAME@Gen.xml',
++  arguments : ['@INPUT@', '@OUTPUT@'])
+ 
+ glib = dependency('glib-2.0', required: false)
+ if not glib.found()
+-- 
+2.38.1
+

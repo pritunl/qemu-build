@@ -1,0 +1,144 @@
+From e03c6d8be0e07dc0a5295867acd3bcde8852d5ba Mon Sep 17 00:00:00 2001
+From: Paolo Bonzini <pbonzini@redhat.com>
+Date: Wed, 5 Oct 2022 16:40:09 +0200
+Subject: [PATCH 6/9] gnome: allow custom targets as gdbus-codegen inputs
+Content-Type: text/plain
+
+Custom targets as sources to `gnome.gdbus_codegen` worked until version 0.60
+of Meson, but broke in 0.61 because of the conversion to typed_pos_args
+and typed_kwargs.  Reinstate this by adding custom targets to the
+decorators and annotations.
+
+While generators also used to work, they are a bit tricky because
+gdbus_codegen desugars to two custom_targets and therefore the generator
+is invoked twice.  This should not be a problem, but be explicit and
+leave that to a separate commit to highlight the problem.
+
+Fixes: 53a187ba2 ("modules/gnome: use typed_pos_args for gdbus_codegen", 2021-11-01)
+Fixes: ef52e6093 ("modules/gnome: use typed_kwargs for gdbus_codegen", 2021-11-08)
+---
+ mesonbuild/modules/gnome.py                   |  8 +++----
+ test cases/frameworks/7 gnome/copyfile.py     |  6 ++++++
+ .../frameworks/7 gnome/gdbus/meson.build      | 21 +++++++++++++++++++
+ test cases/frameworks/7 gnome/meson.build     |  2 ++
+ .../frameworks/7 gnome/resources/copyfile.py  |  6 ------
+ .../frameworks/7 gnome/resources/meson.build  |  2 --
+ 6 files changed, 33 insertions(+), 12 deletions(-)
+ create mode 100644 test cases/frameworks/7 gnome/copyfile.py
+ delete mode 100644 test cases/frameworks/7 gnome/resources/copyfile.py
+
+diff --git a/mesonbuild/modules/gnome.py b/mesonbuild/modules/gnome.py
+index 25cea6938..00feba45c 100644
+--- a/mesonbuild/modules/gnome.py
++++ b/mesonbuild/modules/gnome.py
+@@ -1556,11 +1556,11 @@ class GnomeModule(ExtensionModule):
+     def gtkdoc_html_dir(self, state: 'ModuleState', args: T.Tuple[str], kwargs: 'TYPE_kwargs') -> str:
+         return os.path.join('share/gtk-doc/html', args[0])
+ 
+-    @typed_pos_args('gnome.gdbus_codegen', str, optargs=[(str, mesonlib.File)])
++    @typed_pos_args('gnome.gdbus_codegen', str, optargs=[(str, mesonlib.File, build.CustomTarget, build.CustomTargetIndex)])
+     @typed_kwargs(
+         'gnome.gdbus_codegen',
+         _BUILD_BY_DEFAULT.evolve(since='0.40.0'),
+-        KwargInfo('sources', ContainerTypeInfo(list, (str, mesonlib.File)), since='0.46.0', default=[], listify=True),
++        KwargInfo('sources', ContainerTypeInfo(list, (str, mesonlib.File, build.CustomTarget, build.CustomTargetIndex)), since='0.46.0', default=[], listify=True),
+         KwargInfo('extra_args', ContainerTypeInfo(list, str), since='0.47.0', default=[], listify=True),
+         KwargInfo('interface_prefix', (str, NoneType)),
+         KwargInfo('namespace', (str, NoneType)),
+@@ -1578,10 +1578,10 @@ class GnomeModule(ExtensionModule):
+             validator=in_set_validator({'all', 'none', 'objects'})),
+         INSTALL_DIR_KW.evolve(since='0.46.0')
+     )
+-    def gdbus_codegen(self, state: 'ModuleState', args: T.Tuple[str, T.Optional['FileOrString']],
++    def gdbus_codegen(self, state: 'ModuleState', args: T.Tuple[str, T.Optional[T.Union['FileOrString', 'build.GeneratedTypes']]],
+                       kwargs: 'GdbusCodegen') -> ModuleReturnValue:
+         namebase = args[0]
+-        xml_files: T.List['FileOrString'] = [args[1]] if args[1] else []
++        xml_files: T.List[T.Union['FileOrString', 'build.GeneratedTypes']] = [args[1]] if args[1] else []
+         cmd: T.List[T.Union['ExternalProgram', str]] = [state.find_program('gdbus-codegen')]
+         cmd.extend(kwargs['extra_args'])
+ 
+diff --git a/test cases/frameworks/7 gnome/copyfile.py b/test cases/frameworks/7 gnome/copyfile.py
+new file mode 100644
+index 000000000..7e44c48dd
+--- /dev/null
++++ b/test cases/frameworks/7 gnome/copyfile.py	
+@@ -0,0 +1,6 @@
++#!/usr/bin/env python3
++
++import sys
++import shutil
++
++shutil.copy(sys.argv[1], sys.argv[2])
+diff --git a/test cases/frameworks/7 gnome/gdbus/meson.build b/test cases/frameworks/7 gnome/gdbus/meson.build
+index 682abfffe..d749033e9 100644
+--- a/test cases/frameworks/7 gnome/gdbus/meson.build	
++++ b/test cases/frameworks/7 gnome/gdbus/meson.build	
+@@ -58,6 +58,27 @@ else
+   includes = include_directories('..')
+ endif
+ 
++# check that custom targets work
++gdbus_xml_ct = custom_target('built xml sources for gdbus',
++  output: 'com.example.SampleCustomTarget.xml',
++  input: 'data/com.example.Sample.xml',
++  command : [copyfile, '@INPUT@', '@OUTPUT@'])
++
++gdbus_src_ct = gnome.gdbus_codegen(
++  'generated-gdbus-customtarget-src',
++  gdbus_xml_ct,
++  interface_prefix : 'com.example.',
++  namespace : 'Sample',
++  annotations : [],
++)
++gdbus_src_cti = gnome.gdbus_codegen(
++  'generated-gdbus-customtargetindex-src',
++  gdbus_xml_ct[0],
++  interface_prefix : 'com.example.',
++  namespace : 'Sample',
++  annotations : [],
++)
++
+ gdbus_exe = executable('gdbus-test', 'gdbusprog.c',
+   gdbus_src,
+   include_directories : includes,
+diff --git a/test cases/frameworks/7 gnome/meson.build b/test cases/frameworks/7 gnome/meson.build
+index 9f8640609..920bc6a82 100644
+--- a/test cases/frameworks/7 gnome/meson.build	
++++ b/test cases/frameworks/7 gnome/meson.build	
+@@ -1,5 +1,7 @@
+ project('gobject-introspection', 'c')
+ 
++copyfile = find_program('copyfile.py')
++
+ glib = dependency('glib-2.0', required: false)
+ if not glib.found()
+   error('MESON_SKIP_TEST glib not found.')
+diff --git a/test cases/frameworks/7 gnome/resources/copyfile.py b/test cases/frameworks/7 gnome/resources/copyfile.py
+deleted file mode 100644
+index 7e44c48dd..000000000
+--- a/test cases/frameworks/7 gnome/resources/copyfile.py	
++++ /dev/null
+@@ -1,6 +0,0 @@
+-#!/usr/bin/env python3
+-
+-import sys
+-import shutil
+-
+-shutil.copy(sys.argv[1], sys.argv[2])
+diff --git a/test cases/frameworks/7 gnome/resources/meson.build b/test cases/frameworks/7 gnome/resources/meson.build
+index 180b33851..60fc8481e 100644
+--- a/test cases/frameworks/7 gnome/resources/meson.build	
++++ b/test cases/frameworks/7 gnome/resources/meson.build	
+@@ -1,8 +1,6 @@
+ # There are two tests here, because the 2nd one depends on a version of
+ # GLib (2.51.1) that is very recent at the time of writing.
+ 
+-copyfile = find_program('copyfile.py')
+-
+ simple_gresource = configure_file(
+   input : 'simple.gresource.xml',
+   output : 'simple-gen.gresource.xml',
+-- 
+2.38.1
+

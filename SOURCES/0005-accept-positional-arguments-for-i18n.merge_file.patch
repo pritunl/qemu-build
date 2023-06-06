@@ -1,0 +1,39 @@
+From 1e50e285732925c417377cb78e53d075f134ca70 Mon Sep 17 00:00:00 2001
+From: Paolo Bonzini <pbonzini@redhat.com>
+Date: Wed, 2 Nov 2022 10:06:40 +0100
+Subject: [PATCH 5/9] accept positional arguments for i18n.merge_file
+Content-Type: text/plain
+
+Partial revert of upstream commit 61f2866a9f with a warning added.
+
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+---
+ mesonbuild/modules/i18n.py | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/mesonbuild/modules/i18n.py b/mesonbuild/modules/i18n.py
+index 524a33110..f8d92d211 100644
+--- a/mesonbuild/modules/i18n.py
++++ b/mesonbuild/modules/i18n.py
+@@ -146,7 +146,6 @@ class I18nModule(ExtensionModule):
+         return [path.join(src_dir, d) for d in dirs]
+ 
+     @FeatureNew('i18n.merge_file', '0.37.0')
+-    @noPosargs
+     @typed_kwargs(
+         'i18n.merge_file',
+         CT_BUILD_BY_DEFAULT,
+@@ -161,6 +160,10 @@ class I18nModule(ExtensionModule):
+         KwargInfo('type', str, default='xml', validator=in_set_validator({'xml', 'desktop'})),
+     )
+     def merge_file(self, state: 'ModuleState', args: T.List['TYPE_var'], kwargs: 'MergeFile') -> ModuleReturnValue:
++        if args:
++            mlog.warning('i18n.merge_file() does not take any '
++                         'positional arguments. This will become an error in the future.',
++                         location=self.interpreter.current_node)
+         if self.tools['msgfmt'] is None or not self.tools['msgfmt'].found():
+             self.tools['msgfmt'] = state.find_program('msgfmt', for_machine=mesonlib.MachineChoice.BUILD)
+         podir = path.join(state.build_to_src, state.subdir, kwargs['po_dir'])
+-- 
+2.38.1
+

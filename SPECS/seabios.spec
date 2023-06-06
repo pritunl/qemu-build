@@ -1,12 +1,13 @@
 Name:           seabios
-Version:        1.16.0
-Release:        4%{?dist}
+Version:        1.16.1
+Release:        1%{?dist}
 Summary:        Open-source legacy BIOS implementation
 
 License:        LGPLv3
 URL:            https://www.coreboot.org/SeaBIOS
 
-Source0:        https://code.coreboot.org/p/seabios/downloads/get/seabios-1.16.0.tar.gz
+Source0:        https://code.coreboot.org/p/seabios/downloads/get/seabios-1.16.1.tar.gz
+
 
 Source10:       config.vga-cirrus
 Source12:       config.vga-qxl
@@ -15,20 +16,6 @@ Source18:       config.seabios-256k
 Source19:       config.vga-virtio
 Source20:       config.vga-ramfb
 Source21:       config.vga-bochs-display
-
-Patch0002: 0001-Workaround-for-a-win8.1-32-S4-resume-bug.patch
-# For bz#2004662 - RFE: "Unable to allocate resource at romfile_loader_allocate:87" when running very large VMs
-Patch3: seabios-malloc-use-variable-for-ZoneHigh-size.patch
-# For bz#2004662 - RFE: "Unable to allocate resource at romfile_loader_allocate:87" when running very large VMs
-Patch4: seabios-malloc-use-large-ZoneHigh-when-there-is-enough-memor.patch
-# For bz#2086407 - qemu reboot problem with seabios 1.16.0
-Patch5: seabios-pci-refactor-the-pci_config_-functions.patch
-# For bz#2086407 - qemu reboot problem with seabios 1.16.0
-Patch6: seabios-reset-force-standard-PCI-configuration-access.patch
-# For bz#2108555 - [rhel.9.1] Loading a kernel/initrd is sometimes very slow
-Patch7: seabios-virtio-blk-use-larger-default-request-size.patch
-
-# Source-git patches
 
 BuildRequires: make
 BuildRequires: gcc
@@ -145,6 +132,11 @@ install -m 0644 binaries/vgabios*.bin $RPM_BUILD_ROOT%{_datadir}/seavgabios
 %{_datadir}/seavgabios/vgabios*.bin
 
 %changelog
+* Wed Dec 07 2022 Miroslav Rezanina <mrezanin@redhat.com> - 1.16.1-1
+- Rebase to 1.16.1 [bz#2149280]
+- Resolves: bz#2149280
+  (rebase seabios to 1.16.1)
+
 * Mon Jul 25 2022 Miroslav Rezanina <mrezanin@redhat.com> - 1.16.0-4
 - seabios-virtio-blk-use-larger-default-request-size.patch [bz#2108555]
 - Resolves: bz#2108555

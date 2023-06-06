@@ -1,0 +1,29 @@
+From 783c55103daac6240dd4117a14873df0ac038cf6 Mon Sep 17 00:00:00 2001
+From: Paolo Bonzini <pbonzini@redhat.com>
+Date: Thu, 3 Nov 2022 12:13:10 +0100
+Subject: [PATCH 8/9] Revert "use shared implementation to convert files()
+ strings to File objects"
+Content-Type: text/plain
+
+This reverts commit e6e8159980e9a4c816223fcdac8c729d104c0c02.
+It causes a failure to build gtk-vnc.
+---
+ mesonbuild/interpreter/interpreter.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mesonbuild/interpreter/interpreter.py b/mesonbuild/interpreter/interpreter.py
+index b52a55890..caf28f8bd 100644
+--- a/mesonbuild/interpreter/interpreter.py
++++ b/mesonbuild/interpreter/interpreter.py
+@@ -645,7 +645,7 @@ class Interpreter(InterpreterBase, HoldableObject):
+     @typed_pos_args('files', varargs=str)
+     @noKwargs
+     def func_files(self, node: mparser.FunctionNode, args: T.Tuple[T.List[str]], kwargs: 'TYPE_kwargs') -> T.List[mesonlib.File]:
+-        return self.source_strings_to_files(args[0])
++        return [mesonlib.File.from_source_file(self.environment.source_dir, self.subdir, fname) for fname in args[0]]
+ 
+     # Used by pkgconfig.generate()
+     def extract_variables(self, kwargs: T.Dict[str, T.Union[T.Dict[str, str], T.List[str], str]],
+-- 
+2.38.1
+

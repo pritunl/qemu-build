@@ -1,0 +1,33 @@
+From 8c0af255ff937329931372b33335ec580a8e9daa Mon Sep 17 00:00:00 2001
+From: Paolo Bonzini <pbonzini@redhat.com>
+Date: Thu, 3 Nov 2022 17:49:25 +0100
+Subject: [PATCH 9/9] gnome: allow duplicated languages for gnome.yelp
+Content-Type: text/plain
+
+This fixes building Glade 3.38.2.
+
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+---
+ mesonbuild/modules/gnome.py | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/mesonbuild/modules/gnome.py b/mesonbuild/modules/gnome.py
+index d8669bb48..98ec8a5ca 100644
+--- a/mesonbuild/modules/gnome.py
++++ b/mesonbuild/modules/gnome.py
+@@ -1303,7 +1303,12 @@ class GnomeModule(ExtensionModule):
+                                     state.environment)
+         targets.append(pottarget)
+ 
++        langs_done = set()
+         for l in langs:
++            if l in langs_done:
++                mlog.warning(f'duplicate language "{l}" in LINGUAS file')
++                continue
++            langs_done.add(l)
+             l_subdir = os.path.join(state.subdir, l)
+             l_install_dir = os.path.join(install_dir, l, project_id)
+ 
+-- 
+2.38.1
+

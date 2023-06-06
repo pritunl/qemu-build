@@ -1,12 +1,3 @@
-## START: Set by rpmautospec
-## (rpmautospec version 0.3.0)
-%define autorelease(e:s:pb:n) %{?-p:0.}%{lua:
-    release_number = 1;
-    base_release_number = tonumber(rpm.expand("%{?-b*}%{!?-b:1}"));
-    print(release_number + base_release_number - 1);
-}%{?-e:.%{-e*}}%{?-s:.%{-s*}}%{!?-n:%{?dist}}
-## END: Set by rpmautospec
-
 %global libname mesonbuild
 
 # Don’t run the tests by default, since they are rather flaky.
@@ -16,7 +7,7 @@
 
 Name:           meson
 Version:        0.63.3
-Release:        %autorelease
+Release:        1%{?dist}
 Summary:        High productivity build system
 
 License:        ASL 2.0
@@ -81,6 +72,58 @@ BuildRequires:  llvm-devel
 BuildRequires:  cups-devel
 %endif
 
+#########################################
+# Revert backwards incompatible changes #
+#########################################
+
+# The upstreaming plan is to turn these into non-fatal warning if
+# VER is old enough in project(..., version: 'VER').  These occur
+# dozens of times on a RHEL rebuild.
+
+# python_installation.dependency stopped taking positional arguments in 0.60.
+Patch0001: 0001-accept-positional-arguments-for-python.dependency.patch
+
+# Unknown keyword arguments started being rejected in 0.60.
+Patch0002: 0002-Revert-decorators-Make-unknown-kwarg-fatal.patch
+
+# Unknown options are being rejected by get_option() in 0.60.
+Patch0003: 0003-Revert-coredata-throw-a-MesonException-on-unknown-op.patch
+
+# Trying to compare values of different types is an error in 0.60
+# (found with gnome-settings-daemon)
+Patch0004: 0004-warn-on-equality-inequality-with-different-types.patch
+
+# i18n.merge_file stopped taking positional arguments in 0.60.
+Patch0005: 0005-accept-positional-arguments-for-i18n.merge_file.patch
+
+############################
+# Already upstream in 0.64 #
+############################
+
+# fix for fprintd, https://github.com/mesonbuild/meson/pull/10895
+Patch0006: 0006-gnome-allow-custom-targets-as-gdbus-codegen-inputs.patch
+Patch0007: 0007-gnome-allow-generator-outputs-as-gdbus-codegen-input.patch
+
+##################################################
+# More reverts of backwards incompatible changes #
+##################################################
+
+# These are unlikely to be accepted upstream and they only affect two
+# packages, so we may consider fixing gtk-vnc and glade as well.
+
+# Fix for gtk-vnc sandbox violations; the fix requires 0.63 and 0.63
+# breaks old versions, so revert at least for now to avoid a lockstep
+# update.  The gtk-vnc fixes are
+#    https://gitlab.com/keycodemap/keycodemapdb/-/commit/e15649b83a78f89f57205927022115536d2c1698
+#    https://gitlab.gnome.org/GNOME/gtk-vnc/-/commit/8da5e173ebdccbca60387ef2347c629be3c78dff
+Patch0008: 0008-Revert-use-shared-implementation-to-convert-files-st.patch
+
+# Just a duplicated line in glade's help/LINGUAS file, but easy to
+# workaround in meson.  I will nevertheless try to upstream it.
+# The glade fix is
+#    https://gitlab.gnome.org/GNOME/glade/-/commit/efdd5338b034a11c5d617684d92d11edc600965e
+Patch0009: 0009-gnome-allow-duplicated-languages-for-gnome.yelp.patch
+
 %description
 Meson is a build system designed to optimize programmer
 productivity. It aims to do this by providing simple, out-of-the-box
@@ -98,8 +141,6 @@ sed -i -e "/^%%__meson /s| .*$| %{_bindir}/%{name}|" data/macros.%{name}
 %install
 %py3_install
 install -Dpm0644 -t %{buildroot}%{rpmmacrodir} data/macros.%{name}
-install -Dpm0644 -t %{buildroot}%{_datadir}/bash-completion/completions/ data/shell-completions/bash/meson
-install -Dpm0644 -t %{buildroot}%{_datadir}/zsh/site-functions/ data/shell-completions/zsh/_meson
 
 %if %{with check}
 %check
@@ -121,86 +162,21 @@ export MESON_PRINT_TEST_OUTPUT=1
 %dir %{_datadir}/polkit-1
 %dir %{_datadir}/polkit-1/actions
 %{_datadir}/polkit-1/actions/com.mesonbuild.install.policy
-%{_datadir}/bash-completion/completions/meson
-%{_datadir}/zsh/site-functions/_meson
 
 %changelog
-* Thu Oct 06 2022 Kalev Lember <klember@redhat.com> 0.63.3-1
+* Wed Nov 2 2022 Paolo Bonzini <pbonzini@redhat.com> - 0.63.3-1
 - Update to 0.63.3
 
-* Sat Sep 03 2022 Kalev Lember <klember@redhat.com> 0.63.2-1
-- Update to 0.63.2
+* Fri Sep 24 2021 Eduardo Lima (Etrunko) <etrunko@redhat.com> - 0.58.2-1
+- Update to 0.58.2
+  Resolves: rhbz#1997067
 
-* Thu Aug 25 2022 Otto Liljalaakso <otto.liljalaakso@iki.fi> 0.63.1-2
-- Apply upstream patch for D build issue
-- Fixes rhbz#2121586
+* Mon Aug 09 2021 Mohan Boddu <mboddu@redhat.com>
+- Rebuilt for IMA sigs, glibc 2.34, aarch64 flags
+  Related: rhbz#1991688
 
-* Sat Aug 13 2022 Kalev Lember <klember@redhat.com> 0.63.1-1
-- Update to 0.63.1
-
-* Thu Jul 21 2022 Fedora Release Engineering <releng@fedoraproject.org> 0.62.2-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_37_Mass_Rebuild
-
-* Tue Jun 21 2022 Zbigniew Jędrzejewski-Szmek <zbyszek@in.waw.pl> 0.62.2-1
-- Version 0.62.2
-
-* Mon Jun 13 2022 Python Maint <python-maint@redhat.com> 0.62.1-3
-- Rebuilt for Python 3.11
-
-* Tue Apr 26 2022 Marc-André Lureau <marcandre.lureau@redhat.com> - 0.62.1-1
-- Update to 0.62.1
-
-* Tue Mar 15 2022 Marc-André Lureau <marcandre.lureau@redhat.com> - 0.61.3-1
-- Update to 0.61.3
-- Install zsh & bash completion
-
-* Thu Jan 20 2022 Fedora Release Engineering <releng@fedoraproject.org> - 0.60.3-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_36_Mass_Rebuild
-
-* Sun Dec 26 2021 Kalev Lember <klember@redhat.com> - 0.60.3-1
-- Update to 0.60.3
-
-* Mon Dec 06 2021 Kalev Lember <klember@redhat.com> - 0.60.2-1
-- Update to 0.60.2
-
-* Fri Nov 12 2021 Neal Gompa <ngompa@fedoraproject.org> - 0.60.1-1
-- Update to 0.60.1
-
-* Thu Oct 28 2021 Kalev Lember <klember@redhat.com> - 0.59.4-1
-- Update to 0.59.4
-
-* Sat Oct 23 2021 Kalev Lember <klember@redhat.com> - 0.59.3-1
-- Update to 0.59.3
-
-* Sat Aug 21 2021 Kalev Lember <klember@redhat.com> - 0.59.1-1
-- Update to 0.59.1
-
-* Tue Aug 17 2021 Adam Williamson <awilliam@redhat.com> - 0.59.0-2
-- Backport PR #9027 to fix a bug that broke some test suites (#1994006)
-
-* Fri Jul 23 2021 Marc-André Lureau <marcandre.lureau@redhat.com> - 0.59.0-1
-- new version
-
-* Thu Jul 22 2021 Fedora Release Engineering <releng@fedoraproject.org> - 0.58.0-5
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_35_Mass_Rebuild
-
-* Thu Jun 03 2021 Python Maint <python-maint@redhat.com> - 0.58.0-4
-- Rebuilt for Python 3.10
-
-* Tue May 25 2021 Ondrej Holy <oholy@redhat.com> - 0.58.0-3
-- Backport upstream patch to fix environment variable regression
-
-* Thu May 20 2021 Kalev Lember <klember@redhat.com> - 0.58.0-2
-- Backport upstream patch to fix gtkdoc generation
-
-* Wed May 05 2021 Marc-André Lureau <marcandre.lureau@redhat.com> - 0.58.0-1
-- new version
-
-* Sun Apr 11 2021 Kalev Lember <klember@redhat.com> - 0.57.2-1
-- Update to 0.57.2
-
-* Fri Mar 05 2021 Igor Raits <ignatenkobrain@fedoraproject.org> - 0.57.1-1
-- Update to 0.57.1
+* Fri Apr 16 2021 Mohan Boddu <mboddu@redhat.com>
+- Rebuilt for RHEL 9 BETA on Apr 15th 2021. Related: rhbz#1947937
 
 * Tue Jan 26 2021 Fedora Release Engineering <releng@fedoraproject.org> - 0.56.2-2
 - Rebuilt for https://fedoraproject.org/wiki/Fedora_34_Mass_Rebuild
@@ -594,4 +570,3 @@ export MESON_PRINT_TEST_OUTPUT=1
 
 * Wed Jan 21 2015 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 0.22.0-1
 - Initial package
-

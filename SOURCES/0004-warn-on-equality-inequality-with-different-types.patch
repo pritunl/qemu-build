@@ -1,0 +1,79 @@
+From 4e6fe24a702b58117e282cf8c9eb612d4e85cd83 Mon Sep 17 00:00:00 2001
+From: Paolo Bonzini <pbonzini@redhat.com>
+Date: Wed, 2 Nov 2022 10:24:39 +0100
+Subject: [PATCH 4/9] warn on equality/inequality with different types
+Content-Type: text/plain
+
+---
+ mesonbuild/interpreterbase/baseobjects.py | 18 ++++++++++--------
+ 1 file changed, 10 insertions(+), 8 deletions(-)
+
+diff --git a/mesonbuild/interpreterbase/baseobjects.py b/mesonbuild/interpreterbase/baseobjects.py
+index a65b0536d..67f294387 100644
+--- a/mesonbuild/interpreterbase/baseobjects.py
++++ b/mesonbuild/interpreterbase/baseobjects.py
+@@ -12,7 +12,7 @@
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ 
+-from .. import mparser
++from .. import mparser, mlog
+ from .exceptions import InvalidCode, InvalidArguments
+ from .helpers import flatten, resolve_second_level_holders
+ from .operator import MesonOperator
+@@ -98,6 +98,9 @@ class InterpreterObject:
+             if op[0] is None and other is not None:
+                 raise MesonBugException(f'The unary operator `{operator.value}` of {self.display_name()} was passed the object {other} of type {type(other).__name__}')
+             if op[0] is not None and not isinstance(other, op[0]):
++                if operator in (MesonOperator.EQUALS, MesonOperator.NOT_EQUALS):
++                    mlog.warning(f'Trying to compare values of different types ({self.display_name()}, {type(other).__name__})')
++                    return operator == MesonOperator.NOT_EQUALS
+                 raise InvalidArguments(f'The `{operator.value}` operator of {self.display_name()} does not accept objects of type {type(other).__name__} ({other})')
+             return op[1](other)
+         if operator in self.operators:
+@@ -106,12 +109,8 @@ class InterpreterObject:
+ 
+     # Default comparison operator support
+     def _throw_comp_exception(self, other: TYPE_var, opt_type: str) -> T.NoReturn:
+-        raise InvalidArguments(textwrap.dedent(
+-            f'''
+-                Trying to compare values of different types ({self.display_name()}, {type(other).__name__}) using {opt_type}.
+-                This was deprecated and undefined behavior previously and is as of 0.60.0 a hard error.
+-            '''
+-        ))
++        mlog.warning(
++                'Trying to compare values of different types ({self.display_name()}, {type(other).__name__}) using {opt_type}.')
+ 
+     def op_equals(self, other: TYPE_var) -> bool:
+         # We use `type(...) == type(...)` here to enforce an *exact* match for comparison. We
+@@ -119,11 +118,12 @@ class InterpreterObject:
+         # would pass because this comparison must never be true: `derived_obj == base_obj`
+         if type(self) != type(other):
+             self._throw_comp_exception(other, '==')
++            return False
+         return self == other
+ 
+     def op_not_equals(self, other: TYPE_var) -> bool:
+         if type(self) != type(other):
+-            self._throw_comp_exception(other, '!=')
++            return True
+         return self != other
+ 
+ class MesonInterpreterObject(InterpreterObject):
+@@ -157,11 +157,13 @@ class ObjectHolder(InterpreterObject, T.Generic[InterpreterObjectTypeVar]):
+         # See the comment from InterpreterObject why we are using `type()` here.
+         if type(self.held_object) != type(other):
+             self._throw_comp_exception(other, '==')
++            return False
+         return self.held_object == other
+ 
+     def op_not_equals(self, other: TYPE_var) -> bool:
+         if type(self.held_object) != type(other):
+             self._throw_comp_exception(other, '!=')
++            return True
+         return self.held_object != other
+ 
+     def __repr__(self) -> str:
+-- 
+2.38.1
+
