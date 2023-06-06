@@ -1,6 +1,6 @@
 # qemu-build
 
-Build source for Pritunl KVM repository, currently provides QEMU v7.2.0 for RHEL9.
+Build source for Pritunl KVM repository, currently provides QEMU v8.0.0 for RHEL9.
 
 ```bash
 sudo tee /etc/yum.repos.d/pritunl-kvm.repo << EOF
@@ -63,17 +63,17 @@ wget https://yum.oracle.com/repo/OracleLinux/OL8/developer/EPEL/x86_64/getPackag
 wget https://yum.oracle.com/repo/OracleLinux/OL8/developer/EPEL/x86_64/getPackageSource/libslirp-4.3.1-2.el8.src.rpm
 wget https://yum.oracle.com/repo/OracleLinux/OL9/appstream/x86_64/getPackageSource/ipxe-20200823-9.git4bd064de.el9.src.rpm
 wget https://yum.oracle.com/repo/OracleLinux/OL9/appstream/x86_64/getPackageSource/dtc-1.6.0-7.el9.src.rpm
-wget https://yum.oracle.com/repo/OracleLinux/OL9/appstream/x86_64/getPackageSource/seabios-1.16.0-4.el9.src.rpm
+wget https://yum.oracle.com/repo/OracleLinux/OL9/appstream/x86_64/getPackageSource/seabios-1.16.1-1.el9.src.rpm
 wget https://yum.oracle.com/repo/OracleLinux/OL9/developer/kvm/utils/x86_64/getPackageSource/edk2-20220628-1.el9.src.rpm
 wget https://yum.oracle.com/repo/OracleLinux/OL8/appstream/x86_64/getPackageSource/spice-0.14.3-4.el8.src.rpm
+wget https://yum.oracle.com/repo/OracleLinux/OL8/appstream/x86_64/getPackageSource/libcacard-2.7.0-2.el8_1.src.rpm
+wget https://yum.oracle.com/repo/OracleLinux/OL9/codeready/builder/x86_64/getPackageSource/meson-0.63.3-1.el9.src.rpm
 
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/37/Everything/source/tree/Packages/c/celt051-0.5.1.3-24.fc37.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/37/Everything/source/tree/Packages/l/libcacard-2.8.1-3.fc37.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/37/Everything/source/tree/Packages/m/meson-0.63.3-1.fc37.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/v/virglrenderer-0.10.4-1.20230104git88b9fe3b.fc38.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/37/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-7.fc37.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-7.2.0-4.fc38.src.rpm
-
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/38/Everything/source/tree/Packages/c/celt051-0.5.1.3-25.fc38.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/38/Everything/source/tree/Packages/v/virglrenderer-0.10.4-2.20230104git88b9fe3b.fc38.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/38/Everything/source/tree/Packages/v/virtiofsd-1.5.1-1.fc38.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-9.fc39.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-8.0.0-4.fc39.src.rpm
 
 rpm -K libepoxy-1.5.5-4.el9.src.rpm
 rpm -K liburing-0.7-7.el9.src.rpm
@@ -82,15 +82,16 @@ rpm -K libnfs-4.0.0-1.el8.src.rpm
 rpm -K libslirp-4.3.1-2.el8.src.rpm
 rpm -K ipxe-20200823-9.git4bd064de.el9.src.rpm
 rpm -K dtc-1.6.0-7.el9.src.rpm
-rpm -K seabios-1.16.0-4.el9.src.rpm
+rpm -K seabios-1.16.1-1.el9.src.rpm
 rpm -K edk2-20220628-1.el9.src.rpm
 rpm -K spice-0.14.3-4.el8.src.rpm
-rpm -K libcacard-2.8.1-3.fc37.src.rpm
-rpm -K celt051-0.5.1.3-24.fc37.src.rpm
-rpm -K meson-0.63.3-1.fc37.src.rpm
-rpm -K virglrenderer-0.10.4-1.20230104git88b9fe3b.fc38.src.rpm
-rpm -K qemu-sanity-check-1.1.6-7.fc37.src.rpm
-rpm -K qemu-7.2.0-4.fc38.src.rpm
+rpm -K libcacard-2.7.0-2.el8_1.src.rpm
+rpm -K meson-0.63.3-1.el9.src.rpm
+rpm -K celt051-0.5.1.3-25.fc38.src.rpm
+rpm -K virglrenderer-0.10.4-2.20230104git88b9fe3b.fc38.src.rpm
+rpm -K virtiofsd-1.5.1-1.fc38.src.rpm
+rpm -K qemu-sanity-check-1.1.6-9.fc39.src.rpm
+rpm -K qemu-8.0.0-4.fc39.src.rpm
 
 sudo rpm -i libepoxy-1.5.5-4.el9.src.rpm
 sudo rpm -i liburing-0.7-7.el9.src.rpm
@@ -203,6 +204,11 @@ sudo yum-builddep -y ~/rpmbuild/SPECS/meson.spec
 rpmbuild -ba meson.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/noarch/meson-*.el9.noarch.rpm
+
+sudo yum-builddep -y ~/rpmbuild/SPECS/virtiofsd.spec
+rpmbuild -ba virtiofsd.spec
+
+sudo yum -y install ~/rpmbuild/RPMS/x86_64/virtiofsd-*.el9.noarch.rpm
 
 sudo yum-builddep -y ~/rpmbuild/SPECS/qemu.spec
 rpmbuild -ba qemu.spec
