@@ -23,6 +23,7 @@ sudo /usr/libexec/oci-growfs
 sudo yum-config-manager --enable ol9_addons
 sudo yum-config-manager --enable ol9_appstream
 sudo yum-config-manager --enable ol9_codeready_builder
+sudo yum-config-manager --enable ol9_distro_builder
 
 sudo yum -y install oracle-epel-release-el9
 sudo yum-config-manager --enable ol9_developer_EPEL
@@ -100,15 +101,16 @@ sudo rpm -i libnfs-4.0.0-1.el8.src.rpm
 sudo rpm -i libslirp-4.3.1-2.el8.src.rpm
 sudo rpm -i ipxe-20200823-9.git4bd064de.el9.src.rpm
 sudo rpm -i dtc-1.6.0-7.el9.src.rpm
-sudo rpm -i seabios-1.16.0-4.el9.src.rpm
+sudo rpm -i seabios-1.16.1-1.el9.src.rpm
 sudo rpm -i edk2-20220628-1.el9.src.rpm
 sudo rpm -i spice-0.14.3-4.el8.src.rpm
-sudo rpm -i celt051-0.5.1.3-24.fc37.src.rpm
-sudo rpm -i libcacard-2.8.1-3.fc37.src.rpm
-sudo rpm -i meson-0.63.3-1.fc37.src.rpm
-sudo rpm -i virglrenderer-0.10.4-1.20230104git88b9fe3b.fc38.src.rpm
-sudo rpm -i qemu-sanity-check-1.1.6-7.fc37.src.rpm
-sudo rpm -i qemu-7.2.0-4.fc38.src.rpm
+sudo rpm -i libcacard-2.7.0-2.el8_1.src.rpm
+sudo rpm -i meson-0.63.3-1.el9.src.rpm
+sudo rpm -i celt051-0.5.1.3-25.fc38.src.rpm
+sudo rpm -i virglrenderer-0.10.4-2.20230104git88b9fe3b.fc38.src.rpm
+sudo rpm -i virtiofsd-1.5.1-1.fc38.src.rpm
+sudo rpm -i qemu-sanity-check-1.1.6-9.fc39.src.rpm
+sudo rpm -i qemu-8.0.0-4.fc39.src.rpm
 
 sudo mv /root/rpmbuild ~/rpmbuild
 sudo chown -R opc:opc ~/rpmbuild
@@ -205,10 +207,8 @@ rpmbuild -ba meson.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/noarch/meson-*.el9.noarch.rpm
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/virtiofsd.spec
+sudo dnf builddep -y ~/rpmbuild/SPECS/virtiofsd.spec
 rpmbuild -ba virtiofsd.spec
-
-sudo yum -y install ~/rpmbuild/RPMS/x86_64/virtiofsd-*.el9.noarch.rpm
 
 sudo yum-builddep -y ~/rpmbuild/SPECS/qemu.spec
 rpmbuild -ba qemu.spec
