@@ -16,7 +16,7 @@ ExcludeArch:    i686
 BuildRequires:  rust-packaging >= 21
 BuildRequires:  libcap-ng-devel
 BuildRequires:  libseccomp-devel
-Requires:       qemu-common
+Requires:       pritunl-qemu-common
 Provides:       vhostuser-backend(fs)
 Conflicts:      qemu-virtiofsd
 
@@ -25,10 +25,26 @@ Conflicts:      qemu-virtiofsd
 
 %prep
 %autosetup -n %{name}-%{version_no_tilde} -p1
-%cargo_prep
+set -eu
+/usr/bin/mkdir -p .cargo
+cat > .cargo/config << EOF
+[build]
+rustc = "/usr/bin/rustc"
+rustdoc = "/usr/bin/rustdoc"
 
-%generate_buildrequires
-%cargo_generate_buildrequires
+[env]
+CFLAGS = "-O2 -flto=auto -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-D_FORTIFY_SOURCE=2 -Wp,-D_GLIBCXX_ASSERTIONS -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -fstack-protector-strong -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -m64 -march=x86-64-v2 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection"
+CXXFLAGS = "-O2 -flto=auto -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-D_FORTIFY_SOURCE=2 -Wp,-D_GLIBCXX_ASSERTIONS -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -fstack-protector-strong -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -m64 -march=x86-64-v2 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection"
+LDFLAGS = "-Wl,-z,relro -Wl,--as-needed  -Wl,-z,now -specs=/usr/lib/rpm/redhat/redhat-hardened-ld -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1 "
+
+[install]
+root = "/home/opc/rpmbuild/BUILDROOT/%{NAME}-%{VERSION}-%{RELEASE}.x86_64/usr"
+
+[term]
+verbose = true
+EOF
+/usr/bin/rm -f Cargo.lock
+/usr/bin/rm -f Cargo.toml.orig
 
 %build
 %cargo_build

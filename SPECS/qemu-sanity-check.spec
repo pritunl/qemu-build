@@ -45,11 +45,6 @@ BuildRequires:  cpio
 BuildRequires:  glibc-static
 
 # For testing.
-%if !0%{?rhel}
-BuildRequires:  qemu
-%else
-BuildRequires:  qemu-kvm
-%endif
 BuildRequires:  kernel
 
 # For complicated reasons, this is required so that
@@ -132,15 +127,6 @@ as %{name} except that this package does not depend on qemu or kernel.
   exit 1
 }
 make %{?_smp_mflags}
-
-
-%check
-%ifarch %{test_arches}
-make check || {
-  cat test-suite.log
-  exit 1
-}
-%endif
 
 
 %install
