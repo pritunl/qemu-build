@@ -1,0 +1,24 @@
+From dadf21727ffb9af20dcfc1858e5a3bef2795b917 Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Thu, 18 May 2023 13:36:31 +0100
+Subject: [PATCH 05/10] Ignore user-added local files such as ./localconfigure
+
+---
+ .gitignore | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/.gitignore b/.gitignore
+index c2f3c39..edcd1ac 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -17,6 +17,7 @@ Makefile.in
+ /config.status
+ /configure
+ /depcomp
++/local*
+ /init
+ /initrd
+ /install-sh
+-- 
+2.41.0
+

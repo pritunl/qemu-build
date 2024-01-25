@@ -1,0 +1,231 @@
+From e7fcb0e3e50797315086c40bc2daf43a82641337 Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Fri, 1 Sep 2023 13:42:37 +0100
+Subject: [PATCH 06/10] Move the tests into a subdirectory
+
+---
+ Makefile.am                                   | 15 ++-------
+ configure.ac                                  |  2 +-
+ tests/Makefile.am                             | 33 +++++++++++++++++++
+ .../run-qemu-sanity-check                     |  2 +-
+ sleeper => tests/sleeper                      |  0
+ test-bad-kernel => tests/test-bad-kernel      |  2 +-
+ test-bad-options => tests/test-bad-options    |  6 ++--
+ test-bad-qemu => tests/test-bad-qemu          |  2 +-
+ .../test-bad-userspace                        |  2 +-
+ test-timeout => tests/test-timeout            |  2 +-
+ 10 files changed, 45 insertions(+), 21 deletions(-)
+ create mode 100644 tests/Makefile.am
+ rename run-qemu-sanity-check => tests/run-qemu-sanity-check (94%)
+ rename sleeper => tests/sleeper (100%)
+ rename test-bad-kernel => tests/test-bad-kernel (94%)
+ rename test-bad-options => tests/test-bad-options (91%)
+ rename test-bad-qemu => tests/test-bad-qemu (95%)
+ rename test-bad-userspace => tests/test-bad-userspace (96%)
+ rename test-timeout => tests/test-timeout (93%)
+
+diff --git a/Makefile.am b/Makefile.am
+index 5f22f79..657b6dc 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -15,14 +15,14 @@
+ # with this program; if not, write to the Free Software Foundation, Inc.,
+ # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ 
++SUBDIRS = . tests
++
+ EXTRA_DIST = \
+ 	.gitignore \
+ 	qemu-sanity-check.1 \
+ 	qemu-sanity-check.in \
+ 	qemu-sanity-check.pod \
+-	qemu-sanity-check.pod.in \
+-	sleeper \
+-	$(TESTS)
++	qemu-sanity-check.pod.in
+ 
+ CLEANFILES = \
+ 	*~ \
+@@ -61,15 +61,6 @@ qemu-sanity-check.1: qemu-sanity-check.pod
+ 
+ endif
+ 
+-# Tests.
+-TESTS = \
+-	run-qemu-sanity-check \
+-	test-timeout \
+-	test-bad-options \
+-	test-bad-kernel \
+-	test-bad-qemu \
+-	test-bad-userspace
+-
+ # Tag HEAD with current version (maintainer only).
+ 
+ maintainer-tag:
+diff --git a/configure.ac b/configure.ac
+index 06b21f6..432c63e 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -71,6 +71,6 @@ AM_CONDITIONAL([HAVE_POD2MAN], [test "x$POD2MAN" != "xno"])
+ dnl Produce output files.
+ AC_CONFIG_HEADERS([config.h])
+ AC_CONFIG_FILES([qemu-sanity-check],[chmod 0555 qemu-sanity-check])
+-AC_CONFIG_FILES([Makefile])
++AC_CONFIG_FILES([Makefile tests/Makefile])
+ 
+ AC_OUTPUT
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+new file mode 100644
+index 0000000..7185f14
+--- /dev/null
++++ b/tests/Makefile.am
+@@ -0,0 +1,33 @@
++# Makefile for qemu-sanity-check
++# Copyright (C) 2013 Red Hat Inc.
++#
++# This program is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; either version 2 of the License, or
++# (at your option) any later version.
++#
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License along
++# with this program; if not, write to the Free Software Foundation, Inc.,
++# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++
++EXTRA_DIST = \
++	sleeper \
++	$(TESTS)
++
++CLEANFILES = \
++	*~
++
++TESTS_ENVIRONMENT = PATH=$(abs_top_builddir):$(PATH)
++
++TESTS = \
++	run-qemu-sanity-check \
++	test-timeout \
++	test-bad-options \
++	test-bad-kernel \
++	test-bad-qemu \
++	test-bad-userspace
+diff --git a/run-qemu-sanity-check b/tests/run-qemu-sanity-check
+similarity index 94%
+rename from run-qemu-sanity-check
+rename to tests/run-qemu-sanity-check
+index 79745e5..ec015af 100755
+--- a/run-qemu-sanity-check
++++ b/tests/run-qemu-sanity-check
+@@ -17,4 +17,4 @@
+ # with this program; if not, write to the Free Software Foundation, Inc.,
+ # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ 
+-./qemu-sanity-check -v --initrd=./initrd "$@"
++qemu-sanity-check -v --initrd=../initrd "$@"
+diff --git a/sleeper b/tests/sleeper
+similarity index 100%
+rename from sleeper
+rename to tests/sleeper
+diff --git a/test-bad-kernel b/tests/test-bad-kernel
+similarity index 94%
+rename from test-bad-kernel
+rename to tests/test-bad-kernel
+index 78756f4..09d2f97 100755
+--- a/test-bad-kernel
++++ b/tests/test-bad-kernel
+@@ -17,7 +17,7 @@
+ # with this program; if not, write to the Free Software Foundation, Inc.,
+ # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ 
+-./run-qemu-sanity-check --kernel=/dev/null
++$srcdir/run-qemu-sanity-check --kernel=/dev/null
+ r=$?
+ if [ $r -ne 1 ]; then
+     echo "$0: unexpected exit code $r (expecting 1)"
+diff --git a/test-bad-options b/tests/test-bad-options
+similarity index 91%
+rename from test-bad-options
+rename to tests/test-bad-options
+index 4783158..bbe9a65 100755
+--- a/test-bad-options
++++ b/tests/test-bad-options
+@@ -17,21 +17,21 @@
+ # with this program; if not, write to the Free Software Foundation, Inc.,
+ # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ 
+-./qemu-sanity-check --foobar
++qemu-sanity-check --foobar
+ r=$?
+ if [ $r -ne 2 ]; then
+     echo "$0: bad argument: unexpected exit code $r (expecting 2)"
+     exit 1
+ fi
+ 
+-./qemu-sanity-check --kernel=/nosuchfile
++qemu-sanity-check --kernel=/nosuchfile
+ r=$?
+ if [ $r -ne 2 ]; then
+     echo "$0: missing kernel: unexpected exit code $r (expecting 2)"
+     exit 1
+ fi
+ 
+-./qemu-sanity-check --initrd=/nosuchfile
++qemu-sanity-check --initrd=/nosuchfile
+ r=$?
+ if [ $r -ne 2 ]; then
+     echo "$0: missing initrd: unexpected exit code $r (expecting 2)"
+diff --git a/test-bad-qemu b/tests/test-bad-qemu
+similarity index 95%
+rename from test-bad-qemu
+rename to tests/test-bad-qemu
+index a2404b9..6d80ad4 100755
+--- a/test-bad-qemu
++++ b/tests/test-bad-qemu
+@@ -20,7 +20,7 @@
+ # Choose a fake qemu which won't immediately fail, but also won't work
+ # properly when it's run for real.
+ 
+-./run-qemu-sanity-check --qemu=true
++$srcdir/run-qemu-sanity-check --qemu=true
+ r=$?
+ if [ $r -ne 1 ]; then
+     echo "$0: unexpected exit code $r (expecting 1)"
+diff --git a/test-bad-userspace b/tests/test-bad-userspace
+similarity index 96%
+rename from test-bad-userspace
+rename to tests/test-bad-userspace
+index 7543679..ab46046 100755
+--- a/test-bad-userspace
++++ b/tests/test-bad-userspace
+@@ -19,7 +19,7 @@
+ 
+ # Test what happens if the userspace (ie. initrd) is bad.
+ 
+-./qemu-sanity-check --initrd=/dev/null
++qemu-sanity-check --initrd=/dev/null
+ r=$?
+ if [ $r -ne 1 ]; then
+     echo "$0: unexpected exit code $r (expecting 1)"
+diff --git a/test-timeout b/tests/test-timeout
+similarity index 93%
+rename from test-timeout
+rename to tests/test-timeout
+index fd2b5ca..704b0f1 100755
+--- a/test-timeout
++++ b/tests/test-timeout
+@@ -19,7 +19,7 @@
+ 
+ # Check the --timeout option is functional.
+ 
+-./run-qemu-sanity-check --timeout=10 --qemu=./sleeper
++$srcdir/run-qemu-sanity-check --timeout=10 --qemu=./sleeper
+ r=$?
+ if [ $r -ne 1 ]; then
+     echo "$0: unexpected exit code $r (expecting 1)"
+-- 
+2.41.0
+

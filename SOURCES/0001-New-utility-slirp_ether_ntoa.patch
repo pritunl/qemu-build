@@ -1,0 +1,186 @@
+From c6fcedf4f53e070dfcb7a6910624705cdcc0a027 Mon Sep 17 00:00:00 2001
+From: Doug Evans <dje@google.com>
+Date: Tue, 23 Feb 2021 15:23:19 -0800
+Subject: [PATCH 1/2] New utility slirp_ether_ntoa
+
+... and call it everywhere a macaddr is pretty-printed.
+
+Signed-off-by: Doug Evans <dje@google.com>
+(cherry picked from commit ac00ba460e101bbce0a167b4f0517378a0fbe6b8)
+---
+ src/arp_table.c | 12 +++++++-----
+ src/ndp_table.c | 18 ++++++++++--------
+ src/slirp.c     | 11 +++++------
+ src/util.c      | 11 +++++++++++
+ src/util.h      |  8 ++++++++
+ 5 files changed, 41 insertions(+), 19 deletions(-)
+
+diff --git a/src/arp_table.c b/src/arp_table.c
+index 959e5b9ec0af..ba8c8a4eee88 100644
+--- a/src/arp_table.c
++++ b/src/arp_table.c
+@@ -34,11 +34,12 @@ void arp_table_add(Slirp *slirp, uint32_t ip_addr,
+         ~slirp->vnetwork_mask.s_addr | slirp->vnetwork_addr.s_addr;
+     ArpTable *arptbl = &slirp->arp_table;
+     int i;
++    char ethaddr_str[ETH_ADDRSTRLEN];
+ 
+     DEBUG_CALL("arp_table_add");
+     DEBUG_ARG("ip = %s", inet_ntoa((struct in_addr){ .s_addr = ip_addr }));
+-    DEBUG_ARG("hw addr = %02x:%02x:%02x:%02x:%02x:%02x", ethaddr[0], ethaddr[1],
+-              ethaddr[2], ethaddr[3], ethaddr[4], ethaddr[5]);
++    DEBUG_ARG("hw addr = %s", slirp_ether_ntoa(ethaddr, ethaddr_str,
++                                               sizeof(ethaddr_str)));
+ 
+     if (ip_addr == 0 || ip_addr == 0xffffffff || ip_addr == broadcast_addr) {
+         /* Do not register broadcast addresses */
+@@ -67,6 +68,7 @@ bool arp_table_search(Slirp *slirp, uint32_t ip_addr,
+         ~slirp->vnetwork_mask.s_addr | slirp->vnetwork_addr.s_addr;
+     ArpTable *arptbl = &slirp->arp_table;
+     int i;
++    char ethaddr_str[ETH_ADDRSTRLEN];
+ 
+     DEBUG_CALL("arp_table_search");
+     DEBUG_ARG("ip = %s", inet_ntoa((struct in_addr){ .s_addr = ip_addr }));
+@@ -81,9 +83,9 @@ bool arp_table_search(Slirp *slirp, uint32_t ip_addr,
+     for (i = 0; i < ARP_TABLE_SIZE; i++) {
+         if (arptbl->table[i].ar_sip == ip_addr) {
+             memcpy(out_ethaddr, arptbl->table[i].ar_sha, ETH_ALEN);
+-            DEBUG_ARG("found hw addr = %02x:%02x:%02x:%02x:%02x:%02x",
+-                      out_ethaddr[0], out_ethaddr[1], out_ethaddr[2],
+-                      out_ethaddr[3], out_ethaddr[4], out_ethaddr[5]);
++            DEBUG_ARG("found hw addr = %s",
++                      slirp_ether_ntoa(out_ethaddr, ethaddr_str,
++                                       sizeof(ethaddr_str)));
+             return 1;
+         }
+     }
+diff --git a/src/ndp_table.c b/src/ndp_table.c
+index 110d6ea0e43f..61ae8e0468fc 100644
+--- a/src/ndp_table.c
++++ b/src/ndp_table.c
+@@ -12,13 +12,14 @@ void ndp_table_add(Slirp *slirp, struct in6_addr ip_addr,
+     char addrstr[INET6_ADDRSTRLEN];
+     NdpTable *ndp_table = &slirp->ndp_table;
+     int i;
++    char ethaddr_str[ETH_ADDRSTRLEN];
+ 
+     inet_ntop(AF_INET6, &(ip_addr), addrstr, INET6_ADDRSTRLEN);
+ 
+     DEBUG_CALL("ndp_table_add");
+     DEBUG_ARG("ip = %s", addrstr);
+-    DEBUG_ARG("hw addr = %02x:%02x:%02x:%02x:%02x:%02x", ethaddr[0], ethaddr[1],
+-              ethaddr[2], ethaddr[3], ethaddr[4], ethaddr[5]);
++    DEBUG_ARG("hw addr = %s", slirp_ether_ntoa(ethaddr, ethaddr_str,
++                                               sizeof(ethaddr_str)));
+ 
+     if (IN6_IS_ADDR_MULTICAST(&ip_addr) || in6_zero(&ip_addr)) {
+         /* Do not register multicast or unspecified addresses */
+@@ -50,6 +51,7 @@ bool ndp_table_search(Slirp *slirp, struct in6_addr ip_addr,
+     char addrstr[INET6_ADDRSTRLEN];
+     NdpTable *ndp_table = &slirp->ndp_table;
+     int i;
++    char ethaddr_str[ETH_ADDRSTRLEN];
+ 
+     inet_ntop(AF_INET6, &(ip_addr), addrstr, INET6_ADDRSTRLEN);
+ 
+@@ -66,18 +68,18 @@ bool ndp_table_search(Slirp *slirp, struct in6_addr ip_addr,
+         out_ethaddr[3] = ip_addr.s6_addr[13];
+         out_ethaddr[4] = ip_addr.s6_addr[14];
+         out_ethaddr[5] = ip_addr.s6_addr[15];
+-        DEBUG_ARG("multicast addr = %02x:%02x:%02x:%02x:%02x:%02x",
+-                  out_ethaddr[0], out_ethaddr[1], out_ethaddr[2],
+-                  out_ethaddr[3], out_ethaddr[4], out_ethaddr[5]);
++        DEBUG_ARG("multicast addr = %s",
++                  slirp_ether_ntoa(out_ethaddr, ethaddr_str,
++                                   sizeof(ethaddr_str)));
+         return 1;
+     }
+ 
+     for (i = 0; i < NDP_TABLE_SIZE; i++) {
+         if (in6_equal(&ndp_table->table[i].ip_addr, &ip_addr)) {
+             memcpy(out_ethaddr, ndp_table->table[i].eth_addr, ETH_ALEN);
+-            DEBUG_ARG("found hw addr = %02x:%02x:%02x:%02x:%02x:%02x",
+-                      out_ethaddr[0], out_ethaddr[1], out_ethaddr[2],
+-                      out_ethaddr[3], out_ethaddr[4], out_ethaddr[5]);
++            DEBUG_ARG("found hw addr = %s",
++                      slirp_ether_ntoa(out_ethaddr, ethaddr_str,
++                                       sizeof(ethaddr_str)));
+             return 1;
+         }
+     }
+diff --git a/src/slirp.c b/src/slirp.c
+index abb6f9a966d8..1f2513a9e1a4 100644
+--- a/src/slirp.c
++++ b/src/slirp.c
+@@ -1054,6 +1054,7 @@ int if_encap(Slirp *slirp, struct mbuf *ifm)
+     uint8_t ethaddr[ETH_ALEN];
+     const struct ip *iph = (const struct ip *)ifm->m_data;
+     int ret;
++    char ethaddr_str[ETH_ADDRSTRLEN];
+ 
+     if (ifm->m_len + ETH_HLEN > sizeof(buf)) {
+         return 1;
+@@ -1079,12 +1080,10 @@ int if_encap(Slirp *slirp, struct mbuf *ifm)
+     }
+ 
+     memcpy(eh->h_dest, ethaddr, ETH_ALEN);
+-    DEBUG_ARG("src = %02x:%02x:%02x:%02x:%02x:%02x", eh->h_source[0],
+-              eh->h_source[1], eh->h_source[2], eh->h_source[3],
+-              eh->h_source[4], eh->h_source[5]);
+-    DEBUG_ARG("dst = %02x:%02x:%02x:%02x:%02x:%02x", eh->h_dest[0],
+-              eh->h_dest[1], eh->h_dest[2], eh->h_dest[3], eh->h_dest[4],
+-              eh->h_dest[5]);
++    DEBUG_ARG("src = %s", slirp_ether_ntoa(eh->h_source, ethaddr_str,
++                                           sizeof(ethaddr_str)));
++    DEBUG_ARG("dst = %s", slirp_ether_ntoa(eh->h_dest, ethaddr_str,
++                                           sizeof(ethaddr_str)));
+     memcpy(buf + sizeof(struct ethhdr), ifm->m_data, ifm->m_len);
+     slirp_send_packet_all(slirp, buf, ifm->m_len + ETH_HLEN);
+     return 1;
+diff --git a/src/util.c b/src/util.c
+index 2d8fb9642e76..67ef66786f54 100644
+--- a/src/util.c
++++ b/src/util.c
+@@ -427,3 +427,14 @@ int slirp_fmt0(char *str, size_t size, const char *format, ...)
+ 
+     return rv;
+ }
++
++const char *slirp_ether_ntoa(const uint8_t *addr, char *out_str,
++                             size_t out_str_size)
++{
++    assert(out_str_size >= ETH_ADDRSTRLEN);
++
++    slirp_fmt0(out_str, out_str_size, "%02x:%02x:%02x:%02x:%02x:%02x",
++               addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
++
++    return out_str;
++}
+diff --git a/src/util.h b/src/util.h
+index d67b3d0de9aa..8134db961779 100644
+--- a/src/util.h
++++ b/src/util.h
+@@ -84,6 +84,7 @@ struct iovec {
+ #define SCALE_MS 1000000
+ 
+ #define ETH_ALEN 6
++#define ETH_ADDRSTRLEN 18 /* "xx:xx:xx:xx:xx:xx", with trailing NUL */
+ #define ETH_HLEN 14
+ #define ETH_P_IP (0x0800) /* Internet Protocol packet  */
+ #define ETH_P_ARP (0x0806) /* Address Resolution packet */
+@@ -186,4 +187,11 @@ void slirp_pstrcpy(char *buf, int buf_size, const char *str);
+ int slirp_fmt(char *str, size_t size, const char *format, ...) G_GNUC_PRINTF(3, 4);
+ int slirp_fmt0(char *str, size_t size, const char *format, ...) G_GNUC_PRINTF(3, 4);
+ 
++/*
++ * Pretty print a MAC address into out_str.
++ * As a convenience returns out_str.
++ */
++const char *slirp_ether_ntoa(const uint8_t *addr, char *out_str,
++                             size_t out_str_len);
++
+ #endif
+-- 
+2.34.1.428.gdcc0cd074f0c
+

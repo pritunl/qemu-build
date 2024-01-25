@@ -1,0 +1,36 @@
+From 0f017f39a390d8fa4ae817f45fbf71a0c8332860 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Fri, 4 Jun 2021 16:15:14 +0400
+Subject: [PATCH 3/7] bootp: check bootp_input buffer size
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Fixes: CVE-2021-3592
+Fixes: https://gitlab.freedesktop.org/slirp/libslirp/-/issues/44
+
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+(cherry picked from commit 2eca0838eee1da96204545e22cdaed860d9d7c6c)
+---
+ src/bootp.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/bootp.c b/src/bootp.c
+index e0db8d1..cafa1eb 100644
+--- a/src/bootp.c
++++ b/src/bootp.c
+@@ -365,9 +365,9 @@ static void bootp_reply(Slirp *slirp,
+ 
+ void bootp_input(struct mbuf *m)
+ {
+-    struct bootp_t *bp = mtod(m, struct bootp_t *);
++    struct bootp_t *bp = mtod_check(m, sizeof(struct bootp_t));
+ 
+-    if (bp->bp_op == BOOTP_REQUEST) {
++    if (bp && bp->bp_op == BOOTP_REQUEST) {
+         bootp_reply(m->slirp, bp, m_end(m));
+     }
+ }
+-- 
+2.29.0
+

@@ -1,5 +1,5 @@
 diff --git a/ArmVirtPkg/ArmVirt.dsc.inc b/ArmVirtPkg/ArmVirt.dsc.inc
-index 5a1598d..2961eef 100644
+index ba711deac0..de44073d95 100644
 --- a/ArmVirtPkg/ArmVirt.dsc.inc
 +++ b/ArmVirtPkg/ArmVirt.dsc.inc
 @@ -230,21 +230,25 @@
@@ -29,7 +29,7 @@ index 5a1598d..2961eef 100644
  [LibraryClasses.common.DXE_RUNTIME_DRIVER]
    MemoryAllocationLib|MdePkg/Library/UefiMemoryAllocationLib/UefiMemoryAllocationLib.inf
 diff --git a/ArmVirtPkg/ArmVirtQemu.dsc b/ArmVirtPkg/ArmVirtQemu.dsc
-index 84c28b0..459baac 100644
+index b2b0d304d3..26862cf898 100644
 --- a/ArmVirtPkg/ArmVirtQemu.dsc
 +++ b/ArmVirtPkg/ArmVirtQemu.dsc
 @@ -140,8 +140,8 @@
@@ -54,6 +54,15 @@ index 84c28b0..459baac 100644
    #
    # The maximum physical I/O addressability of the processor, set with
    # BuildCpuHob().
+@@ -221,7 +225,7 @@
+   gEfiMdeModulePkgTokenSpaceGuid.PcdSmbiosEntryPointProvideMethod|0x2
+ 
+ [PcdsDynamicDefault.common]
+-  gEfiMdePkgTokenSpaceGuid.PcdPlatformBootTimeOut|3
++  gEfiMdePkgTokenSpaceGuid.PcdPlatformBootTimeOut|0
+ 
+   ## If TRUE, OvmfPkg/AcpiPlatformDxe will not wait for PCI
+   #  enumeration to complete before installing ACPI tables.
 @@ -367,7 +371,6 @@
  !endif
    }

@@ -1,0 +1,54 @@
+From 87f5d0c70bdb46d467d32e3c3a8d7a472c97e148 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Fri, 4 Jun 2021 15:58:25 +0400
+Subject: [PATCH 1/7] Add mtod_check()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Recent security issues demonstrate the lack of safety care when casting
+a mbuf to a particular structure type. At least, it should check that
+the buffer is large enough. The following patches will make use of this
+function.
+
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+(cherry picked from commit 93e645e72a056ec0b2c16e0299fc5c6b94e4ca17)
+---
+ src/mbuf.c | 11 +++++++++++
+ src/mbuf.h |  1 +
+ 2 files changed, 12 insertions(+)
+
+diff --git a/src/mbuf.c b/src/mbuf.c
+index 54ec721..cb2e971 100644
+--- a/src/mbuf.c
++++ b/src/mbuf.c
+@@ -222,3 +222,14 @@ struct mbuf *dtom(Slirp *slirp, void *dat)
+ 
+     return (struct mbuf *)0;
+ }
++
++void *mtod_check(struct mbuf *m, size_t len)
++{
++    if (m->m_len >= len) {
++        return m->m_data;
++    }
++
++    DEBUG_ERROR("mtod failed");
++
++    return NULL;
++}
+diff --git a/src/mbuf.h b/src/mbuf.h
+index 546e785..2015e32 100644
+--- a/src/mbuf.h
++++ b/src/mbuf.h
+@@ -118,6 +118,7 @@ void m_inc(struct mbuf *, int);
+ void m_adj(struct mbuf *, int);
+ int m_copy(struct mbuf *, struct mbuf *, int, int);
+ struct mbuf *dtom(Slirp *, void *);
++void *mtod_check(struct mbuf *, size_t len);
+ 
+ static inline void ifs_init(struct mbuf *ifm)
+ {
+-- 
+2.29.0
+

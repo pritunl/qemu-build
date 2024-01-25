@@ -8,8 +8,8 @@ index 7991a19..651ec2e 100644
    "EFI Development Kit II / OVMF\0"     /* Vendor */ \
 -  "0.0.0\0"                             /* BiosVersion */ \
 -  "02/06/2015\0"                        /* BiosReleaseDate */
-+  "1.6.3\0"                             /* BiosVersion */ \
-+  "06/28/2022\0"                        /* BiosReleaseDate */
++  "1.6.6\0"                             /* BiosVersion */ \
++  "08/21/2023\0"                        /* BiosReleaseDate */
  //
  // Type definition and contents of the default Type 0 SMBIOS table.
  //

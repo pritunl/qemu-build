@@ -1,0 +1,170 @@
+From 9c08c62a9f4ae9a2bb8bf7029da2bcdb60a1a125 Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Fri, 1 Sep 2023 13:49:55 +0100
+Subject: [PATCH 07/10] Move the source files into a subdirectory
+
+---
+ .gitignore                                    |  6 +--
+ Makefile.am                                   | 20 +---------
+ configure.ac                                  |  4 +-
+ src/Makefile.am                               | 37 +++++++++++++++++++
+ init.c => src/init.c                          |  0
+ .../qemu-sanity-check.in                      |  0
+ tests/Makefile.am                             |  2 +-
+ tests/run-qemu-sanity-check                   |  2 +-
+ 8 files changed, 46 insertions(+), 25 deletions(-)
+ create mode 100644 src/Makefile.am
+ rename init.c => src/init.c (100%)
+ rename qemu-sanity-check.in => src/qemu-sanity-check.in (100%)
+
+diff --git a/.gitignore b/.gitignore
+index edcd1ac..a9ac667 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -18,13 +18,13 @@ Makefile.in
+ /configure
+ /depcomp
+ /local*
+-/init
+-/initrd
+ /install-sh
+ /missing
+-/qemu-sanity-check
+ /qemu-sanity-check.1
+ /qemu-sanity-check.pod
+ /qemu-sanity-check-*.tar.gz
++/src/init
++/src/initrd
++/src/qemu-sanity-check
+ /stamp-h1
+ /test-driver
+diff --git a/Makefile.am b/Makefile.am
+index 657b6dc..5fc5815 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -15,32 +15,16 @@
+ # with this program; if not, write to the Free Software Foundation, Inc.,
+ # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ 
+-SUBDIRS = . tests
++SUBDIRS = src tests
+ 
+ EXTRA_DIST = \
+ 	.gitignore \
+ 	qemu-sanity-check.1 \
+-	qemu-sanity-check.in \
+ 	qemu-sanity-check.pod \
+ 	qemu-sanity-check.pod.in
+ 
+ CLEANFILES = \
+-	*~ \
+-	qemu-sanity-check
+-
+-bin_SCRIPTS = qemu-sanity-check
+-initrddir = $(libdir)/qemu-sanity-check
+-initrd_DATA = initrd
+-
+-# Build the initramfs.
+-initrd: init
+-	echo $< | cpio --quiet -o -H newc > $@-t
+-	mv $@-t $@
+-
+-noinst_PROGRAMS = init
+-init_SOURCES = init.c
+-init_CFLAGS = -static
+-init_LDFLAGS = -static
++	*~
+ 
+ # Build the man pages.
+ qemu-sanity-check.pod: qemu-sanity-check.pod.in Makefile
+diff --git a/configure.ac b/configure.ac
+index 432c63e..31d3627 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -70,7 +70,7 @@ AM_CONDITIONAL([HAVE_POD2MAN], [test "x$POD2MAN" != "xno"])
+ 
+ dnl Produce output files.
+ AC_CONFIG_HEADERS([config.h])
+-AC_CONFIG_FILES([qemu-sanity-check],[chmod 0555 qemu-sanity-check])
+-AC_CONFIG_FILES([Makefile tests/Makefile])
++AC_CONFIG_FILES([src/qemu-sanity-check],[chmod 0555 src/qemu-sanity-check])
++AC_CONFIG_FILES([Makefile src/Makefile tests/Makefile])
+ 
+ AC_OUTPUT
+diff --git a/src/Makefile.am b/src/Makefile.am
+new file mode 100644
+index 0000000..823a7a2
+--- /dev/null
++++ b/src/Makefile.am
+@@ -0,0 +1,37 @@
++# Makefile for qemu-sanity-check
++# Copyright (C) 2013 Red Hat Inc.
++#
++# This program is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; either version 2 of the License, or
++# (at your option) any later version.
++#
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License along
++# with this program; if not, write to the Free Software Foundation, Inc.,
++# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++
++EXTRA_DIST = \
++	qemu-sanity-check.in
++
++CLEANFILES = \
++	*~ \
++	qemu-sanity-check
++
++bin_SCRIPTS = qemu-sanity-check
++initrddir = $(libdir)/qemu-sanity-check
++initrd_DATA = initrd
++
++# Build the initramfs.
++initrd: init
++	echo $< | cpio --quiet -o -H newc > $@-t
++	mv $@-t $@
++
++noinst_PROGRAMS = init
++init_SOURCES = init.c
++init_CFLAGS = -static
++init_LDFLAGS = -static
+diff --git a/init.c b/src/init.c
+similarity index 100%
+rename from init.c
+rename to src/init.c
+diff --git a/qemu-sanity-check.in b/src/qemu-sanity-check.in
+similarity index 100%
+rename from qemu-sanity-check.in
+rename to src/qemu-sanity-check.in
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+index 7185f14..010e5a3 100644
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -22,7 +22,7 @@ EXTRA_DIST = \
+ CLEANFILES = \
+ 	*~
+ 
+-TESTS_ENVIRONMENT = PATH=$(abs_top_builddir):$(PATH)
++TESTS_ENVIRONMENT = PATH=$(abs_top_builddir)/src:$(PATH)
+ 
+ TESTS = \
+ 	run-qemu-sanity-check \
+diff --git a/tests/run-qemu-sanity-check b/tests/run-qemu-sanity-check
+index ec015af..be32cda 100755
+--- a/tests/run-qemu-sanity-check
++++ b/tests/run-qemu-sanity-check
+@@ -17,4 +17,4 @@
+ # with this program; if not, write to the Free Software Foundation, Inc.,
+ # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ 
+-qemu-sanity-check -v --initrd=../initrd "$@"
++qemu-sanity-check -v --initrd=../src/initrd "$@"
+-- 
+2.41.0
+

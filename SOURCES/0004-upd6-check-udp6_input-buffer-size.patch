@@ -1,0 +1,36 @@
+From 30feadb676a0792036a0f64309235c5767e2ee76 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Fri, 4 Jun 2021 16:32:55 +0400
+Subject: [PATCH 4/7] upd6: check udp6_input buffer size
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Fixes: CVE-2021-3593
+Fixes: https://gitlab.freedesktop.org/slirp/libslirp/-/issues/45
+
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+(cherry picked from commit de71c15de66ba9350bf62c45b05f8fbff166517b)
+---
+ src/udp6.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/udp6.c b/src/udp6.c
+index fdd8089..236b962 100644
+--- a/src/udp6.c
++++ b/src/udp6.c
+@@ -29,7 +29,10 @@ void udp6_input(struct mbuf *m)
+     ip = mtod(m, struct ip6 *);
+     m->m_len -= iphlen;
+     m->m_data += iphlen;
+-    uh = mtod(m, struct udphdr *);
++    uh = mtod_check(m, sizeof(struct udphdr));
++    if (uh == NULL) {
++        goto bad;
++    }
+     m->m_len += iphlen;
+     m->m_data -= iphlen;
+ 
+-- 
+2.29.0
+

@@ -1,0 +1,167 @@
+From nobody Fri Jan 12 11:43:01 2024
+Delivered-To: importer@patchew.org
+Authentication-Results: mx.zohomail.com;
+	dkim=pass;
+	spf=pass (zohomail.com: domain of gnu.org designates 209.51.188.17 as
+ permitted sender)
+  smtp.mailfrom=qemu-devel-bounces+importer=patchew.org@nongnu.org;
+	dmarc=pass(p=none dis=none)  header.from=linaro.org
+ARC-Seal: i=1; a=rsa-sha256; t=1704150435; cv=none;
+	d=zohomail.com; s=zohoarc;
+	b=WuuXzKFWal2lWtDkRW1hyD3JeOc+SWN52QHBHapuNgK1+I2+cPYMj5+cN4Zjw5A7mvf00GT1vtuKEVQlfbQSdQAabRvUm1IApyvu/IScVt/y4bgJZtJkcM5aIIBT037PWrprtRBiC9NpSYfZNMYJYHp5uvh2KAr4S98QWMlhafM=
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=zohomail.com;
+ s=zohoarc;
+	t=1704150435;
+ h=Content-Transfer-Encoding:Cc:Cc:Date:Date:From:From:List-Subscribe:List-Post:List-Id:List-Archive:List-Help:List-Unsubscribe:MIME-Version:Message-ID:Sender:Subject:Subject:To:To:Message-Id:Reply-To;
+	bh=Fc7w6qm1lcKkOSX/aWlQDZG20+2gOdT5iAy2c8bZOd8=;
+	b=QMgOfOfOQAWcCWBO+IO/NBDK5btCFlibal5JOy2X4uS9kOBwvViipo6SvZjrO2SptH2Bi+pLPhRpPU1O+ubVU7cY0GoFzzM0Wawd0XkZ9kzDzY/fvhog49o5nYI6cX46rt18qOXLWvvY702wGVdiMHoKrhRrIaJJE75z3jI9Bj4=
+ARC-Authentication-Results: i=1; mx.zohomail.com;
+	dkim=pass;
+	spf=pass (zohomail.com: domain of gnu.org designates 209.51.188.17 as
+ permitted sender)
+  smtp.mailfrom=qemu-devel-bounces+importer=patchew.org@nongnu.org;
+	dmarc=pass header.from=<richard.henderson@linaro.org> (p=none dis=none)
+Return-Path: <qemu-devel-bounces+importer=patchew.org@nongnu.org>
+Received: from lists.gnu.org (lists.gnu.org [209.51.188.17]) by
+ mx.zohomail.com
+	with SMTPS id 1704150435302898.4215703047593;
+ Mon, 1 Jan 2024 15:07:15 -0800 (PST)
+Received: from localhost ([::1] helo=lists1p.gnu.org)
+	by lists.gnu.org with esmtp (Exim 4.90_1)
+	(envelope-from <qemu-devel-bounces@nongnu.org>)
+	id 1rKRMd-0001OI-9C; Mon, 01 Jan 2024 18:06:31 -0500
+Received: from eggs.gnu.org ([2001:470:142:3::10])
+ by lists.gnu.org with esmtps (TLS1.2:ECDHE_RSA_AES_256_GCM_SHA384:256)
+ (Exim 4.90_1) (envelope-from <richard.henderson@linaro.org>)
+ id 1rKRMa-0001NR-Rr
+ for qemu-devel@nongnu.org; Mon, 01 Jan 2024 18:06:28 -0500
+Received: from mail-pg1-x52f.google.com ([2607:f8b0:4864:20::52f])
+ by eggs.gnu.org with esmtps (TLS1.2:ECDHE_RSA_AES_128_GCM_SHA256:128)
+ (Exim 4.90_1) (envelope-from <richard.henderson@linaro.org>)
+ id 1rKRMZ-0000Uc-9F
+ for qemu-devel@nongnu.org; Mon, 01 Jan 2024 18:06:28 -0500
+Received: by mail-pg1-x52f.google.com with SMTP id
+ 41be03b00d2f7-53fbf2c42bfso6436343a12.3
+ for <qemu-devel@nongnu.org>; Mon, 01 Jan 2024 15:06:26 -0800 (PST)
+Received: from stoup.. (124-149-254-207.tpgi.com.au. [124.149.254.207])
+ by smtp.gmail.com with ESMTPSA id
+ h12-20020a63df4c000000b005bd2b3a03eesm19672386pgj.6.2024.01.01.15.06.21
+ (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+ Mon, 01 Jan 2024 15:06:24 -0800 (PST)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+ d=linaro.org; s=google; t=1704150385; x=1704755185; darn=nongnu.org;
+ h=content-transfer-encoding:mime-version:message-id:date:subject:cc
+ :to:from:from:to:cc:subject:date:message-id:reply-to;
+ bh=Fc7w6qm1lcKkOSX/aWlQDZG20+2gOdT5iAy2c8bZOd8=;
+ b=dNkcO41+f8tEqtfO4CNEK3dzzuYmU72bWdyd57epmAhewzLeLt7RHz7f8a67QcEMtj
+ ogk6TnzY9C5YB3hC95BjYoWhfUSIRC+4LS6Z0RwjdR/VKwliPovopIgOnnCJgr11M6gq
+ x0Oo7AV6+ydX2/CJ/vi7CdysfcZZNdnlX5DkwVtTI296PMIfJhRN/SIHiqDfABCFrw8B
+ Nf+VpbYc91syKadTGBPzmOtamcAqx3MD7ndkVEI1eFkiejeGu9jawdqrAxz+jrFJJMby
+ 3/j4e+hqiQjlRVHVrpiQEM6ip7BsHqaMXlc6glQyIRph/u6yRDewnRTojoIGcUN84nFm
+ mbCg==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+ d=1e100.net; s=20230601; t=1704150385; x=1704755185;
+ h=content-transfer-encoding:mime-version:message-id:date:subject:cc
+ :to:from:x-gm-message-state:from:to:cc:subject:date:message-id
+ :reply-to;
+ bh=Fc7w6qm1lcKkOSX/aWlQDZG20+2gOdT5iAy2c8bZOd8=;
+ b=hZafAFg/VkyIycwdF4otV76XBU2LSrOJf6IQXXrHMfYC6VpDcmh6U6unnnNrhV1rJc
+ Frk0If2lK+nqHlo6ygJZVRdtRCln267V28VDpSD/lTZPO9vgZZYtmILeAjt4/L6mtPUf
+ 43iW7kR8zjBT8Uf80ld5qRodyuJS5bo86Asuzg/WgRfMGqBs9Im+w+MqwqKrTxSjPAvs
+ Psix/WKTNvKR6XHuyVDA17fTVJiGIsDUQp1InHF1ExsF2gG4wPI3hVMjTj+F2hs0SeY6
+ Ivqs1RMAKbe9i581Wo6tIM2Jw/MHxL8fKN1SVC7klk4HpF516HBS8u/gQQE9vunYup05
+ ccyQ==
+X-Gm-Message-State: AOJu0Yy5sdlKUW0PNOmXX9aF7N5+gfVMCk21pUVv8dRCuvQamjzIYvYj
+ bSbNjV179B0oOyVl1t2lm1MwjDSpugfXsoz2rrpo8m8NOcc=
+X-Google-Smtp-Source: 
+ AGHT+IEE8RrF8uJO+68mSKODXu7giWx4EOgGGw+lT4v5lrdoFoZHlM0SU92PKHZ7B7CK5Dh1q82oRg==
+X-Received: by 2002:a05:6a20:111f:b0:194:9578:9ba8 with SMTP id
+ x31-20020a056a20111f00b0019495789ba8mr14471419pze.16.1704150384447;
+ Mon, 01 Jan 2024 15:06:24 -0800 (PST)
+From: Richard Henderson <richard.henderson@linaro.org>
+To: qemu-devel@nongnu.org
+Cc: pbonzini@redhat.com, qemu-stable@nongnu.org,
+ Michael Tokarev <mjt@tls.msk.ru>
+Subject: [PATCH] target/i386: Do not re-compute new pc with CF_PCREL
+Date: Tue,  2 Jan 2024 10:06:17 +1100
+Message-Id: <20240101230617.129349-1-richard.henderson@linaro.org>
+X-Mailer: git-send-email 2.34.1
+MIME-Version: 1.0
+Content-Transfer-Encoding: quoted-printable
+Received-SPF: pass (zohomail.com: domain of gnu.org designates 209.51.188.17
+ as permitted sender) client-ip=209.51.188.17;
+ envelope-from=qemu-devel-bounces+importer=patchew.org@nongnu.org;
+ helo=lists.gnu.org;
+Received-SPF: pass client-ip=2607:f8b0:4864:20::52f;
+ envelope-from=richard.henderson@linaro.org; helo=mail-pg1-x52f.google.com
+X-Spam_score_int: -20
+X-Spam_score: -2.1
+X-Spam_bar: --
+X-Spam_report: (-2.1 / 5.0 requ) BAYES_00=-1.9, DKIM_SIGNED=0.1,
+ DKIM_VALID=-0.1, DKIM_VALID_AU=-0.1, DKIM_VALID_EF=-0.1,
+ RCVD_IN_DNSWL_NONE=-0.0001, SPF_HELO_NONE=0.001, SPF_PASS=-0.001,
+ T_SCC_BODY_TEXT_LINE=-0.01 autolearn=unavailable autolearn_force=no
+X-Spam_action: no action
+X-BeenThere: qemu-devel@nongnu.org
+X-Mailman-Version: 2.1.29
+Precedence: list
+List-Id: <qemu-devel.nongnu.org>
+List-Unsubscribe: <https://lists.nongnu.org/mailman/options/qemu-devel>,
+ <mailto:qemu-devel-request@nongnu.org?subject=unsubscribe>
+List-Archive: <https://lists.nongnu.org/archive/html/qemu-devel>
+List-Post: <mailto:qemu-devel@nongnu.org>
+List-Help: <mailto:qemu-devel-request@nongnu.org?subject=help>
+List-Subscribe: <https://lists.nongnu.org/mailman/listinfo/qemu-devel>,
+ <mailto:qemu-devel-request@nongnu.org?subject=subscribe>
+Errors-To: qemu-devel-bounces+importer=patchew.org@nongnu.org
+Sender: qemu-devel-bounces+importer=patchew.org@nongnu.org
+X-ZohoMail-DKIM: pass (identity @linaro.org)
+X-ZM-MESSAGEID: 1704150436325100001
+Content-Type: text/plain; charset="utf-8"
+
+With PCREL, we have a page-relative view of EIP, and an
+approximation of PC =3D EIP+CSBASE that is good enough to
+detect page crossings.  If we try to recompute PC after
+masking EIP, we will mess up that approximation and write
+a corrupt value to EIP.
+
+We already handled masking properly for PCREL, so the
+fix in b5e0d5d2 was only needed for the !PCREL path.
+
+Cc: qemu-stable@nongnu.org
+Fixes: b5e0d5d22fbf ("target/i386: Fix 32-bit wrapping of pc/eip computatio=
+n")
+Reported-by: Michael Tokarev <mjt@tls.msk.ru>
+Signed-off-by: Richard Henderson <richard.henderson@linaro.org>
+---
+ target/i386/tcg/translate.c | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
+index 037bc47e7c..e68375b19d 100644
+--- a/target/i386/tcg/translate.c
++++ b/target/i386/tcg/translate.c
+@@ -2845,10 +2845,6 @@ static void gen_jmp_rel(DisasContext *s, MemOp ot, i=
+nt diff, int tb_num)
+         }
+     }
+     new_eip &=3D mask;
+-    new_pc =3D new_eip + s->cs_base;
+-    if (!CODE64(s)) {
+-        new_pc =3D (uint32_t)new_pc;
+-    }
+=20
+     gen_update_cc_op(s);
+     set_cc_op(s, CC_OP_DYNAMIC);
+@@ -2864,6 +2860,8 @@ static void gen_jmp_rel(DisasContext *s, MemOp ot, in=
+t diff, int tb_num)
+             tcg_gen_andi_tl(cpu_eip, cpu_eip, mask);
+             use_goto_tb =3D false;
+         }
++    } else if (!CODE64(s)) {
++        new_pc =3D (uint32_t)(new_eip + s->cs_base);
+     }
+=20
+     if (use_goto_tb && translator_use_goto_tb(&s->base, new_pc)) {
+--=20
+2.34.1

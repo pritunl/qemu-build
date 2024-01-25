@@ -1,0 +1,39 @@
+From 2492fbbf626e0b2a8c1e22b6e926382fcd343666 Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Fri, 1 Sep 2023 13:56:35 +0100
+Subject: [PATCH 09/10] Make sure that qemu-sanity-check -v displays kernel
+ output
+
+Even in the case when the test doesn't fail, if the -v option was used
+make sure the full output is shown.
+---
+ src/qemu-sanity-check.in | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu-sanity-check.in b/src/qemu-sanity-check.in
+index 79372ed..56e93c2 100644
+--- a/src/qemu-sanity-check.in
++++ b/src/qemu-sanity-check.in
+@@ -1,7 +1,7 @@
+ #!/bin/bash
+ # -*- shell-script -*-
+ # qemu-sanity-check
+-# Copyright (C) 2013-2020 Red Hat Inc.
++# Copyright (C) 2013-2023 Red Hat Inc.
+ #
+ # This program is free software; you can redistribute it and/or modify
+ # it under the terms of the GNU General Public License as published by
+@@ -226,6 +226,10 @@ elif [ $r -ne 0 ]; then
+     exit 1
+ fi
+ 
++if [ "$verbose" = "yes" ]; then
++    cat "$test_output"
++fi
++
+ # Verify that userspace was reached.
+ if ! grep -sq "initrd started up OK" "$test_output"; then
+     cat "$test_output"
+-- 
+2.41.0
+

@@ -1,0 +1,36 @@
+From ca41f7eaa58d3f63a3df58d812b3cec32343ab6a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Fri, 4 Jun 2021 16:40:23 +0400
+Subject: [PATCH 7/7] udp: check upd_input buffer size
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Fixes: CVE-2021-3594
+Fixes: https://gitlab.freedesktop.org/slirp/libslirp/-/issues/47
+
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+(cherry picked from commit 74572be49247c8c5feae7c6e0b50c4f569ca9824)
+---
+ src/udp.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/udp.c b/src/udp.c
+index 050cee4..e4578aa 100644
+--- a/src/udp.c
++++ b/src/udp.c
+@@ -94,7 +94,10 @@ void udp_input(register struct mbuf *m, int iphlen)
+     /*
+      * Get IP and UDP header together in first mbuf.
+      */
+-    ip = mtod(m, struct ip *);
++    ip = mtod_check(m, iphlen + sizeof(struct udphdr));
++    if (ip == NULL) {
++        goto bad;
++    }
+     uh = (struct udphdr *)((char *)ip + iphlen);
+ 
+     /*
+-- 
+2.29.0
+

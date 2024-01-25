@@ -18,7 +18,7 @@ index 1c2580e..860752a 100644
 +  {
 +    CHAR8 Buffer[64];
 +    UINTN Length;
-+    Length = AsciiSPrint (Buffer, sizeof Buffer, "Oracle AAVMF Version: 1.6.3\n");
++    Length = AsciiSPrint (Buffer, sizeof Buffer, "Oracle AAVMF Version: 1.6.6\n");
 +
 +    SerialPortWrite((UINT8 *)Buffer, Length);
 +  }
@@ -485,7 +485,7 @@ index 2c55616..1c60969 100644
 +  if (!IsS3Resume()) {
 +    CHAR8 Buffer[64];
 +    UINTN Length;
-+    Length = AsciiSPrint (Buffer, sizeof Buffer, "Oracle OVMF Version: 1.6.3\n");
++    Length = AsciiSPrint (Buffer, sizeof Buffer, "Oracle OVMF Version: 1.6.6\n");
 +
 +    SerialPortWrite((UINT8 *)Buffer, Length);
 +  }
