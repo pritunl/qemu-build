@@ -49,8 +49,8 @@ rm -rf rpmkeys
 mkdir rpmkeys
 cd rpmkeys
 
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/x86_64/os/Packages/d/distribution-gpg-keys-1.81-1.fc38.noarch.rpm
-rpm2cpio ./distribution-gpg-keys-1.81-1.fc38.noarch.rpm | cpio -idmv
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/x86_64/os/Packages/d/distribution-gpg-keys-1.98-1.fc40.noarch.rpm
+rpm2cpio ./distribution-gpg-keys-1.98-1.fc40.noarch.rpm | cpio -idmv
 sudo rpm --import ./usr/share/distribution-gpg-keys/fedora/RPM-GPG-KEY-fedora-rawhide-primary
 
 cd ..
@@ -59,58 +59,59 @@ rm -rf rpmkeys
 
 wget https://yum.oracle.com/repo/OracleLinux/OL9/appstream/x86_64/getPackageSource/libepoxy-1.5.5-4.el9.src.rpm
 wget https://yum.oracle.com/repo/OracleLinux/OL9/appstream/x86_64/getPackageSource/liburing-0.7-7.el9.src.rpm
-wget https://yum.oracle.com/repo/OracleLinux/OL9/developer/EPEL/x86_64/getPackageSource/capstone-4.0.2-9.el9.src.rpm
-wget https://yum.oracle.com/repo/OracleLinux/OL8/developer/EPEL/x86_64/getPackageSource/libnfs-4.0.0-1.el8.src.rpm
-wget https://yum.oracle.com/repo/OracleLinux/OL8/developer/EPEL/x86_64/getPackageSource/libslirp-4.3.1-2.el8.src.rpm
+wget https://yum.oracle.com/repo/OracleLinux/OL9/appstream/x86_64/getPackageSource/capstone-4.0.2-10.el9.src.rpm
+wget https://yum.oracle.com/repo/OracleLinux/OL9/developer/EPEL/x86_64/getPackageSource/libnfs-5.0.2-2.el9.src.rpm
+wget https://yum.oracle.com/repo/OracleLinux/OL9/appstream/x86_64/getPackageSource/libslirp-4.4.0-7.el9.src.rpm
 wget https://yum.oracle.com/repo/OracleLinux/OL9/appstream/x86_64/getPackageSource/ipxe-20200823-9.git4bd064de.el9.src.rpm
 wget https://yum.oracle.com/repo/OracleLinux/OL9/appstream/x86_64/getPackageSource/dtc-1.6.0-7.el9.src.rpm
 wget https://yum.oracle.com/repo/OracleLinux/OL9/appstream/x86_64/getPackageSource/seabios-1.16.1-1.el9.src.rpm
-wget https://yum.oracle.com/repo/OracleLinux/OL9/developer/kvm/utils/x86_64/getPackageSource/edk2-20220628-1.el9.src.rpm
+wget https://yum.oracle.com/repo/OracleLinux/OL9/kvm/utils/x86_64/getPackageSource/edk2-20230821-1.el9.src.rpm
 wget https://yum.oracle.com/repo/OracleLinux/OL8/appstream/x86_64/getPackageSource/spice-0.14.3-4.el8.src.rpm
-wget https://yum.oracle.com/repo/OracleLinux/OL8/appstream/x86_64/getPackageSource/libcacard-2.7.0-2.el8_1.src.rpm
+wget https://yum.oracle.com/repo/OracleLinux/OL9/developer/EPEL/x86_64/getPackageSource/libcacard-2.8.1-6.el9.src.rpm
 wget https://yum.oracle.com/repo/OracleLinux/OL9/codeready/builder/x86_64/getPackageSource/meson-0.63.3-1.el9.src.rpm
+wget https://yum.oracle.com/repo/OracleLinux/OL9/appstream/x86_64/getPackageSource/virtiofsd-1.7.2-1.el9.src.rpm
 
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/38/Everything/source/tree/Packages/c/celt051-0.5.1.3-25.fc38.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/38/Everything/source/tree/Packages/v/virglrenderer-0.10.4-2.20230104git88b9fe3b.fc38.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/38/Everything/source/tree/Packages/v/virtiofsd-1.5.1-1.fc38.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-9.fc39.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-8.0.0-4.fc39.src.rpm
+
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/39/Everything/source/tree/Packages/c/celt051-0.5.1.3-26.fc39.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/v/virglrenderer-1.0.1-1.fc40.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-11.fc40.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-8.2.0-2.fc40.src.rpm
 
 rpm -K libepoxy-1.5.5-4.el9.src.rpm
 rpm -K liburing-0.7-7.el9.src.rpm
-rpm -K capstone-4.0.2-9.el9.src.rpm
-rpm -K libnfs-4.0.0-1.el8.src.rpm
-rpm -K libslirp-4.3.1-2.el8.src.rpm
+rpm -K capstone-4.0.2-10.el9.src.rpm
+rpm -K libnfs-5.0.2-2.el9.src.rpm
+rpm -K libslirp-4.4.0-7.el9.src.rpm
 rpm -K ipxe-20200823-9.git4bd064de.el9.src.rpm
 rpm -K dtc-1.6.0-7.el9.src.rpm
 rpm -K seabios-1.16.1-1.el9.src.rpm
 rpm -K edk2-20220628-1.el9.src.rpm
 rpm -K spice-0.14.3-4.el8.src.rpm
-rpm -K libcacard-2.7.0-2.el8_1.src.rpm
+rpm -K libcacard-2.8.1-6.el9.src.rpm
 rpm -K meson-0.63.3-1.el9.src.rpm
-rpm -K celt051-0.5.1.3-25.fc38.src.rpm
-rpm -K virglrenderer-0.10.4-2.20230104git88b9fe3b.fc38.src.rpm
-rpm -K virtiofsd-1.5.1-1.fc38.src.rpm
-rpm -K qemu-sanity-check-1.1.6-9.fc39.src.rpm
-rpm -K qemu-8.0.0-4.fc39.src.rpm
+rpm -K virtiofsd-1.7.2-1.el9.src.rpm
+rpm -K celt051-0.5.1.3-26.fc39.src.rpm
+rpm -K virglrenderer-1.0.1-1.fc40.src.rpm
+rpm -K qemu-sanity-check-1.1.6-11.fc40.src.rpm
+rpm -K qemu-8.2.0-2.fc40.src.rpm
 
 sudo rpm -i libepoxy-1.5.5-4.el9.src.rpm
 sudo rpm -i liburing-0.7-7.el9.src.rpm
-sudo rpm -i capstone-4.0.2-9.el9.src.rpm
-sudo rpm -i libnfs-4.0.0-1.el8.src.rpm
-sudo rpm -i libslirp-4.3.1-2.el8.src.rpm
+sudo rpm -i capstone-4.0.2-10.el9.src.rpm
+sudo rpm -i libnfs-5.0.2-2.el9.src.rpm
+sudo rpm -i libslirp-4.4.0-7.el9.src.rpm
 sudo rpm -i ipxe-20200823-9.git4bd064de.el9.src.rpm
 sudo rpm -i dtc-1.6.0-7.el9.src.rpm
 sudo rpm -i seabios-1.16.1-1.el9.src.rpm
 sudo rpm -i edk2-20220628-1.el9.src.rpm
 sudo rpm -i spice-0.14.3-4.el8.src.rpm
-sudo rpm -i libcacard-2.7.0-2.el8_1.src.rpm
+sudo rpm -i libcacard-2.8.1-6.el9.src.rpm
 sudo rpm -i meson-0.63.3-1.el9.src.rpm
-sudo rpm -i celt051-0.5.1.3-25.fc38.src.rpm
-sudo rpm -i virglrenderer-0.10.4-2.20230104git88b9fe3b.fc38.src.rpm
-sudo rpm -i virtiofsd-1.5.1-1.fc38.src.rpm
-sudo rpm -i qemu-sanity-check-1.1.6-9.fc39.src.rpm
-sudo rpm -i qemu-8.0.0-4.fc39.src.rpm
+sudo rpm -i virtiofsd-1.7.2-1.el9.src.rpm
+sudo rpm -i celt051-0.5.1.3-26.fc39.src.rpm
+sudo rpm -i virglrenderer-1.0.1-1.fc40.src.rpm
+sudo rpm -i qemu-sanity-check-1.1.6-11.fc40.src.rpm
+sudo rpm -i qemu-8.2.0-2.fc40.src.rpm
 
 sudo mv /root/rpmbuild ~/rpmbuild
 sudo chown -R opc:opc ~/rpmbuild
