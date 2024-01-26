@@ -10,6 +10,7 @@ name=Pritunl KVM Repository
 baseurl=https://repo.pritunl.com/kvm-stable/oraclelinux/9/
 gpgcheck=1
 enabled=1
+gpgkey=https://raw.githubusercontent.com/pritunl/pgp/master/pritunl_kvm_repo_pub.asc
 EOF
 
 # unstable repository
@@ -19,10 +20,8 @@ name=Pritunl KVM Repository
 baseurl=https://repo.pritunl.com/kvm-unstable/oraclelinux/9/
 gpgcheck=1
 enabled=1
+gpgkey=https://raw.githubusercontent.com/pritunl/pgp/master/pritunl_kvm_repo_pub.asc
 EOF
-
-gpg --keyserver hkp://keyserver.ubuntu.com --recv-keys 1BB6FBB8D641BD9C6C0398D74D55437EC0508F5F
-gpg --armor --export 1BB6FBB8D641BD9C6C0398D74D55437EC0508F5F > key.tmp; sudo rpm --import key.tmp; rm -f key.tmp
 ```
 
 # build
