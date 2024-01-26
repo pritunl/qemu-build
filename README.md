@@ -59,15 +59,6 @@ sudo systemctl disable firewalld
 mkdir rpmkeys
 cd rpmkeys
 
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/updates/37/Everything/x86_64/Packages/d/distribution-gpg-keys-1.81-1.fc37.noarch.rpm
-rpm2cpio ./distribution-gpg-keys-1.81-1.fc37.noarch.rpm | cpio -idmv
-sudo rpm --import ./usr/share/distribution-gpg-keys/fedora/RPM-GPG-KEY-fedora-*-primary
-
-cd ..
-rm -rf rpmkeys
-mkdir rpmkeys
-cd rpmkeys
-
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/x86_64/os/Packages/d/distribution-gpg-keys-1.100-1.fc40.noarch.rpm
 rpm2cpio ./distribution-gpg-keys-1.100-1.fc40.noarch.rpm | cpio -idmv
 sudo rpm --import ./usr/share/distribution-gpg-keys/fedora/RPM-GPG-KEY-fedora-rawhide-primary
