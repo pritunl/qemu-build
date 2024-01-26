@@ -26,7 +26,26 @@ sudo yum-config-manager --enable ol9_codeready_builder
 sudo yum-config-manager --enable ol9_distro_builder
 
 sudo yum -y install oracle-epel-release-el9
+sudo yum -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
 sudo yum-config-manager --enable ol9_developer_EPEL
+sudo yum-config-manager --disable epel
+sudo yum-config-manager --disable epel-cisco-openh264
+
+
+sudo dnf install rust-anyhow+default-devel rust-cfg-if+default-devel rust-libc+default-devel rust-log+default-devel rust-nix+default-devel rust-nix0.26+default-devel rust-once_cell+default-devel rust-pkg-config+default-devel rust-thiserror+default-devel rust-zerocopy+default-devel
+
+sudo yum-config-manager --disable ol9_developer_EPEL
+sudo yum-config-manager --enable epel
+sudo yum-config-manager --enable epel-cisco-openh264
+
+sudo dnf install rust-zerocopy0.6-devel rust-zerocopy0.6+default-devel rust-zerocopy-derive0.6-devel rust-zerocopy-derive0.6+default-devel
+
+sudo dnf install rust-rustversion-devel rust-rustversion+default-devel rust-syn-devel rust-syn+default-devel rust-syn+full-devel rust-syn+visit-mut-devel rust-trybuild-devel rust-trybuild+default-devel rust-trybuild+diff-devel
+
+sudo yum-config-manager --enable ol9_developer_EPEL
+sudo yum-config-manager --disable epel
+sudo yum-config-manager --disable epel-cisco-openh264
+
 
 sudo yum -y update
 sudo yum -y remove cockpit cockpit-ws
@@ -138,80 +157,86 @@ scp /home/cloud/git/qemu-build/SPECS/qemu-sanity-check.spec opc@123.123.123.123:
 
 cd ~/rpmbuild/SPECS/
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/libepoxy.spec
+sudo dnf builddep -y ~/rpmbuild/SPECS/libepoxy.spec
 rpmbuild -ba libepoxy.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/x86_64/libepoxy-*.el9.x86_64.rpm
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/libcacard.spec
+sudo dnf builddep -y ~/rpmbuild/SPECS/libcacard.spec
 rpmbuild -ba libcacard.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/x86_64/libcacard-*.el9.x86_64.rpm
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/celt051.spec
+sudo dnf builddep -y ~/rpmbuild/SPECS/celt051.spec
 rpmbuild -ba celt051.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/x86_64/celt051-*.el9.x86_64.rpm
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/spice.spec
+sudo dnf builddep -y ~/rpmbuild/SPECS/spice.spec
 rpmbuild -ba spice.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/x86_64/spice-*.el9.x86_64.rpm
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/virglrenderer.spec
+sudo dnf builddep -y ~/rpmbuild/SPECS/virglrenderer.spec
 rpmbuild -ba virglrenderer.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/x86_64/virglrenderer-*.el9.x86_64.rpm
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/rutabaga-gfx-ffi.spec
+sudo dnf builddep -y ~/rpmbuild/SPECS/rust-remain.spec
+rpmbuild -ba rust-remain.spec
+
+sudo yum -y install ~/rpmbuild/RPMS/noarch/rust-remain*.el9.noarch.rpm
+
+sudo dnf builddep -y ~/rpmbuild/SPECS/rutabaga-gfx-ffi.spec
+
 rpmbuild -ba rutabaga-gfx-ffi.spec
 
-sudo yum -y install ~/rpmbuild/RPMS/x86_64/rutabaga-gfx-ffi-*.el9.x86_64.rpm
+sudo yum -y install ~/rpmbuild/RPMS/x86_64/rutabaga-gfx-ffi*.el9.x86_64.rpm
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/liburing.spec
+sudo dnf builddep -y ~/rpmbuild/SPECS/liburing.spec
 rpmbuild -ba liburing.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/x86_64/liburing-*.el9.x86_64.rpm
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/qemu-sanity-check.spec
+sudo dnf builddep -y ~/rpmbuild/SPECS/qemu-sanity-check.spec
 rpmbuild -ba qemu-sanity-check.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/x86_64/qemu-sanity-check-nodeps-*.el9.x86_64.rpm
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/capstone.spec
+sudo dnf builddep -y ~/rpmbuild/SPECS/capstone.spec
 rpmbuild -ba capstone.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/x86_64/capstone-*.el9.x86_64.rpm
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/libslirp.spec
+sudo dnf builddep -y ~/rpmbuild/SPECS/libslirp.spec
 rpmbuild -ba libslirp.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/x86_64/libslirp-*.el9.x86_64.rpm
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/libnfs.spec
+sudo dnf builddep -y ~/rpmbuild/SPECS/libnfs.spec
 rpmbuild -ba libnfs.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/x86_64/libnfs-*.el9.x86_64.rpm
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/dtc.spec
+sudo dnf builddep -y ~/rpmbuild/SPECS/dtc.spec
 rpmbuild -ba dtc.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/x86_64/dtc-*.el9.x86_64.rpm
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/edk2.spec
+sudo dnf builddep -y ~/rpmbuild/SPECS/edk2.spec
 rpmbuild -ba edk2.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/noarch/edk2-*.el9.noarch.rpm ~/rpmbuild/RPMS/x86_64/edk2-*.el9.x86_64.rpm
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/ipxe.spec
+sudo dnf builddep -y ~/rpmbuild/SPECS/ipxe.spec
 rpmbuild -ba ipxe.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/noarch/ipxe-*.el9.noarch.rpm
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/seabios.spec
+sudo dnf builddep -y ~/rpmbuild/SPECS/seabios.spec
 rpmbuild -ba seabios.spec
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/meson.spec
+sudo dnf builddep -y ~/rpmbuild/SPECS/meson.spec
 rpmbuild -ba meson.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/noarch/meson-*.el9.noarch.rpm
@@ -219,7 +244,7 @@ sudo yum -y install ~/rpmbuild/RPMS/noarch/meson-*.el9.noarch.rpm
 sudo dnf builddep -y ~/rpmbuild/SPECS/virtiofsd.spec
 rpmbuild -ba virtiofsd.spec
 
-sudo yum-builddep -y ~/rpmbuild/SPECS/qemu.spec
+sudo dnf builddep -y ~/rpmbuild/SPECS/qemu.spec
 rpmbuild -ba qemu.spec
 ```
 
