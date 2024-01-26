@@ -1,8 +1,18 @@
 # qemu-build
 
-Build source for Pritunl KVM repository, currently provides QEMU v8.0.0 for RHEL9.
+Build source for Pritunl KVM repository, provides updated QEMU for RHEL9.
 
 ```bash
+# stable repository
+sudo tee /etc/yum.repos.d/pritunl-kvm.repo << EOF
+[pritunl-kvm]
+name=Pritunl KVM Repository
+baseurl=https://repo.pritunl.com/kvm-stable/oraclelinux/9/
+gpgcheck=1
+enabled=1
+EOF
+
+# unstable repository
 sudo tee /etc/yum.repos.d/pritunl-kvm.repo << EOF
 [pritunl-kvm]
 name=Pritunl KVM Repository
