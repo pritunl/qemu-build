@@ -1,0 +1,14 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 1edcc40..335c8bb 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -28,9 +28,6 @@ log = "0.4"
+ [target.'cfg(unix)'.dependencies]
+ nix = "0.26.1"
+ 
+-[target.'cfg(windows)'.dependencies]
+-winapi = "0.3"
+-
+ # To build latest Vulkano, change version to git = "https:/github.com/vulkano-rs/vulkano.git"
+ # vulkano = { version = "0.31.0", optional = true }
+ 
