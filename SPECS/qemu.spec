@@ -6,9 +6,8 @@
 %global libfdt_version 1.6.0
 %global libseccomp_version 2.4.0
 %global libusbx_version 1.0.23
-%global meson_version 0.61.3
+%global meson_version 0.63.3
 %global usbredir_version 0.7.1
-%global ipxe_version 20200823-5.git4bd064de
 
 %global have_memlock_limits 0
 %global need_qemu_kvm 0
@@ -52,11 +51,7 @@
 
 %global tools_only 0
 
-%global user_static 1
-%if 0%{?rhel}
-# EPEL/RHEL do not have required -static builddeps
 %global user_static 0
-%endif
 
 %global have_kvm 0
 %if 0%{?kvm_package:1}
@@ -71,56 +66,27 @@
 
 # Matches spice ExclusiveArch
 %global have_spice 1
-%ifnarch %{ix86} x86_64 %{arm} aarch64
-%global have_spice 0
-%endif
-%if 0%{?rhel} >= 9
-%global have_spice 0
-%endif
 
 # Matches xen ExclusiveArch
 %global have_xen 0
-%if 0%{?fedora}
-%ifarch x86_64 aarch64
-%global have_xen 1
-%endif
-%endif
 
-%global have_liburing 0
-%if 0%{?fedora}
-%ifnarch %{arm}
 %global have_liburing 1
-%endif
-%endif
 
-%global have_virgl 0
-%if 0%{?fedora}
 %global have_virgl 1
-%endif
 
 %global have_pmem 0
 %ifarch x86_64 %{power64}
 %global have_pmem 1
 %endif
 
-%global have_jack 1
-%if 0%{?rhel}
 %global have_jack 0
-%endif
 
-%global have_dbus_display 1
-%if %{defined rhel} && 0%{?rhel} < 9
-# RHEL/Centos 8 glib is not new enough
 %global have_dbus_display 0
-%endif
 
-%global have_libblkio 0
-%if 0%{?fedora} >= 37
 %global have_libblkio 1
-%endif
 
-%global have_gvnc_devel %{defined fedora}
-%global have_sdl_image %{defined fedora}
+%global have_gvnc_devel 1
+%global have_sdl_image 0
 %global have_fdt 1
 %global have_opengl 1
 %global have_usbredir 1
@@ -141,14 +107,8 @@
 
 
 %global have_block_gluster 1
-%if 0%{?rhel} >= 9
-%global have_block_gluster 0
-%endif
 
-%define have_block_nfs 0
-%if 0%{?fedora}
 %define have_block_nfs 1
-%endif
 
 %define have_librdma 1
 %ifarch %{arm}
@@ -156,16 +116,8 @@
 %endif
 
 %define have_libcacard 1
-%if 0%{?rhel} >= 9
-%define have_libcacard 0
-%endif
 
-%define have_rutabaga_gfx 0
-%if 0%{?fedora} >= 40
-%ifarch x86_64 aarch64
 %define have_rutabaga_gfx 1
-%endif
-%endif
 
 # LTO still has issues with qemu on armv7hl and aarch64
 # https://bugzilla.redhat.com/show_bug.cgi?id=1952483
@@ -173,7 +125,7 @@
 
 %global firmwaredirs "%{_datadir}/qemu-firmware:%{_datadir}/ipxe/qemu:%{_datadir}/seavgabios:%{_datadir}/seabios"
 
-%global qemudocdir %{_docdir}/%{name}
+%global qemudocdir %{_docdir}/qemu
 %define evr %{epoch}:%{version}-%{release}
 
 %if %{have_libblkio}
@@ -209,14 +161,10 @@
 %define requires_audio_alsa Requires: %{name}-audio-alsa = %{evr}
 %define requires_audio_oss Requires: %{name}-audio-oss = %{evr}
 %define requires_audio_pa Requires: %{name}-audio-pa = %{evr}
-%define requires_audio_pipewire Requires: %{name}-audio-pipewire = %{evr}
-%define requires_audio_sdl Requires: %{name}-audio-sdl = %{evr}
 %define requires_char_baum Requires: %{name}-char-baum = %{evr}
 %define requires_device_usb_host Requires: %{name}-device-usb-host = %{evr}
 %define requires_device_usb_redirect Requires: %{name}-device-usb-redirect = %{evr}
 %define requires_ui_curses Requires: %{name}-ui-curses = %{evr}
-%define requires_ui_gtk Requires: %{name}-ui-gtk = %{evr}
-%define requires_ui_sdl Requires: %{name}-ui-sdl = %{evr}
 %define requires_ui_egl_headless Requires: %{name}-ui-egl-headless = %{evr}
 %define requires_ui_opengl Requires: %{name}-ui-opengl = %{evr}
 %define requires_device_display_virtio_gpu Requires: %{name}-device-display-virtio-gpu = %{evr}
@@ -226,11 +174,7 @@
 %define requires_device_display_virtio_vga_gl Requires: %{name}-device-display-virtio-vga-gl = %{evr}
 %define requires_package_qemu_pr_helper Requires: qemu-pr-helper
 %ifnarch %{ix86}
-%if 0%{?fedora} || 0%{?rhel} > 9
-%define requires_package_virtiofsd Requires: vhostuser-backend(fs)
-%else
 %define requires_package_virtiofsd Requires: virtiofsd
-%endif
 %define obsoletes_package_virtiofsd %{nil}
 %else
 %define requires_package_virtiofsd %{nil}
@@ -305,13 +249,9 @@
 %{requires_audio_dbus} \
 %{requires_audio_oss} \
 %{requires_audio_pa} \
-%{requires_audio_pipewire} \
-%{requires_audio_sdl} \
 %{requires_audio_jack} \
 %{requires_audio_spice} \
 %{requires_ui_curses} \
-%{requires_ui_gtk} \
-%{requires_ui_sdl} \
 %{requires_ui_egl_headless} \
 %{requires_ui_opengl} \
 %{requires_ui_spice_app} \
@@ -340,7 +280,6 @@
 %global obsoletes_some_modules \
 %{obsoletes_block_gluster} \
 %{obsoletes_block_rbd} \
-%{obsoletes_package_virtiofsd} \
 Obsoletes: %{name}-system-lm32 <= %{epoch}:%{version}-%{release} \
 Obsoletes: %{name}-system-lm32-core <= %{epoch}:%{version}-%{release} \
 Obsoletes: %{name}-system-moxie <= %{epoch}:%{version}-%{release} \
@@ -350,7 +289,6 @@ Obsoletes: %{name}-system-unicore32-core <= %{epoch}:%{version}-%{release} \
 Obsoletes: sgabios-bin <= 1:0.20180715git-10.fc38
 
 # Release candidate version tracking
-#global rcver rc2
 %if 0%{?rcver:1}
 %global rcrel .%{rcver}
 %global rcstr -%{rcver}
@@ -360,7 +298,7 @@ Obsoletes: sgabios-bin <= 1:0.20180715git-10.fc38
 %global baserelease 2
 
 Summary: QEMU is a FAST! processor emulator
-Name: qemu
+Name: pritunl-qemu
 Version: 8.2.0
 Release: %{baserelease}%{?rcrel}%{?dist}
 Epoch: 2
@@ -369,13 +307,9 @@ URL: http://www.qemu.org/
 
 %global dlurl https://download.qemu.org
 
-Source0: %{dlurl}/%{name}-%{version}%{?rcstr}.tar.xz
-Source1: %{dlurl}/%{name}-%{version}%{?rcstr}.tar.xz.sig
+Source0: %{dlurl}/qemu-%{version}%{?rcstr}.tar.xz
+Source1: %{dlurl}/qemu-%{version}%{?rcstr}.tar.xz.sig
 Source2: gpgkey-CEACC9E15534EBABB82D3FA03353C9CEF108B584.gpg
-
-# https://patchwork.kernel.org/project/qemu-devel/patch/20231128143647.847668-1-crobinso@redhat.com/
-# Fix pvh.img ld build failure on fedora rawhide
-Patch: 0001-pc-bios-optionrom-Fix-pvh.img-ld-build-failure-on-fe.patch
 
 
 # https://bugzilla.redhat.com/show_bug.cgi?id=2256884
@@ -459,7 +393,7 @@ BuildRequires: pkgconfig(gbm)
 %endif
 BuildRequires: perl-Test-Harness
 BuildRequires: libslirp-devel
-BuildRequires: libbpf-devel >= 1.0.0
+BuildRequires: libbpf-devel
 %if %{have_libblkio}
 BuildRequires: libblkio-devel
 %endif
@@ -474,8 +408,6 @@ BuildRequires: gcc
 BuildRequires: make
 # For autosetup git_am
 BuildRequires: git
-# -display sdl support
-BuildRequires: SDL2-devel
 # pulseaudio audio output
 BuildRequires: pulseaudio-libs-devel
 # alsa audio output
@@ -499,11 +431,6 @@ BuildRequires: brlapi-devel
 # gluster block driver
 BuildRequires: glusterfs-api-devel
 %endif
-# GTK frontend
-BuildRequires: gtk3-devel
-BuildRequires: vte291-devel
-# GTK translations
-BuildRequires: gettext
 %if %{have_xen}
 # Xen support
 BuildRequires: xen-devel
@@ -540,7 +467,7 @@ BuildRequires: daxctl-devel
 BuildRequires: fuse-devel
 %if %{have_jack}
 # jack audio driver
-BuildRequires: (pipewire-jack-audio-connection-kit-devel or jack-audio-connection-kit-devel)
+BuildRequires: jack-audio-connection-kit-devel
 %endif
 BuildRequires: fuse3-devel
 %if %{have_sdl_image}
@@ -550,8 +477,6 @@ BuildRequires: SDL2_image-devel
 # Used by vnc-display-test
 BuildRequires: pkgconfig(gvnc-1.0)
 %endif
-# Used by pipewire audio backend
-BuildRequires: pipewire-devel
 # Used by cryptodev-backend-lkcf
 BuildRequires: keyutils-libs-devel
 # Used by net AF_XDP
@@ -612,7 +537,7 @@ Requires(post): systemd-units
 Requires(preun): systemd-units
 Requires(postun): systemd-units
 %{obsoletes_some_modules}
-Requires: ipxe-roms-qemu >= %{ipxe_version}
+Requires: ipxe-roms-qemu
 %description common
 %{name} is an open source virtualizer that provides hardware emulation for
 the KVM hypervisor.
@@ -627,9 +552,9 @@ BuildArch: noarch
 %{name}-docs provides documentation files regarding %{name}.
 
 
-%package -n qemu-img
+%package  img
 Summary: QEMU command line tool for manipulating disk images
-%description -n qemu-img
+%description img
 This package provides a command line tool for manipulating disk images.
 
 
@@ -654,9 +579,9 @@ Summary: %{name} support tools
 %{name}-tools provides various tools related to %{name} usage.
 
 
-%package -n qemu-pr-helper
-Summary: qemu-pr-helper utility for %{name}
-%description -n qemu-pr-helper
+%package  pr-helper
+Summary: %{name}-pr-helper utility for %{name}
+%description pr-helper
 This package provides the qemu-pr-helper utility that is required for certain
 SCSI features.
 
@@ -779,14 +704,6 @@ Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
 %description audio-alsa
 This package provides the additional ALSA audio driver for QEMU.
 
-%if %{have_dbus_display}
-%package  audio-dbus
-Summary: QEMU D-Bus audio driver
-Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
-%description audio-dbus
-This package provides the additional D-Bus audio driver for QEMU.
-%endif
-
 %package  audio-oss
 Summary: QEMU OSS audio driver
 Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
@@ -798,18 +715,6 @@ Summary: QEMU PulseAudio audio driver
 Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
 %description audio-pa
 This package provides the additional PulseAudio audio driver for QEMU.
-
-%package  audio-pipewire
-Summary: QEMU Pipewire audio driver
-Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
-%description audio-pipewire
-This package provides the additional Pipewire audio driver for QEMU.
-
-%package  audio-sdl
-Summary: QEMU SDL audio driver
-Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
-%description audio-sdl
-This package provides the additional SDL audio driver for QEMU.
 
 %if %{have_jack}
 %package  audio-jack
@@ -825,28 +730,6 @@ Summary: QEMU curses UI driver
 Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
 %description ui-curses
 This package provides the additional curses UI for QEMU.
-
-%if %{have_dbus_display}
-%package  ui-dbus
-Summary: QEMU D-Bus UI driver
-Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
-%description ui-dbus
-This package provides the additional D-Bus UI for QEMU.
-%endif
-
-%package  ui-gtk
-Summary: QEMU GTK UI driver
-Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
-Requires: %{name}-ui-opengl%{?_isa} = %{epoch}:%{version}-%{release}
-%description ui-gtk
-This package provides the additional GTK UI for QEMU.
-
-%package  ui-sdl
-Summary: QEMU SDL UI driver
-Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
-Requires: %{name}-ui-opengl%{?_isa} = %{epoch}:%{version}-%{release}
-%description ui-sdl
-This package provides the additional SDL UI for QEMU.
 
 %package  ui-egl-headless
 Summary: QEMU EGL headless driver
@@ -1004,7 +887,7 @@ This package provides the spice audio driver for QEMU.
 %if %{have_kvm}
 %package kvm
 Summary: QEMU metapackage for KVM support
-Requires: qemu-%{kvm_package} = %{epoch}:%{version}-%{release}
+Requires: %{name}-%{kvm_package} = %{epoch}:%{version}-%{release}
 %description kvm
 This is a meta-package that provides a qemu-system-<arch> package for native
 architectures where kvm can be enabled. For example, in an x86 system, this
@@ -1013,7 +896,7 @@ will install qemu-system-x86
 
 %package kvm-core
 Summary: QEMU metapackage for KVM support
-Requires: qemu-%{kvm_package}-core = %{epoch}:%{version}-%{release}
+Requires: %{name}-%{kvm_package}-core = %{epoch}:%{version}-%{release}
 %description kvm-core
 This is a meta-package that provides a qemu-system-<arch>-core package
 for native architectures where kvm can be enabled. For example, in an
@@ -1233,9 +1116,6 @@ This package provides the QEMU system emulator for ARM systems.
 %package system-arm-core
 Summary: QEMU system emulator for ARM
 Requires: %{name}-common = %{epoch}:%{version}-%{release}
-%if %{have_edk2}
-Requires: edk2-arm
-%endif
 %description system-arm-core
 This package provides the QEMU system emulator for ARM boards.
 
@@ -1687,9 +1567,8 @@ run_configure() {
         --extra-cflags="%{optflags} -DSTAP_SDT_ARG_CONSTRAINT=g" \
 %endif
         --with-pkgversion="%{name}-%{version}-%{release}" \
-        --with-suffix="%{name}" \
+        --with-suffix="qemu" \
         --firmwarepath="%firmwaredirs" \
-        --enable-trace-backends=dtrace \
         --with-coroutine=ucontext \
         --tls-priority=@QEMU,SYSTEM \
         %{disable_everything} \
@@ -1738,7 +1617,6 @@ run_configure \
 %if %{have_fdt}
   --enable-fdt=system \
 %endif
-  --enable-gettext \
   --enable-gnutls \
   --enable-guest-agent \
   --enable-iconv \
@@ -1771,7 +1649,6 @@ run_configure \
   --enable-oss \
   --enable-pa \
   --enable-pie \
-  --enable-pipewire \
   --enable-pixman \
 %if %{have_block_rbd}
   --enable-rbd \
@@ -1806,7 +1683,7 @@ run_configure \
   --enable-xkbcommon \
   \
   \
-  --audio-drv-list=pipewire,pa,sdl,alsa,%{?jack_drv}oss \
+  --audio-drv-list=pa,alsa,oss \
   --target-list-exclude=moxie-softmmu \
   --with-default-devices \
   --enable-auth-pam \
@@ -1821,7 +1698,6 @@ run_configure \
 %if %{have_block_gluster}
   --enable-glusterfs \
 %endif
-  --enable-gtk \
   --enable-hv-balloon \
   --enable-libdaxctl \
   --enable-libdw \
@@ -1846,7 +1722,6 @@ run_configure \
 %if %{have_rutabaga_gfx}
   --enable-rutabaga-gfx \
 %endif
-  --enable-sdl \
 %if %{have_sdl_image}
   --enable-sdl-image \
 %endif
@@ -1867,7 +1742,6 @@ run_configure \
   --enable-virtfs-proxy-helper \
   --enable-vpc \
   --enable-vnc-jpeg \
-  --enable-vte \
   --enable-vvfat \
 %if %{have_xen}
   --enable-xen \
@@ -1875,7 +1749,12 @@ run_configure \
   --enable-xen-pci-passthrough \
 %endif
 %endif
-  --enable-zstd
+  --enable-zstd \
+  --disable-pipewire \
+  --disable-sdl \
+  --disable-gtk \
+  --disable-gtk-clipboard \
+  --disable-vte
 
 %if %{tools_only}
 %make_build qemu-img
@@ -1927,8 +1806,8 @@ install -D -m 0644 %{_sourcedir}/99-qemu-guest-agent.rules %{buildroot}%{_udevru
 # Install qemu-ga fsfreeze bits
 mkdir -p %{buildroot}%{_sysconfdir}/qemu-ga/fsfreeze-hook.d
 install -p scripts/qemu-guest-agent/fsfreeze-hook %{buildroot}%{_sysconfdir}/qemu-ga/fsfreeze-hook
-mkdir -p %{buildroot}%{_datadir}/%{name}/qemu-ga/fsfreeze-hook.d/
-install -p -m 0644 scripts/qemu-guest-agent/fsfreeze-hook.d/*.sample %{buildroot}%{_datadir}/%{name}/qemu-ga/fsfreeze-hook.d/
+mkdir -p %{buildroot}%{_datadir}/qemu/qemu-ga/fsfreeze-hook.d/
+install -p -m 0644 scripts/qemu-guest-agent/fsfreeze-hook.d/*.sample %{buildroot}%{_datadir}/qemu/qemu-ga/fsfreeze-hook.d/
 mkdir -p -v %{buildroot}%{_localstatedir}/log/qemu-ga/
 
 
@@ -1956,7 +1835,7 @@ popd
 
 %if !%{tools_only}
 # Install rules to use the bridge helper with libvirt's virbr0
-install -D -m 0644 %{_sourcedir}/bridge.conf %{buildroot}%{_sysconfdir}/%{name}/bridge.conf
+install -D -m 0644 %{_sourcedir}/bridge.conf %{buildroot}%{_sysconfdir}/qemu/bridge.conf
 
 # Install qemu-pr-helper service
 install -m 0644 contrib/systemd/qemu-pr-helper.service %{buildroot}%{_unitdir}
@@ -1973,22 +1852,22 @@ install -D -p -m 0644 %{modprobe_kvm_conf} %{buildroot}%{_sysconfdir}/modprobe.d
 
 # Copy some static data into place
 install -D -p -m 0644 -t %{buildroot}%{qemudocdir} README.rst COPYING COPYING.LIB LICENSE docs/interop/qmp-spec.rst
-install -D -p -m 0644 qemu.sasl %{buildroot}%{_sysconfdir}/sasl2/%{name}.conf
+install -D -p -m 0644 qemu.sasl %{buildroot}%{_sysconfdir}/sasl2/qemu.conf
 
-install -m 0644 scripts/dump-guest-memory.py %{buildroot}%{_datadir}/%{name}
+install -m 0644 scripts/dump-guest-memory.py %{buildroot}%{_datadir}/qemu
 
 
 # Install simpletrace
-install -m 0755 scripts/simpletrace.py %{buildroot}%{_datadir}/%{name}/simpletrace.py
-mkdir -p %{buildroot}%{_datadir}/%{name}/tracetool
-install -m 0644 -t %{buildroot}%{_datadir}/%{name}/tracetool scripts/tracetool/*.py
-mkdir -p %{buildroot}%{_datadir}/%{name}/tracetool/backend
-install -m 0644 -t %{buildroot}%{_datadir}/%{name}/tracetool/backend scripts/tracetool/backend/*.py
-mkdir -p %{buildroot}%{_datadir}/%{name}/tracetool/format
-install -m 0644 -t %{buildroot}%{_datadir}/%{name}/tracetool/format scripts/tracetool/format/*.py
+install -m 0755 scripts/simpletrace.py %{buildroot}%{_datadir}/qemu/simpletrace.py
+mkdir -p %{buildroot}%{_datadir}/qemu/tracetool
+install -m 0644 -t %{buildroot}%{_datadir}/qemu/tracetool scripts/tracetool/*.py
+mkdir -p %{buildroot}%{_datadir}/qemu/tracetool/backend
+install -m 0644 -t %{buildroot}%{_datadir}/qemu/tracetool/backend scripts/tracetool/backend/*.py
+mkdir -p %{buildroot}%{_datadir}/qemu/tracetool/format
+install -m 0644 -t %{buildroot}%{_datadir}/qemu/tracetool/format scripts/tracetool/format/*.py
 
 # Ensure vhost-user directory is present even if built without virgl
-mkdir -p %{buildroot}%{_datadir}/%{name}/vhost-user
+mkdir -p %{buildroot}%{_datadir}/qemu/vhost-user
 
 # Create new directories and put them all under tests-src
 mkdir -p %{buildroot}%{testsdir}/python
@@ -2021,7 +1900,7 @@ popd
 
 # We need to make the block device modules and other qemu SO files executable
 # otherwise RPM won't pick up their dependencies.
-chmod +x %{buildroot}%{_libdir}/%{name}/*.so
+chmod +x %{buildroot}%{_libdir}/qemu/*.so
 
 # Remove docs we don't care about
 find %{buildroot}%{qemudocdir} -name .buildinfo -delete
@@ -2029,25 +1908,22 @@ rm -rf %{buildroot}%{qemudocdir}/specs
 
 
 # Provided by package openbios
-rm -rf %{buildroot}%{_datadir}/%{name}/openbios-ppc
-rm -rf %{buildroot}%{_datadir}/%{name}/openbios-sparc32
-rm -rf %{buildroot}%{_datadir}/%{name}/openbios-sparc64
+rm -rf %{buildroot}%{_datadir}/qemu/openbios-ppc
+rm -rf %{buildroot}%{_datadir}/qemu/openbios-sparc32
+rm -rf %{buildroot}%{_datadir}/qemu/openbios-sparc64
 # Provided by package SLOF
-rm -rf %{buildroot}%{_datadir}/%{name}/slof.bin
+rm -rf %{buildroot}%{_datadir}/qemu/slof.bin
 # Provided by package ipxe
-rm -rf %{buildroot}%{_datadir}/%{name}/pxe*rom
-rm -rf %{buildroot}%{_datadir}/%{name}/efi*rom
+rm -rf %{buildroot}%{_datadir}/qemu/pxe*rom
+rm -rf %{buildroot}%{_datadir}/qemu/efi*rom
 # Provided by package seavgabios
-rm -rf %{buildroot}%{_datadir}/%{name}/vgabios*bin
+rm -rf %{buildroot}%{_datadir}/qemu/vgabios*bin
 # Provided by package seabios
-rm -rf %{buildroot}%{_datadir}/%{name}/bios*.bin
+rm -rf %{buildroot}%{_datadir}/qemu/bios*.bin
 # Provided by edk2
-rm -rf %{buildroot}%{_datadir}/%{name}/edk2*
-rm -rf %{buildroot}%{_datadir}/%{name}/firmware
+rm -rf %{buildroot}%{_datadir}/qemu/edk2*
+rm -rf %{buildroot}%{_datadir}/qemu/firmware
 
-
-# Fedora specific stuff below
-%find_lang %{name}
 
 # Generate qemu-system-* man pages
 chmod -x %{buildroot}%{_mandir}/man1/*
@@ -2262,7 +2138,7 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 
 
-%files -n qemu-img
+%files img
 %{_bindir}/qemu-img
 %{_bindir}/qemu-io
 %{_bindir}/qemu-nbd
@@ -2281,7 +2157,7 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %{_udevrulesdir}/99-qemu-guest-agent.rules
 %config(noreplace) %{_sysconfdir}/sysconfig/qemu-ga
 %{_sysconfdir}/qemu-ga
-%{_datadir}/%{name}/qemu-ga
+%{_datadir}/qemu/qemu-ga
 %dir %{_localstatedir}/log/qemu-ga
 
 
@@ -2290,7 +2166,7 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 # Deliberately empty
 
 
-%files -n qemu-pr-helper
+%files pr-helper
 %{_bindir}/qemu-pr-helper
 %{_unitdir}/qemu-pr-helper.service
 %{_unitdir}/qemu-pr-helper.socket
@@ -2300,14 +2176,12 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %files tools
 %{_bindir}/qemu-keymap
 %{_bindir}/qemu-edid
-%{_bindir}/qemu-trace-stap
-%{_datadir}/%{name}/simpletrace.py*
-%{_datadir}/%{name}/tracetool/*.py*
-%{_datadir}/%{name}/tracetool/backend/*.py*
-%{_datadir}/%{name}/tracetool/format/*.py*
-%{_datadir}/%{name}/dump-guest-memory.py*
-%{_datadir}/%{name}/trace-events-all
-%{_mandir}/man1/qemu-trace-stap.1*
+%{_datadir}/qemu/simpletrace.py*
+%{_datadir}/qemu/tracetool/*.py*
+%{_datadir}/qemu/tracetool/backend/*.py*
+%{_datadir}/qemu/tracetool/format/*.py*
+%{_datadir}/qemu/dump-guest-memory.py*
+%{_datadir}/qemu/trace-events-all
 # Fedora specific
 %{_bindir}/elf2dmp
 
@@ -2316,165 +2190,157 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %doc %{qemudocdir}
 
 
-%files common -f %{name}.lang
+%files common
 %license COPYING COPYING.LIB LICENSE
-%dir %{_datadir}/%{name}/
-%dir %{_datadir}/%{name}/vhost-user/
+%dir %{_datadir}/qemu/
+%dir %{_datadir}/qemu/vhost-user/
 %{_datadir}/icons/*
-%{_datadir}/%{name}/keymaps/
-%{_datadir}/%{name}/linuxboot_dma.bin
+%{_datadir}/qemu/keymaps/
+%{_datadir}/qemu/linuxboot_dma.bin
 %attr(4755, -, -) %{_libexecdir}/qemu-bridge-helper
-%{_mandir}/man1/%{name}.1*
+%{_mandir}/man1/qemu.1*
 %{_mandir}/man7/qemu-block-drivers.7*
 %{_mandir}/man7/qemu-cpu-models.7*
 %{_mandir}/man7/qemu-ga-ref.7*
 %{_mandir}/man7/qemu-qmp-ref.7*
-%dir %{_sysconfdir}/%{name}
-%config(noreplace) %{_sysconfdir}/%{name}/bridge.conf
+%dir %{_sysconfdir}/qemu
+%config(noreplace) %{_sysconfdir}/qemu/bridge.conf
 %if %{have_kvm}
 %config(noreplace) %{_sysconfdir}/modprobe.d/kvm.conf
 %config(noreplace) %{_sysconfdir}/modprobe.d/vhost.conf
 %endif
-%config(noreplace) %{_sysconfdir}/sasl2/%{name}.conf
+%config(noreplace) %{_sysconfdir}/sasl2/qemu.conf
 
 
 # Fedora specific
 %{_datadir}/applications/qemu.desktop
-%exclude %{_datadir}/%{name}/qemu-nsis.bmp
+%exclude %{_datadir}/qemu/qemu-nsis.bmp
 %{_libexecdir}/virtfs-proxy-helper
 %{_mandir}/man1/virtfs-proxy-helper.1*
 
 
 %files tests
 %{testsdir}
-%{_libdir}/%{name}/accel-qtest-*.so
+%{_libdir}/qemu/accel-qtest-*.so
 
 %if %{have_libblkio}
 %files block-blkio
-%{_libdir}/%{name}/block-blkio.so
+%{_libdir}/qemu/block-blkio.so
 %endif
 %files block-curl
-%{_libdir}/%{name}/block-curl.so
+%{_libdir}/qemu/block-curl.so
 %files block-iscsi
-%{_libdir}/%{name}/block-iscsi.so
+%{_libdir}/qemu/block-iscsi.so
 %if %{have_block_rbd}
 %files block-rbd
-%{_libdir}/%{name}/block-rbd.so
+%{_libdir}/qemu/block-rbd.so
 %endif
 %files block-ssh
-%{_libdir}/%{name}/block-ssh.so
+%{_libdir}/qemu/block-ssh.so
 
 %if %{have_opengl}
 %files ui-opengl
-%{_libdir}/%{name}/ui-opengl.so
+%{_libdir}/qemu/ui-opengl.so
 %endif
 
 
 %files block-dmg
-%{_libdir}/%{name}/block-dmg-bz2.so
+%{_libdir}/qemu/block-dmg-bz2.so
 %if %{have_block_gluster}
 %files block-gluster
-%{_libdir}/%{name}/block-gluster.so
+%{_libdir}/qemu/block-gluster.so
 %endif
 %if %{have_block_nfs}
 %files block-nfs
-%{_libdir}/%{name}/block-nfs.so
+%{_libdir}/qemu/block-nfs.so
 %endif
 
 %files audio-alsa
-%{_libdir}/%{name}/audio-alsa.so
+%{_libdir}/qemu/audio-alsa.so
 %if %{have_dbus_display}
 %files audio-dbus
-%{_libdir}/%{name}/audio-dbus.so
+%{_libdir}/qemu/audio-dbus.so
 %endif
 %files audio-oss
-%{_libdir}/%{name}/audio-oss.so
+%{_libdir}/qemu/audio-oss.so
 %files audio-pa
-%{_libdir}/%{name}/audio-pa.so
-%files audio-pipewire
-%{_libdir}/%{name}/audio-pipewire.so
-%files audio-sdl
-%{_libdir}/%{name}/audio-sdl.so
+%{_libdir}/qemu/audio-pa.so
 %if %{have_jack}
 %files audio-jack
-%{_libdir}/%{name}/audio-jack.so
+%{_libdir}/qemu/audio-jack.so
 %endif
 
 
 %files ui-curses
-%{_libdir}/%{name}/ui-curses.so
+%{_libdir}/qemu/ui-curses.so
 %if %{have_dbus_display}
 %files ui-dbus
-%{_libdir}/%{name}/ui-dbus.so
+%{_libdir}/qemu/ui-dbus.so
 %endif
-%files ui-gtk
-%{_libdir}/%{name}/ui-gtk.so
-%files ui-sdl
-%{_libdir}/%{name}/ui-sdl.so
 %files ui-egl-headless
-%{_libdir}/%{name}/ui-egl-headless.so
+%{_libdir}/qemu/ui-egl-headless.so
 
 %files char-baum
-%{_libdir}/%{name}/chardev-baum.so
+%{_libdir}/qemu/chardev-baum.so
 
 
 %files device-display-virtio-gpu
-%{_libdir}/%{name}/hw-display-virtio-gpu.so
+%{_libdir}/qemu/hw-display-virtio-gpu.so
 %if %{have_virgl}
 %files device-display-virtio-gpu-gl
-%{_libdir}/%{name}/hw-display-virtio-gpu-gl.so
+%{_libdir}/qemu/hw-display-virtio-gpu-gl.so
 %endif
 %if %{have_rutabaga_gfx}
 %files device-display-virtio-gpu-rutabaga
-%{_libdir}/%{name}/hw-display-virtio-gpu-rutabaga.so
+%{_libdir}/qemu/hw-display-virtio-gpu-rutabaga.so
 %endif
 %files device-display-virtio-gpu-pci
-%{_libdir}/%{name}/hw-display-virtio-gpu-pci.so
+%{_libdir}/qemu/hw-display-virtio-gpu-pci.so
 %if %{have_virgl}
 %files device-display-virtio-gpu-pci-gl
-%{_libdir}/%{name}/hw-display-virtio-gpu-pci-gl.so
+%{_libdir}/qemu/hw-display-virtio-gpu-pci-gl.so
 %endif
 %if %{have_rutabaga_gfx}
 %files device-display-virtio-gpu-pci-rutabaga
-%{_libdir}/%{name}/hw-display-virtio-gpu-pci-rutabaga.so
+%{_libdir}/qemu/hw-display-virtio-gpu-pci-rutabaga.so
 %endif
 %files device-display-virtio-gpu-ccw
-%{_libdir}/%{name}/hw-s390x-virtio-gpu-ccw.so
+%{_libdir}/qemu/hw-s390x-virtio-gpu-ccw.so
 %files device-display-virtio-vga
-%{_libdir}/%{name}/hw-display-virtio-vga.so
+%{_libdir}/qemu/hw-display-virtio-vga.so
 %files device-display-virtio-vga-gl
-%{_libdir}/%{name}/hw-display-virtio-vga-gl.so
+%{_libdir}/qemu/hw-display-virtio-vga-gl.so
 %if %{have_rutabaga_gfx}
 %files device-display-virtio-vga-rutabaga
-%{_libdir}/%{name}/hw-display-virtio-vga-rutabaga.so
+%{_libdir}/qemu/hw-display-virtio-vga-rutabaga.so
 %endif
 %files device-usb-host
-%{_libdir}/%{name}/hw-usb-host.so
+%{_libdir}/qemu/hw-usb-host.so
 %files device-usb-redirect
-%{_libdir}/%{name}/hw-usb-redirect.so
+%{_libdir}/qemu/hw-usb-redirect.so
 %if %{have_libcacard}
 %files device-usb-smartcard
-%{_libdir}/%{name}/hw-usb-smartcard.so
+%{_libdir}/qemu/hw-usb-smartcard.so
 %endif
 
 
 %if %{have_virgl}
 %files device-display-vhost-user-gpu
-%{_datadir}/%{name}/vhost-user/50-qemu-gpu.json
+%{_datadir}/qemu/vhost-user/50-qemu-gpu.json
 %{_libexecdir}/vhost-user-gpu
 %endif
 
 %if %{have_spice}
 %files audio-spice
-%{_libdir}/%{name}/audio-spice.so
+%{_libdir}/qemu/audio-spice.so
 %files char-spice
-%{_libdir}/%{name}/chardev-spice.so
+%{_libdir}/qemu/chardev-spice.so
 %files device-display-qxl
-%{_libdir}/%{name}/hw-display-qxl.so
+%{_libdir}/qemu/hw-display-qxl.so
 %files ui-spice-core
-%{_libdir}/%{name}/ui-spice-core.so
+%{_libdir}/qemu/ui-spice-core.so
 %files ui-spice-app
-%{_libdir}/%{name}/ui-spice-app.so
+%{_libdir}/qemu/ui-spice-app.so
 %endif
 
 
@@ -2524,112 +2390,6 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %{_bindir}/qemu-xtensa
 %{_bindir}/qemu-xtensaeb
 
-%{_datadir}/systemtap/tapset/qemu-aarch64.stp
-%{_datadir}/systemtap/tapset/qemu-aarch64-log.stp
-%{_datadir}/systemtap/tapset/qemu-aarch64-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-aarch64_be.stp
-%{_datadir}/systemtap/tapset/qemu-aarch64_be-log.stp
-%{_datadir}/systemtap/tapset/qemu-aarch64_be-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-alpha.stp
-%{_datadir}/systemtap/tapset/qemu-alpha-log.stp
-%{_datadir}/systemtap/tapset/qemu-alpha-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-armeb.stp
-%{_datadir}/systemtap/tapset/qemu-armeb-log.stp
-%{_datadir}/systemtap/tapset/qemu-armeb-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-arm.stp
-%{_datadir}/systemtap/tapset/qemu-arm-log.stp
-%{_datadir}/systemtap/tapset/qemu-arm-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-cris.stp
-%{_datadir}/systemtap/tapset/qemu-cris-log.stp
-%{_datadir}/systemtap/tapset/qemu-cris-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-hexagon.stp
-%{_datadir}/systemtap/tapset/qemu-hexagon-log.stp
-%{_datadir}/systemtap/tapset/qemu-hexagon-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-hppa.stp
-%{_datadir}/systemtap/tapset/qemu-hppa-log.stp
-%{_datadir}/systemtap/tapset/qemu-hppa-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-i386.stp
-%{_datadir}/systemtap/tapset/qemu-i386-log.stp
-%{_datadir}/systemtap/tapset/qemu-i386-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-loongarch64.stp
-%{_datadir}/systemtap/tapset/qemu-loongarch64-log.stp
-%{_datadir}/systemtap/tapset/qemu-loongarch64-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-m68k.stp
-%{_datadir}/systemtap/tapset/qemu-m68k-log.stp
-%{_datadir}/systemtap/tapset/qemu-m68k-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-microblaze.stp
-%{_datadir}/systemtap/tapset/qemu-microblaze-log.stp
-%{_datadir}/systemtap/tapset/qemu-microblaze-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-microblazeel.stp
-%{_datadir}/systemtap/tapset/qemu-microblazeel-log.stp
-%{_datadir}/systemtap/tapset/qemu-microblazeel-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-mips.stp
-%{_datadir}/systemtap/tapset/qemu-mips-log.stp
-%{_datadir}/systemtap/tapset/qemu-mips-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-mips64el.stp
-%{_datadir}/systemtap/tapset/qemu-mips64el-log.stp
-%{_datadir}/systemtap/tapset/qemu-mips64el-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-mips64.stp
-%{_datadir}/systemtap/tapset/qemu-mips64-log.stp
-%{_datadir}/systemtap/tapset/qemu-mips64-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-mipsel.stp
-%{_datadir}/systemtap/tapset/qemu-mipsel-log.stp
-%{_datadir}/systemtap/tapset/qemu-mipsel-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-mipsn32.stp
-%{_datadir}/systemtap/tapset/qemu-mipsn32-log.stp
-%{_datadir}/systemtap/tapset/qemu-mipsn32-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-mipsn32el.stp
-%{_datadir}/systemtap/tapset/qemu-mipsn32el-log.stp
-%{_datadir}/systemtap/tapset/qemu-mipsn32el-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-nios2.stp
-%{_datadir}/systemtap/tapset/qemu-nios2-log.stp
-%{_datadir}/systemtap/tapset/qemu-nios2-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-or1k.stp
-%{_datadir}/systemtap/tapset/qemu-or1k-log.stp
-%{_datadir}/systemtap/tapset/qemu-or1k-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-ppc.stp
-%{_datadir}/systemtap/tapset/qemu-ppc-log.stp
-%{_datadir}/systemtap/tapset/qemu-ppc-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64-log.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64le.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64le-log.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64le-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-riscv32.stp
-%{_datadir}/systemtap/tapset/qemu-riscv32-log.stp
-%{_datadir}/systemtap/tapset/qemu-riscv32-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-riscv64.stp
-%{_datadir}/systemtap/tapset/qemu-riscv64-log.stp
-%{_datadir}/systemtap/tapset/qemu-riscv64-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-s390x.stp
-%{_datadir}/systemtap/tapset/qemu-s390x-log.stp
-%{_datadir}/systemtap/tapset/qemu-s390x-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-sh4.stp
-%{_datadir}/systemtap/tapset/qemu-sh4-log.stp
-%{_datadir}/systemtap/tapset/qemu-sh4-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-sh4eb.stp
-%{_datadir}/systemtap/tapset/qemu-sh4eb-log.stp
-%{_datadir}/systemtap/tapset/qemu-sh4eb-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-sparc.stp
-%{_datadir}/systemtap/tapset/qemu-sparc-log.stp
-%{_datadir}/systemtap/tapset/qemu-sparc-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-sparc32plus.stp
-%{_datadir}/systemtap/tapset/qemu-sparc32plus-log.stp
-%{_datadir}/systemtap/tapset/qemu-sparc32plus-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-sparc64.stp
-%{_datadir}/systemtap/tapset/qemu-sparc64-log.stp
-%{_datadir}/systemtap/tapset/qemu-sparc64-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-x86_64.stp
-%{_datadir}/systemtap/tapset/qemu-x86_64-log.stp
-%{_datadir}/systemtap/tapset/qemu-x86_64-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-xtensa.stp
-%{_datadir}/systemtap/tapset/qemu-xtensa-log.stp
-%{_datadir}/systemtap/tapset/qemu-xtensa-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-xtensaeb.stp
-%{_datadir}/systemtap/tapset/qemu-xtensaeb-log.stp
-%{_datadir}/systemtap/tapset/qemu-xtensaeb-simpletrace.stp
-
 
 %files user-binfmt
 %{_exec_prefix}/lib/binfmt.d/qemu-*-dynamic.conf
@@ -2641,12 +2401,6 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %files user-static-aarch64
 %{_bindir}/qemu-aarch64-static
 %{_bindir}/qemu-aarch64_be-static
-%{_datadir}/systemtap/tapset/qemu-aarch64-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-aarch64-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-aarch64-static.stp
-%{_datadir}/systemtap/tapset/qemu-aarch64_be-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-aarch64_be-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-aarch64_be-static.stp
 %ifnarch aarch64
 %{_exec_prefix}/lib/binfmt.d/qemu-aarch64-static.conf
 %endif
@@ -2654,20 +2408,11 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 %files user-static-alpha
 %{_bindir}/qemu-alpha-static
-%{_datadir}/systemtap/tapset/qemu-alpha-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-alpha-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-alpha-static.stp
 %{_exec_prefix}/lib/binfmt.d/qemu-alpha-static.conf
 
 %files user-static-arm
 %{_bindir}/qemu-arm-static
 %{_bindir}/qemu-armeb-static
-%{_datadir}/systemtap/tapset/qemu-arm-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-arm-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-arm-static.stp
-%{_datadir}/systemtap/tapset/qemu-armeb-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-armeb-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-armeb-static.stp
 %ifnarch aarch64
 %{_exec_prefix}/lib/binfmt.d/qemu-arm-static.conf
 %endif
@@ -2675,47 +2420,26 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 %files user-static-cris
 %{_bindir}/qemu-cris-static
-%{_datadir}/systemtap/tapset/qemu-cris-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-cris-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-cris-static.stp
 
 %files user-static-hexagon
 %{_bindir}/qemu-hexagon-static
-%{_datadir}/systemtap/tapset/qemu-hexagon-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-hexagon-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-hexagon-static.stp
 %{_exec_prefix}/lib/binfmt.d/qemu-hexagon-static.conf
 
 %files user-static-hppa
 %{_bindir}/qemu-hppa-static
-%{_datadir}/systemtap/tapset/qemu-hppa-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-hppa-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-hppa-static.stp
 %{_exec_prefix}/lib/binfmt.d/qemu-hppa-static.conf
 
 %files user-static-loongarch64
 %{_bindir}/qemu-loongarch64-static
-%{_datadir}/systemtap/tapset/qemu-loongarch64-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-loongarch64-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-loongarch64-static.stp
 %{_exec_prefix}/lib/binfmt.d/qemu-loongarch64-static.conf
 
 %files user-static-m68k
 %{_bindir}/qemu-m68k-static
-%{_datadir}/systemtap/tapset/qemu-m68k-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-m68k-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-m68k-static.stp
 %{_exec_prefix}/lib/binfmt.d/qemu-m68k-static.conf
 
 %files user-static-microblaze
 %{_bindir}/qemu-microblaze-static
 %{_bindir}/qemu-microblazeel-static
-%{_datadir}/systemtap/tapset/qemu-microblaze-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-microblaze-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-microblaze-static.stp
-%{_datadir}/systemtap/tapset/qemu-microblazeel-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-microblazeel-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-microblazeel-static.stp
 %{_exec_prefix}/lib/binfmt.d/qemu-microblaze-static.conf
 %{_exec_prefix}/lib/binfmt.d/qemu-microblazeel-static.conf
 
@@ -2726,24 +2450,6 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %{_bindir}/qemu-mipsel-static
 %{_bindir}/qemu-mipsn32-static
 %{_bindir}/qemu-mipsn32el-static
-%{_datadir}/systemtap/tapset/qemu-mips-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-mips-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-mips-static.stp
-%{_datadir}/systemtap/tapset/qemu-mips64-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-mips64-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-mips64-static.stp
-%{_datadir}/systemtap/tapset/qemu-mips64el-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-mips64el-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-mips64el-static.stp
-%{_datadir}/systemtap/tapset/qemu-mipsel-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-mipsel-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-mipsel-static.stp
-%{_datadir}/systemtap/tapset/qemu-mipsn32-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-mipsn32-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-mipsn32-static.stp
-%{_datadir}/systemtap/tapset/qemu-mipsn32el-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-mipsn32el-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-mipsn32el-static.stp
 %{_exec_prefix}/lib/binfmt.d/qemu-mips-static.conf
 %{_exec_prefix}/lib/binfmt.d/qemu-mips64-static.conf
 %{_exec_prefix}/lib/binfmt.d/qemu-mips64el-static.conf
@@ -2753,30 +2459,15 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 %files user-static-nios2
 %{_bindir}/qemu-nios2-static
-%{_datadir}/systemtap/tapset/qemu-nios2-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-nios2-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-nios2-static.stp
 
 %files user-static-or1k
 %{_bindir}/qemu-or1k-static
-%{_datadir}/systemtap/tapset/qemu-or1k-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-or1k-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-or1k-static.stp
 %{_exec_prefix}/lib/binfmt.d/qemu-or1k-static.conf
 
 %files user-static-ppc
 %{_bindir}/qemu-ppc-static
 %{_bindir}/qemu-ppc64-static
 %{_bindir}/qemu-ppc64le-static
-%{_datadir}/systemtap/tapset/qemu-ppc-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-ppc-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-ppc-static.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64-static.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64le-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64le-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-ppc64le-static.stp
 %{_exec_prefix}/lib/binfmt.d/qemu-ppc-static.conf
 %{_exec_prefix}/lib/binfmt.d/qemu-ppc64-static.conf
 %ifnarch ppc64le
@@ -2786,12 +2477,6 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %files user-static-riscv
 %{_bindir}/qemu-riscv32-static
 %{_bindir}/qemu-riscv64-static
-%{_datadir}/systemtap/tapset/qemu-riscv32-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-riscv32-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-riscv32-static.stp
-%{_datadir}/systemtap/tapset/qemu-riscv64-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-riscv64-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-riscv64-static.stp
 %{_exec_prefix}/lib/binfmt.d/qemu-riscv32-static.conf
 %ifnarch riscv64
 %{_exec_prefix}/lib/binfmt.d/qemu-riscv64-static.conf
@@ -2799,9 +2484,6 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 %files user-static-s390x
 %{_bindir}/qemu-s390x-static
-%{_datadir}/systemtap/tapset/qemu-s390x-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-s390x-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-s390x-static.stp
 %ifnarch s390x
 %{_exec_prefix}/lib/binfmt.d/qemu-s390x-static.conf
 %endif
@@ -2809,12 +2491,6 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %files user-static-sh4
 %{_bindir}/qemu-sh4-static
 %{_bindir}/qemu-sh4eb-static
-%{_datadir}/systemtap/tapset/qemu-sh4-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-sh4-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-sh4-static.stp
-%{_datadir}/systemtap/tapset/qemu-sh4eb-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-sh4eb-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-sh4eb-static.stp
 %{_exec_prefix}/lib/binfmt.d/qemu-sh4-static.conf
 %{_exec_prefix}/lib/binfmt.d/qemu-sh4eb-static.conf
 
@@ -2822,15 +2498,6 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %{_bindir}/qemu-sparc-static
 %{_bindir}/qemu-sparc32plus-static
 %{_bindir}/qemu-sparc64-static
-%{_datadir}/systemtap/tapset/qemu-sparc-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-sparc-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-sparc-static.stp
-%{_datadir}/systemtap/tapset/qemu-sparc64-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-sparc64-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-sparc64-static.stp
-%{_datadir}/systemtap/tapset/qemu-sparc32plus-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-sparc32plus-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-sparc32plus-static.stp
 %{_exec_prefix}/lib/binfmt.d/qemu-sparc-static.conf
 %{_exec_prefix}/lib/binfmt.d/qemu-sparc32plus-static.conf
 %{_exec_prefix}/lib/binfmt.d/qemu-sparc64-static.conf
@@ -2838,12 +2505,6 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %files user-static-x86
 %{_bindir}/qemu-i386-static
 %{_bindir}/qemu-x86_64-static
-%{_datadir}/systemtap/tapset/qemu-i386-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-i386-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-i386-static.stp
-%{_datadir}/systemtap/tapset/qemu-x86_64-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-x86_64-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-x86_64-static.stp
 %ifnarch %{ix86} x86_64
 %{_exec_prefix}/lib/binfmt.d/qemu-i386-static.conf
 %{_exec_prefix}/lib/binfmt.d/qemu-i486-static.conf
@@ -2853,12 +2514,6 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %files user-static-xtensa
 %{_bindir}/qemu-xtensa-static
 %{_bindir}/qemu-xtensaeb-static
-%{_datadir}/systemtap/tapset/qemu-xtensa-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-xtensa-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-xtensa-static.stp
-%{_datadir}/systemtap/tapset/qemu-xtensaeb-log-static.stp
-%{_datadir}/systemtap/tapset/qemu-xtensaeb-simpletrace-static.stp
-%{_datadir}/systemtap/tapset/qemu-xtensaeb-static.stp
 %{_exec_prefix}/lib/binfmt.d/qemu-xtensa-static.conf
 %{_exec_prefix}/lib/binfmt.d/qemu-xtensaeb-static.conf
 
@@ -2868,75 +2523,51 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %files system-aarch64
 %files system-aarch64-core
 %{_bindir}/qemu-system-aarch64
-%{_datadir}/systemtap/tapset/qemu-system-aarch64.stp
-%{_datadir}/systemtap/tapset/qemu-system-aarch64-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-aarch64-simpletrace.stp
 %{_mandir}/man1/qemu-system-aarch64.1*
 
 
 %files system-alpha
 %files system-alpha-core
 %{_bindir}/qemu-system-alpha
-%{_datadir}/systemtap/tapset/qemu-system-alpha.stp
-%{_datadir}/systemtap/tapset/qemu-system-alpha-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-alpha-simpletrace.stp
 %{_mandir}/man1/qemu-system-alpha.1*
-%{_datadir}/%{name}/palcode-clipper
+%{_datadir}/qemu/palcode-clipper
 
 
 %files system-arm
 %files system-arm-core
 %{_bindir}/qemu-system-arm
-%{_datadir}/%{name}/npcm7xx_bootrom.bin
-%{_datadir}/systemtap/tapset/qemu-system-arm.stp
-%{_datadir}/systemtap/tapset/qemu-system-arm-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-arm-simpletrace.stp
+%{_datadir}/qemu/npcm7xx_bootrom.bin
 %{_mandir}/man1/qemu-system-arm.1*
 
 
 %files system-avr
 %files system-avr-core
 %{_bindir}/qemu-system-avr
-%{_datadir}/systemtap/tapset/qemu-system-avr.stp
-%{_datadir}/systemtap/tapset/qemu-system-avr-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-avr-simpletrace.stp
 %{_mandir}/man1/qemu-system-avr.1*
 
 
 %files system-cris
 %files system-cris-core
 %{_bindir}/qemu-system-cris
-%{_datadir}/systemtap/tapset/qemu-system-cris.stp
-%{_datadir}/systemtap/tapset/qemu-system-cris-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-cris-simpletrace.stp
 %{_mandir}/man1/qemu-system-cris.1*
 
 
 %files system-hppa
 %files system-hppa-core
 %{_bindir}/qemu-system-hppa
-%{_datadir}/systemtap/tapset/qemu-system-hppa.stp
-%{_datadir}/systemtap/tapset/qemu-system-hppa-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-hppa-simpletrace.stp
 %{_mandir}/man1/qemu-system-hppa.1*
-%{_datadir}/%{name}/hppa-firmware.img
+%{_datadir}/qemu/hppa-firmware.img
 
 
 %files system-loongarch64
 %files system-loongarch64-core
 %{_bindir}/qemu-system-loongarch64
-%{_datadir}/systemtap/tapset/qemu-system-loongarch64.stp
-%{_datadir}/systemtap/tapset/qemu-system-loongarch64-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-loongarch64-simpletrace.stp
 %{_mandir}/man1/qemu-system-loongarch64.1*
 
 
 %files system-m68k
 %files system-m68k-core
 %{_bindir}/qemu-system-m68k
-%{_datadir}/systemtap/tapset/qemu-system-m68k.stp
-%{_datadir}/systemtap/tapset/qemu-system-m68k-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-m68k-simpletrace.stp
 %{_mandir}/man1/qemu-system-m68k.1*
 
 
@@ -2944,15 +2575,9 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %files system-microblaze-core
 %{_bindir}/qemu-system-microblaze
 %{_bindir}/qemu-system-microblazeel
-%{_datadir}/systemtap/tapset/qemu-system-microblaze.stp
-%{_datadir}/systemtap/tapset/qemu-system-microblaze-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-microblaze-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-system-microblazeel.stp
-%{_datadir}/systemtap/tapset/qemu-system-microblazeel-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-microblazeel-simpletrace.stp
 %{_mandir}/man1/qemu-system-microblaze.1*
 %{_mandir}/man1/qemu-system-microblazeel.1*
-%{_datadir}/%{name}/petalogix*.dtb
+%{_datadir}/qemu/petalogix*.dtb
 
 
 %files system-mips
@@ -2961,18 +2586,6 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %{_bindir}/qemu-system-mipsel
 %{_bindir}/qemu-system-mips64
 %{_bindir}/qemu-system-mips64el
-%{_datadir}/systemtap/tapset/qemu-system-mips.stp
-%{_datadir}/systemtap/tapset/qemu-system-mips-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-mips-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-system-mipsel.stp
-%{_datadir}/systemtap/tapset/qemu-system-mipsel-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-mipsel-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-system-mips64.stp
-%{_datadir}/systemtap/tapset/qemu-system-mips64-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-mips64-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-system-mips64el.stp
-%{_datadir}/systemtap/tapset/qemu-system-mips64el-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-mips64el-simpletrace.stp
 %{_mandir}/man1/qemu-system-mips.1*
 %{_mandir}/man1/qemu-system-mipsel.1*
 %{_mandir}/man1/qemu-system-mips64el.1*
@@ -2982,18 +2595,12 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %files system-nios2
 %files system-nios2-core
 %{_bindir}/qemu-system-nios2
-%{_datadir}/systemtap/tapset/qemu-system-nios2.stp
-%{_datadir}/systemtap/tapset/qemu-system-nios2-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-nios2-simpletrace.stp
 %{_mandir}/man1/qemu-system-nios2.1*
 
 
 %files system-or1k
 %files system-or1k-core
 %{_bindir}/qemu-system-or1k
-%{_datadir}/systemtap/tapset/qemu-system-or1k.stp
-%{_datadir}/systemtap/tapset/qemu-system-or1k-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-or1k-simpletrace.stp
 %{_mandir}/man1/qemu-system-or1k.1*
 
 
@@ -3001,21 +2608,15 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %files system-ppc-core
 %{_bindir}/qemu-system-ppc
 %{_bindir}/qemu-system-ppc64
-%{_datadir}/systemtap/tapset/qemu-system-ppc.stp
-%{_datadir}/systemtap/tapset/qemu-system-ppc-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-ppc-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-system-ppc64.stp
-%{_datadir}/systemtap/tapset/qemu-system-ppc64-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-ppc64-simpletrace.stp
 %{_mandir}/man1/qemu-system-ppc.1*
 %{_mandir}/man1/qemu-system-ppc64.1*
-%{_datadir}/%{name}/bamboo.dtb
-%{_datadir}/%{name}/canyonlands.dtb
-%{_datadir}/%{name}/qemu_vga.ndrv
-%{_datadir}/%{name}/skiboot.lid
-%{_datadir}/%{name}/u-boot.e500
-%{_datadir}/%{name}/u-boot-sam460-20100605.bin
-%{_datadir}/%{name}/vof*.bin
+%{_datadir}/qemu/bamboo.dtb
+%{_datadir}/qemu/canyonlands.dtb
+%{_datadir}/qemu/qemu_vga.ndrv
+%{_datadir}/qemu/skiboot.lid
+%{_datadir}/qemu/u-boot.e500
+%{_datadir}/qemu/u-boot-sam460-20100605.bin
+%{_datadir}/qemu/vof*.bin
 %if %{have_memlock_limits}
 %{_sysconfdir}/security/limits.d/95-kvm-memlock.conf
 %endif
@@ -3025,46 +2626,28 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %files system-riscv-core
 %{_bindir}/qemu-system-riscv32
 %{_bindir}/qemu-system-riscv64
-%{_datadir}/%{name}/opensbi-riscv*.bin
-%{_datadir}/systemtap/tapset/qemu-system-riscv32.stp
-%{_datadir}/systemtap/tapset/qemu-system-riscv32-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-riscv32-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-system-riscv64.stp
-%{_datadir}/systemtap/tapset/qemu-system-riscv64-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-riscv64-simpletrace.stp
+%{_datadir}/qemu/opensbi-riscv*.bin
 %{_mandir}/man1/qemu-system-riscv*.1*
 
 
 %files system-rx
 %files system-rx-core
 %{_bindir}/qemu-system-rx
-%{_datadir}/systemtap/tapset/qemu-system-rx.stp
-%{_datadir}/systemtap/tapset/qemu-system-rx-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-rx-simpletrace.stp
 %{_mandir}/man1/qemu-system-rx.1*
 
 
 %files system-s390x
 %files system-s390x-core
 %{_bindir}/qemu-system-s390x
-%{_datadir}/systemtap/tapset/qemu-system-s390x.stp
-%{_datadir}/systemtap/tapset/qemu-system-s390x-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-s390x-simpletrace.stp
 %{_mandir}/man1/qemu-system-s390x.1*
-%{_datadir}/%{name}/s390-ccw.img
-%{_datadir}/%{name}/s390-netboot.img
+%{_datadir}/qemu/s390-ccw.img
+%{_datadir}/qemu/s390-netboot.img
 
 
 %files system-sh4
 %files system-sh4-core
 %{_bindir}/qemu-system-sh4
 %{_bindir}/qemu-system-sh4eb
-%{_datadir}/systemtap/tapset/qemu-system-sh4.stp
-%{_datadir}/systemtap/tapset/qemu-system-sh4-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-sh4-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-system-sh4eb.stp
-%{_datadir}/systemtap/tapset/qemu-system-sh4eb-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-sh4eb-simpletrace.stp
 %{_mandir}/man1/qemu-system-sh4.1*
 %{_mandir}/man1/qemu-system-sh4eb.1*
 
@@ -3073,24 +2656,15 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %files system-sparc-core
 %{_bindir}/qemu-system-sparc
 %{_bindir}/qemu-system-sparc64
-%{_datadir}/systemtap/tapset/qemu-system-sparc.stp
-%{_datadir}/systemtap/tapset/qemu-system-sparc-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-sparc-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-system-sparc64.stp
-%{_datadir}/systemtap/tapset/qemu-system-sparc64-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-sparc64-simpletrace.stp
 %{_mandir}/man1/qemu-system-sparc.1*
 %{_mandir}/man1/qemu-system-sparc64.1*
-%{_datadir}/%{name}/QEMU,tcx.bin
-%{_datadir}/%{name}/QEMU,cgthree.bin
+%{_datadir}/qemu/QEMU,tcx.bin
+%{_datadir}/qemu/QEMU,cgthree.bin
 
 
 %files system-tricore
 %files system-tricore-core
 %{_bindir}/qemu-system-tricore
-%{_datadir}/systemtap/tapset/qemu-system-tricore.stp
-%{_datadir}/systemtap/tapset/qemu-system-tricore-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-tricore-simpletrace.stp
 %{_mandir}/man1/qemu-system-tricore.1*
 
 
@@ -3098,22 +2672,16 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %files system-x86-core
 %{_bindir}/qemu-system-i386
 %{_bindir}/qemu-system-x86_64
-%{_libdir}/%{name}/accel-tcg-i386.so
-%{_libdir}/%{name}/accel-tcg-x86_64.so
-%{_datadir}/systemtap/tapset/qemu-system-i386.stp
-%{_datadir}/systemtap/tapset/qemu-system-i386-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-i386-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-system-x86_64.stp
-%{_datadir}/systemtap/tapset/qemu-system-x86_64-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-x86_64-simpletrace.stp
+%{_libdir}/qemu/accel-tcg-i386.so
+%{_libdir}/qemu/accel-tcg-x86_64.so
 %{_mandir}/man1/qemu-system-i386.1*
 %{_mandir}/man1/qemu-system-x86_64.1*
-%{_datadir}/%{name}/kvmvapic.bin
-%{_datadir}/%{name}/linuxboot.bin
-%{_datadir}/%{name}/multiboot.bin
-%{_datadir}/%{name}/multiboot_dma.bin
-%{_datadir}/%{name}/pvh.bin
-%{_datadir}/%{name}/qboot.rom
+%{_datadir}/qemu/kvmvapic.bin
+%{_datadir}/qemu/linuxboot.bin
+%{_datadir}/qemu/multiboot.bin
+%{_datadir}/qemu/multiboot_dma.bin
+%{_datadir}/qemu/pvh.bin
+%{_datadir}/qemu/qboot.rom
 %if %{need_qemu_kvm}
 %{_bindir}/qemu-kvm
 %{_mandir}/man1/qemu-kvm.1*
@@ -3124,12 +2692,6 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %files system-xtensa-core
 %{_bindir}/qemu-system-xtensa
 %{_bindir}/qemu-system-xtensaeb
-%{_datadir}/systemtap/tapset/qemu-system-xtensa.stp
-%{_datadir}/systemtap/tapset/qemu-system-xtensa-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-xtensa-simpletrace.stp
-%{_datadir}/systemtap/tapset/qemu-system-xtensaeb.stp
-%{_datadir}/systemtap/tapset/qemu-system-xtensaeb-log.stp
-%{_datadir}/systemtap/tapset/qemu-system-xtensaeb-simpletrace.stp
 %{_mandir}/man1/qemu-system-xtensa.1*
 %{_mandir}/man1/qemu-system-xtensaeb.1*
 # endif !tools_only
