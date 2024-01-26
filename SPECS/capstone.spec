@@ -1,6 +1,6 @@
 Name:           capstone
 Version:        4.0.2
-Release:        9%{?dist}
+Release:        10%{?dist}
 Summary:        A lightweight multi-platform, multi-architecture disassembly framework
 
 %global         gituser         aquynh
@@ -232,6 +232,9 @@ make check LD_LIBRARY_PATH="`pwd`"
 %{_javadir}/
 
 %changelog
+* Fri Sep 02 2022 Miroslav Rezanina <mrezanin@redhat.com> - 4.0.2-10
+- Import to CentOS 9 Stream / RHEL 9
+
 * Sat Feb 05 2022 Jiri Vanek <jvanek@redhat.com> - 4.0.2-9
 - Rebuilt for java-17-openjdk as system jdk
 

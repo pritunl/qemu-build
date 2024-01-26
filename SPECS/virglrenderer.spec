@@ -1,19 +1,14 @@
-%global gitdate 20230104
-%global gitversion 88b9fe3b
-
 Name:		virglrenderer
-Version:	0.10.4
-Release:	2.%{gitdate}git%{gitversion}%{?dist}
+Version:	1.0.1
+Release:	1%{?dist}
 
 Summary:	Virgl Rendering library.
 License:	MIT
 
-#VCS: git:https://gitlab.freedesktop.org/virgl/virglrenderer.git
-# git snapshot.  to recreate, run:
-# ./make-git-snapshot.sh `cat commitid`
-Source0:	virglrenderer-%{gitdate}.tar.xz
+Source0: https://gitlab.freedesktop.org/virgl/virglrenderer/-/archive/%{version}/virglrenderer-%{version}.tar.bz2
 
 BuildRequires:  meson
+BuildRequires:  gcc
 BuildRequires:	xorg-x11-util-macros
 BuildRequires:	libepoxy-devel
 BuildRequires:	mesa-libgbm-devel
@@ -21,6 +16,7 @@ BuildRequires:	mesa-libEGL-devel
 BuildRequires:	python3
 BuildRequires:	libdrm-devel
 BuildRequires:  libva-devel
+BuildRequires:  vulkan-loader-devel
 
 %description
 The virgil3d rendering library is a library used by
@@ -46,9 +42,9 @@ that can be used along with the mesa virgl
 driver to test virgl rendering without GL.
 
 %prep
-%setup -q -n %{name}-%{gitdate}
+%setup
 %build
-%meson -Dvideo=true
+%meson -Dvideo=true -Dvenus=true
 %meson_build
 
 %install
@@ -59,6 +55,7 @@ driver to test virgl rendering without GL.
 %files
 %license COPYING
 %{_libdir}/lib*.so.*
+%{_libexecdir}/virgl_render_server
 
 %files devel
 %dir %{_includedir}/virgl/
@@ -70,6 +67,15 @@ driver to test virgl rendering without GL.
 %{_bindir}/virgl_test_server
 
 %changelog
+* Wed Jan 10 2024 Fedora Release Monitoring <release-monitoring@fedoraproject.org> - 1.0.1-1
+- Update to 1.0.1 (#2257772)
+
+* Tue Sep 19 2023 Marc-André Lureau <marcandre.lureau@redhat.com> - 1.0.0-1
+- new version
+
+* Sat Jul 22 2023 Fedora Release Engineering <releng@fedoraproject.org> - 0.10.4-3.20230104git88b9fe3b
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_39_Mass_Rebuild
+
 * Sat Jan 21 2023 Fedora Release Engineering <releng@fedoraproject.org> - 0.10.4-2.20230104git88b9fe3b
 - Rebuilt for https://fedoraproject.org/wiki/Fedora_38_Mass_Rebuild
 

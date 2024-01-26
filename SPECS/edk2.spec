@@ -1,4 +1,4 @@
-            #GIT_CMT=63d08c648e2a0cf096573f3113c37b850a884fd5
+            #GIT_CMT=ef5920181835c138376d7e537b9e07e72bea3abb
 %global debug_package %{nil}
 %global python_ver python3
 
@@ -17,7 +17,7 @@
 # rpmbuild -ba buildrpm/ol9/edk2.spec
 #
 Name:		edk2
-Version:	20220628
+Version:	20230821
 Release:    1.el9
 Epoch:		30
 Summary:	UEFI Firmware for 64-bit virtual machines
@@ -25,8 +25,8 @@ Summary:	UEFI Firmware for 64-bit virtual machines
 Group:		Applications/Emulators
 License:	BSD and OpenSSL
 URL:		http://www.tianocore.org
-Source0: edk2-20220628.tar.bz2
-Source3:	OpenSSL-1.1.1n-d82e959e621a3d597f1e0d50ff8c2d8b96915fd7.tgz
+Source0: edk2-20230821.tar.bz2
+Source3:	OpenSSL-1.1.1v-9398e4038c27d5ef15111c61e984d4d2be8a52a8.tgz
 Source4:	BaseTools-BrotliCompress-f4153a09f87cbb9c826d8fc12c74642bb2d879ea.tgz
 Source5:	MdeModulePkg-BrotliCustomDecompressLib-f4153a09f87cbb9c826d8fc12c74642bb2d879ea.tgz
 Source6:	nasm
@@ -135,7 +135,7 @@ cp -a -- %{SOURCE4} .
 cp -a -- %{SOURCE5} .
 cp -a -- %{SOURCE6} .
 
-tar xfz OpenSSL-1.1.1n-d82e959e621a3d597f1e0d50ff8c2d8b96915fd7.tgz -C CryptoPkg/Library/OpensslLib/
+tar xfz OpenSSL-1.1.1v-9398e4038c27d5ef15111c61e984d4d2be8a52a8.tgz -C CryptoPkg/Library/OpensslLib/
 tar xfz BaseTools-BrotliCompress-f4153a09f87cbb9c826d8fc12c74642bb2d879ea.tgz -C BaseTools/Source/C/BrotliCompress
 tar xfz MdeModulePkg-BrotliCustomDecompressLib-f4153a09f87cbb9c826d8fc12c74642bb2d879ea.tgz -C MdeModulePkg/Library/BrotliCustomDecompressLib
 
@@ -230,9 +230,13 @@ for cfg in pure-efi pure-efi-debug secboot secboot-debug; do
 	if [ "$cfg" = secboot ] || [ "$cfg" = secboot-debug ]; then
 		# Enroll the Secureboot vars into the variable store template
 		Oracle/OvmfVarsMgr/ovmf-vars-mgr --var PK --write --vars-file OVMF/OVMF_VARS.${cfg}.fd < Oracle/SB/x86_64/PK.bin
+		Oracle/OvmfVarsMgr/ovmf-vars-mgr --var PKDefault --write --vars-file OVMF/OVMF_VARS.${cfg}.fd < Oracle/SB/x86_64/PK.bin
 		Oracle/OvmfVarsMgr/ovmf-vars-mgr --var KEK --write --vars-file OVMF/OVMF_VARS.${cfg}.fd < Oracle/SB/x86_64/KEK.bin
+		Oracle/OvmfVarsMgr/ovmf-vars-mgr --var KEKDefault --write --vars-file OVMF/OVMF_VARS.${cfg}.fd < Oracle/SB/x86_64/KEK.bin
 		Oracle/OvmfVarsMgr/ovmf-vars-mgr --var db --write --vars-file OVMF/OVMF_VARS.${cfg}.fd < Oracle/SB/x86_64/db.bin
+		Oracle/OvmfVarsMgr/ovmf-vars-mgr --var dbDefault --write --vars-file OVMF/OVMF_VARS.${cfg}.fd < Oracle/SB/x86_64/db.bin
 		Oracle/OvmfVarsMgr/ovmf-vars-mgr --var dbx --write --vars-file OVMF/OVMF_VARS.${cfg}.fd < Oracle/SB/x86_64/dbxupdate_x64-04-2021.bin
+		Oracle/OvmfVarsMgr/ovmf-vars-mgr --var dbxDefault --write --vars-file OVMF/OVMF_VARS.${cfg}.fd < Oracle/SB/x86_64/dbxupdate_x64-04-2021.bin
 	fi
 	rm -rf Build/Ovmf3264
 done
@@ -279,9 +283,13 @@ for cfg in pure-efi pure-efi-debug secboot secboot-debug; do
 	if [ "$cfg" = secboot ] || [ "$cfg" = secboot-debug ] ; then
 		# Enroll the Secureboot vars into the variable store template
 		Oracle/OvmfVarsMgr/aavmf-vars-mgr --var PK --write --vars-file AAVMF/AAVMF_VARS.${cfg}.fd < Oracle/SB/aarch64/PK.bin
+		Oracle/OvmfVarsMgr/aavmf-vars-mgr --var PKDefault --write --vars-file AAVMF/AAVMF_VARS.${cfg}.fd < Oracle/SB/aarch64/PK.bin
 		Oracle/OvmfVarsMgr/aavmf-vars-mgr --var KEK --write --vars-file AAVMF/AAVMF_VARS.${cfg}.fd < Oracle/SB/aarch64/KEK.bin
+		Oracle/OvmfVarsMgr/aavmf-vars-mgr --var KEKDefault --write --vars-file AAVMF/AAVMF_VARS.${cfg}.fd < Oracle/SB/aarch64/KEK.bin
 		Oracle/OvmfVarsMgr/aavmf-vars-mgr --var db --write --vars-file AAVMF/AAVMF_VARS.${cfg}.fd < Oracle/SB/aarch64/db.bin
+		Oracle/OvmfVarsMgr/aavmf-vars-mgr --var dbDefault --write --vars-file AAVMF/AAVMF_VARS.${cfg}.fd < Oracle/SB/aarch64/db.bin
 		Oracle/OvmfVarsMgr/aavmf-vars-mgr --var dbx --write --vars-file AAVMF/AAVMF_VARS.${cfg}.fd < Oracle/SB/aarch64/dbxupdate_arm64-04-2021.bin
+		Oracle/OvmfVarsMgr/aavmf-vars-mgr --var dbxDefault --write --vars-file AAVMF/AAVMF_VARS.${cfg}.fd < Oracle/SB/aarch64/dbxupdate_arm64-04-2021.bin
 	fi
         # Create smaller versions
         cat AAVMF/AAVMF_CODE.${cfg}.fd | head -c 2m > AAVMF/AAVMF_CODE_2M.${cfg}.fd
@@ -411,6 +419,16 @@ cp AAVMF/AAVMF_VARS.pure-efi.fd  %{buildroot}/usr/share/AAVMF/AAVMF_VARS.fd
 
 
 %changelog
+* Mon Aug 21 2023 Aaron Young <aaron.young@oracle.com>
+- Create new 20230821 release for OL9 which includes the following fixed CVEs:
+  {CVE-2019-14560}
+- Update to OpenSSL 1.1.1v which includes the following fixed CVEs:
+  {CVE-2023-3817} {CVE-2023-3446} {CVE-2023-2650} {CVE-2023-0465} {CVE-2023-0466} {CVE-2023-0464} {CVE-2023-0286} {CVE-2023-0215} {CVE-2022-4450} {CVE-2022-4304} {CVE-2022-2097} {CVE-2022-2068} {CVE-2022-1292} {CVE-2022-0778} {CVE-2021-4160} {CVE-2021-3712} {CVE-2021-3711} {CVE-2021-3450} {CVE-2021-3449} {CVE-2021-23841} {CVE-2021-23840} {CVE-2020-1971} {CVE-2020-1967} {CVE-2019-1551} {CVE-2019-1563} {CVE-2019-1549} {CVE-2019-1547} {CVE-2019-1552} {CVE-2019-1543} {CVE-2018-0734} {CVE-2018-0735}
+* Tue Jun 13 2023 Aaron Young <aaron.young@oracle.com>
+- Create new 20230613.cvm release for OL9
+* Mon Feb 27 2023 Aaron Young <aaron.young@oracle.com>
+- Create new 20230227.cvm release for OL9 which includes the following fixed CVEs:
+  {CVE-2021-38578}
 * Tue Jun 28 2022 Aaron Young <aaron.young@oracle.com>
 - Create new 20220628 release for OL9
 * Wed Jun 01 2022 Aaron Young <aaron.young@oracle.com>

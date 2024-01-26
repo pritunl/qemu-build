@@ -1,50 +1,30 @@
 Name:           virtiofsd
-Version:        1.5.1
+Version:        1.7.2
 Release:        1%{?dist}
 Summary:        Virtio-fs vhost-user device daemon (Rust version)
 
 # Upstream license specification: Apache-2.0 AND BSD-3-Clause
-License:        ASL 2.0 and BSD
+License:        Apache-2.0 AND BSD-3-Clause
 URL:            https://gitlab.com/virtio-fs/virtiofsd
-Source:         %{crates_source}
-Patch:          virtiofsd-relax-env_logger-dep.diff
+Source0:        %{crates_source}
+Source1:        %{name}-%{version}-vendor.tar.gz
 
-ExclusiveArch:  %{rust_arches}
-# Some of our deps (i.e. vm-memory) are not available on 32 bits targets.
-ExcludeArch:    i686
-
-BuildRequires:  rust-packaging >= 21
+ExclusiveArch:  x86_64 aarch64 s390x
+BuildRequires:  rust-toolset
 BuildRequires:  libcap-ng-devel
 BuildRequires:  libseccomp-devel
-Requires:       pritunl-qemu-common
-Provides:       vhostuser-backend(fs)
-Conflicts:      qemu-virtiofsd
+Provides: virtiofsd
+Obsoletes: qemu-virtiofsd = 17:6.2.0
+# Both qemu-virtiofsd and virtiofsd ship the same binary
+Conflicts: qemu-virtiofsd = 17:6.2.0
 
 %description
 %{summary}.
 
 %prep
-%autosetup -n %{name}-%{version_no_tilde} -p1
-set -eu
-/usr/bin/mkdir -p .cargo
-cat > .cargo/config << EOF
-[build]
-rustc = "/usr/bin/rustc"
-rustdoc = "/usr/bin/rustdoc"
+%setup -q -n %{name}-%{version}
 
-[env]
-CFLAGS = "-O2 -flto=auto -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-D_FORTIFY_SOURCE=2 -Wp,-D_GLIBCXX_ASSERTIONS -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -fstack-protector-strong -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -m64 -march=x86-64-v2 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection"
-CXXFLAGS = "-O2 -flto=auto -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-D_FORTIFY_SOURCE=2 -Wp,-D_GLIBCXX_ASSERTIONS -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -fstack-protector-strong -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -m64 -march=x86-64-v2 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection"
-LDFLAGS = "-Wl,-z,relro -Wl,--as-needed  -Wl,-z,now -specs=/usr/lib/rpm/redhat/redhat-hardened-ld -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1 "
-
-[install]
-root = "/home/opc/rpmbuild/BUILDROOT/%{NAME}-%{VERSION}-%{RELEASE}.x86_64/usr"
-
-[term]
-verbose = true
-EOF
-/usr/bin/rm -f Cargo.lock
-/usr/bin/rm -f Cargo.toml.orig
+%cargo_prep -V 1
 
 %build
 %cargo_build
@@ -61,25 +41,31 @@ install -D -p -m 0644 50-qemu-virtiofsd.json %{buildroot}%{_datadir}/qemu/vhost-
 %{_datadir}/qemu/vhost-user/50-qemu-virtiofsd.json
 
 %changelog
-* Thu Feb 09 2023 Sergio Lopez <slp@redhat.com> - 1.5.1-1
-- Update to version 1.5.1
+* Tue Jul 18 2023 German Maglione <gmaglione@redhat.com> - 1.7.2-1
+- Update to upstream version 1.7.2 [bz#2233498]
 
-* Sun Feb 05 2023 Fabio Valentini <decathorpe@gmail.com> - 1.4.0-3
-- Rebuild for fixed frame pointer compiler flags in Rust RPM macros.
+* Tue Jul 18 2023 German Maglione <gmaglione@redhat.com> - 1.7.0-1
+- Update to upstream version 1.7.0 [bz#2222221]
 
-* Sat Jan 21 2023 Fedora Release Engineering <releng@fedoraproject.org> - 1.4.0-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_38_Mass_Rebuild
+* Thu Dec 22 2022 German Maglione <gmaglione@redhat.com> - 1.5.0-1
+- Update to upstream version 1.5.0 [bz#2123070]
 
-* Tue Jul 26 2022 Sergio Lopez <slp@redhat.com> - 1.4.0-1
-- Update to version 1.4.0
+* Wed Jul 27 2022 Sergio Lopez <slp@redhat.com> - 1.4.0-1
+- Update to upstream version 1.4.0 [bz#2111356]
 
-* Sat Jul 23 2022 Fedora Release Engineering <releng@fedoraproject.org> - 1.3.0-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_37_Mass_Rebuild
+* Mon Jun 27 2022 Sergio Lopez <slp@redhat.com> - 1.3.0-1
+- Update to upstream version 1.3.0 [bz#2077854]
 
-* Mon Jun 06 2022 Sergio Lopez <slp@redhat.com> - 1.3.0-1
-- Update to version 1.3.0
-- Build on all rust arches except i686 (32-bit targets are not supported)
+* Fri Feb 18 2022 Sergio Lopez <slp@redhat.com> - 1.1.0-3
+- Restore "Provides: virtiofsd", despite rpmdeplint complains, to
+  satisfy qemu-kvm dependencies
 
-* Mon May 16 2022 Sergio Lopez <slp@redhat.com> - 1.2.0-1
+* Fri Jan 28 2022 Sergio Lopez <slp@redhat.com> - 1.1.0-2
+- Explicitly declare the conflict with qemu-virtiofsd
+- Remove explicit library dependencies
+- Remove useless "Provides: virtiosfd"
+- Remove Windows binaries from vendor tarball
+
+* Thu Jan 27 2022 Sergio Lopez <slp@redhat.com> - 1.1.0-1
 - Initial package
 

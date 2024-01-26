@@ -1,15 +1,18 @@
 Name:		libnfs
-Version:	4.0.0
-Release:	1%{?dist}
+Version:	5.0.2
+Release:	2%{?dist}
 Summary:	Client library for accessing NFS shares over a network
-# The library is licensed as LGPLv2+, the protocol definition is BSD
-License:	LGPLv2+ and BSD
+# The library is licensed as LGPL-2.1-or-later
+# The protocol definition is BSD-2-Clause
+# The utility and examples are GPL-3.0-or-later
+License:	LGPL-2.1-or-later AND BSD-2-Clause AND GPL-3.0-or-later
 URL:		https://github.com/sahlberg/libnfs
 Source0:	%{url}/archive/%{name}-%{version}/%{name}-%{version}.tar.gz
 
 BuildRequires:	gcc
 BuildRequires:	automake
 BuildRequires:	libtool
+BuildRequires:	make
 
 %description
 The libnfs package contains a library of functions for accessing NFSv2
@@ -23,7 +26,7 @@ functions.
 Summary:	Development files for libnfs
 # The library is licensed as LGPLv2+, the protocol definition is BSD
 # and the example source code is GPLv3+.
-License:	LGPLv2+ and BSD and GPLv3+
+License:	LGPL-2.1-or-later AND BSD-2-Clause AND GPL-3.0-or-later
 
 Requires:	%{name}%{?_isa} = %{version}-%{release}
 
@@ -34,7 +37,7 @@ developing applications that use libnfs.
 
 %package utils
 Summary:	Utilities for accessing NFS servers
-License:	GPLv3+
+License:	GPL-3.0-or-later
 
 Requires:	%{name}%{?_isa} = %{version}-%{release}
 
@@ -62,7 +65,7 @@ rm -f %{buildroot}%{_libdir}/*.la
 %ldconfig_scriptlets
 
 %files
-%{_libdir}/libnfs.so.13*
+%{_libdir}/libnfs.so.14*
 %doc README
 %license COPYING
 %license LICENCE-*.txt
@@ -78,6 +81,33 @@ rm -f %{buildroot}%{_libdir}/*.la
 %{_mandir}/man1/nfs-*.1*
 
 %changelog
+* Thu Jun 01 2023 Xavier Bachelot <xavier@bachelot.org> - 5.0.2-2
+- Convert License: to SPDX
+
+* Mon Jan 30 2023 Xavier Bachelot <xavier@bachelot.org> - 5.0.2-1
+- Update to 5.0.2 (RHBZ#2047688)
+
+* Thu Jan 19 2023 Fedora Release Engineering <releng@fedoraproject.org> - 4.0.0-8
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_38_Mass_Rebuild
+
+* Thu Jul 21 2022 Fedora Release Engineering <releng@fedoraproject.org> - 4.0.0-7
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_37_Mass_Rebuild
+
+* Thu Jan 20 2022 Fedora Release Engineering <releng@fedoraproject.org> - 4.0.0-6
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_36_Mass_Rebuild
+
+* Thu Jul 22 2021 Fedora Release Engineering <releng@fedoraproject.org> - 4.0.0-5
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_35_Mass_Rebuild
+
+* Tue Jan 26 2021 Fedora Release Engineering <releng@fedoraproject.org> - 4.0.0-4
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_34_Mass_Rebuild
+
+* Tue Jul 28 2020 Fedora Release Engineering <releng@fedoraproject.org> - 4.0.0-3
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_33_Mass_Rebuild
+
+* Wed Jan 29 2020 Fedora Release Engineering <releng@fedoraproject.org> - 4.0.0-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_32_Mass_Rebuild
+
 * Wed Sep 11 2019 Leigh Scott <leigh123linux@googlemail.com> - 4.0.0-1
 - Update to 4.0.0
 

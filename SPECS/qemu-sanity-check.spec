@@ -8,7 +8,7 @@
 
 Name:           qemu-sanity-check
 Version:        1.1.6
-Release:        9%{?dist}
+Release:        11%{?dist}
 Summary:        Simple qemu and Linux kernel sanity checker
 License:        GPLv2+
 
@@ -26,25 +26,38 @@ Source1:        http://people.redhat.com/~rjones/qemu-sanity-check/files/%{name}
 Source2:        libguestfs.keyring
 
 # Patches (all upstream).
-Patch1:         0001-tests-run-qemu-sanity-check-Add-v-flag-for-verbose-m.patch
-Patch2:         0002-Add-cpu-option.patch
-Patch3:         0003-Set-RAM-to-something-larger-than-qemu-default.patch
-Patch4:         0004-Set-console-on-ARM-and-s390.patch
+Patch:          0001-tests-run-qemu-sanity-check-Add-v-flag-for-verbose-m.patch
+Patch:          0002-Add-cpu-option.patch
+Patch:          0003-Set-RAM-to-something-larger-than-qemu-default.patch
+Patch:          0004-Set-console-on-ARM-and-s390.patch
+Patch:          0005-Ignore-user-added-local-files-such-as-.-localconfigu.patch
+Patch:          0006-Move-the-tests-into-a-subdirectory.patch
+Patch:          0007-Move-the-source-files-into-a-subdirectory.patch
+Patch:          0008-Attempt-RB_POWER_OFF-before-reboot.patch
+Patch:          0009-Make-sure-that-qemu-sanity-check-v-displays-kernel-o.patch
+Patch:          0010-Error-out-if-any-kernel-panic-is-seen.patch
 
 # To verify the tarball signature.
 BuildRequires:  gnupg2
 
 BuildRequires:  make
 BuildRequires:  gcc
+BuildRequires:  autoconf
+BuildRequires:  automake
 
 # For building manual pages.
-BuildRequires:   /usr/bin/perldoc
+BuildRequires:  /usr/bin/perldoc
 
 # For building the initramfs.
 BuildRequires:  cpio
 BuildRequires:  glibc-static
 
 # For testing.
+%if !0%{?rhel}
+BuildRequires:  qemu
+%else
+BuildRequires:  qemu-kvm
+%endif
 BuildRequires:  kernel
 
 # For complicated reasons, this is required so that
@@ -111,6 +124,7 @@ as %{name} except that this package does not depend on qemu or kernel.
 %prep
 %{gpgverify} --keyring='%{SOURCE2}' --signature='%{SOURCE1}' --data='%{SOURCE0}'
 %autosetup -p1
+autoreconf -fi
 
 
 %build
@@ -129,6 +143,15 @@ as %{name} except that this package does not depend on qemu or kernel.
 make %{?_smp_mflags}
 
 
+%check
+%ifarch %{test_arches}
+make check || {
+  cat test-suite.log
+  exit 1
+}
+%endif
+
+
 %install
 make DESTDIR=$RPM_BUILD_ROOT install
 
@@ -145,6 +168,12 @@ make DESTDIR=$RPM_BUILD_ROOT install
 
 
 %changelog
+* Fri Sep 01 2023 Richard W.M. Jones <rjones@redhat.com> - 1.1.6-11
+- Rebase with all latest upstream patches
+
+* Fri Jul 21 2023 Fedora Release Engineering <releng@fedoraproject.org> - 1.1.6-10
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_39_Mass_Rebuild
+
 * Thu May 18 2023 Richard W.M. Jones <rjones@redhat.com> - 1.1.6-9
 - Add package to EPEL 9, keep it synched with Fedora Rawhide.
 - Use qemu-kvm package on EPEL.
