@@ -73,6 +73,7 @@ wget https://yum.oracle.com/repo/OracleLinux/OL9/appstream/x86_64/getPackageSour
 
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/39/Everything/source/tree/Packages/c/celt051-0.5.1.3-26.fc39.src.rpm
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/v/virglrenderer-1.0.1-1.fc40.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/r/rutabaga-gfx-ffi-0.1.2-2.20230913gitc3ad0e43e.fc40.src.rpm
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-11.fc40.src.rpm
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/source/tree/Packages/q/qemu-8.2.0-2.fc40.src.rpm
 
@@ -92,6 +93,7 @@ rpm -K meson-0.63.3-1.el9.src.rpm
 rpm -K virtiofsd-1.7.2-1.el9.src.rpm
 rpm -K celt051-0.5.1.3-26.fc39.src.rpm
 rpm -K virglrenderer-1.0.1-1.fc40.src.rpm
+rpm -K rutabaga-gfx-ffi-0.1.2-2.20230913gitc3ad0e43e.fc40.src.rpm
 rpm -K qemu-sanity-check-1.1.6-11.fc40.src.rpm
 rpm -K qemu-8.2.0-2.fc40.src.rpm
 
@@ -110,6 +112,7 @@ sudo rpm -i meson-0.63.3-1.el9.src.rpm
 sudo rpm -i virtiofsd-1.7.2-1.el9.src.rpm
 sudo rpm -i celt051-0.5.1.3-26.fc39.src.rpm
 sudo rpm -i virglrenderer-1.0.1-1.fc40.src.rpm
+sudo rpm -i rutabaga-gfx-ffi-0.1.2-2.20230913gitc3ad0e43e.fc40.src.rpm
 sudo rpm -i qemu-sanity-check-1.1.6-11.fc40.src.rpm
 sudo rpm -i qemu-8.2.0-2.fc40.src.rpm
 
@@ -159,6 +162,11 @@ sudo yum-builddep -y ~/rpmbuild/SPECS/virglrenderer.spec
 rpmbuild -ba virglrenderer.spec
 
 sudo yum -y install ~/rpmbuild/RPMS/x86_64/virglrenderer-*.el9.x86_64.rpm
+
+sudo yum-builddep -y ~/rpmbuild/SPECS/rutabaga-gfx-ffi.spec
+rpmbuild -ba rutabaga-gfx-ffi.spec
+
+sudo yum -y install ~/rpmbuild/RPMS/x86_64/rutabaga-gfx-ffi-*.el9.x86_64.rpm
 
 sudo yum-builddep -y ~/rpmbuild/SPECS/liburing.spec
 rpmbuild -ba liburing.spec
