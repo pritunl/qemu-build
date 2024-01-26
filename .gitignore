@@ -11,3 +11,4 @@ Thumbs.db
 *.egg-info
 .sass-cache
 /SOURCES/qemu-*.tar.xz
+/SOURCES/OpenSSL-*.tgz
