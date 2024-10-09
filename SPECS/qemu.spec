@@ -18,11 +18,6 @@
 %define requires_block_blkio Requires: %{name}-block-blkio = %{evr}
 %define requires_block_iscsi Requires: %{name}-block-iscsi = %{evr}
 %define requires_audio_pa Requires: %{name}-audio-pa = %{evr}
-%if %{have_sdl}
-%define requires_audio_sdl Requires: %{name}-audio-sdl = %{evr}
-%else
-%define requires_audio_sdl %{nil}
-%endif
 %define requires_device_usb_host Requires: %{name}-device-usb-host = %{evr}
 %define requires_device_usb_redirect Requires: %{name}-device-usb-redirect = %{evr}
 %if %{have_gtk}
@@ -69,7 +64,6 @@
 %{requires_block_iscsi} \
 %{requires_audio_dbus} \
 %{requires_audio_pa} \
-%{requires_audio_sdl} \
 %{requires_ui_gtk} \
 %{requires_ui_sdl} \
 %{requires_ui_egl_headless} \
@@ -311,15 +305,6 @@ Summary: QEMU PulseAudio audio driver
 Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
 %description audio-pa
 This package provides the additional PulseAudio audio driver for QEMU.
-
-
-%if %{have_sdl}
-%package audio-sdl
-Summary: QEMU SDL audio driver
-Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
-%description audio-sdl
-This package provides the additional SDL audio driver for QEMU.
-%endif
 
 
 %if %{have_opengl}
@@ -1003,12 +988,6 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 %files audio-pa
 %{_libdir}/qemu/audio-pa.so
-
-
-%if %{have_sdl}
-%files audio-sdl
-%{_libdir}/qemu/audio-sdl.so
-%endif
 
 
 %files ui-dbus
