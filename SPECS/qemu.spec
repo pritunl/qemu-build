@@ -97,7 +97,7 @@
 
 
 Summary: QEMU is a machine emulator and virtualizer
-Name: pritunl-qemu
+Name: qemu
 Version: 9.1.0
 Release: 12%{?rcrel}%{?dist}
 Epoch: 18
