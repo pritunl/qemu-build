@@ -1,0 +1,69 @@
+From e0cd93ad3979388db733852df6d1cdb60f3f931a Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Mon, 29 Jan 2024 19:40:19 +0000
+Subject: [PATCH 13/13] src: Look for kernels in /lib/modules/*/vmlinuz
+
+On Fedora 40 and above when using systemd-boot, there are no more
+kernels in /boot.
+---
+ README                   | 3 ++-
+ qemu-sanity-check.pod.in | 3 ++-
+ src/qemu-sanity-check.in | 6 ++++--
+ 3 files changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/README b/README
+index 3e67291..1b2a57d 100644
+--- a/README
++++ b/README
+@@ -5,7 +5,8 @@ to test the Linux kernel and/or qemu to make sure they are working.
+ Please read the qemu-sanity-check(1) man page, but basic usage is very
+ simple.  You probably want to use one of the following commands:
+ 
+-Test qemu on path against most recent installed Linux kernel in /boot:
++Test qemu on path against most recent installed Linux kernel in /boot
++(or /lib/modules/VERSION/vmlinuz on some distros):
+ 
+   qemu-sanity-check
+ 
+diff --git a/qemu-sanity-check.pod.in b/qemu-sanity-check.pod.in
+index 7c870ac..e28065c 100644
+--- a/qemu-sanity-check.pod.in
++++ b/qemu-sanity-check.pod.in
+@@ -19,7 +19,8 @@ You can use the command on its own:
+  qemu-sanity-check
+ 
+ In this case, the script will look for a suitable qemu binary on the
+-C<$PATH> and the latest Linux kernel in F</boot> and try to boot that
++C<$PATH> and the latest Linux kernel in F</boot> (or
++F</lib/modules/VERSION/vmlinuz> on some distros) and try to boot that
+ kernel on that qemu.
+ 
+ You can also specify a qemu binary or a Linux kernel (either or both
+diff --git a/src/qemu-sanity-check.in b/src/qemu-sanity-check.in
+index 719261a..0c96485 100644
+--- a/src/qemu-sanity-check.in
++++ b/src/qemu-sanity-check.in
+@@ -152,16 +152,18 @@ fi
+ 
+ # Locate kernel if not specified.
+ if [ -z "$kernel" ]; then
++    shopt -s nullglob
+     if [ "$verbose" = "yes" ]; then
+         echo "all kernels:"
+-        ls -1dvr /boot/vmlinuz-*.$arch*
++        ls -1dvr /lib/modules/*/vmlinuz /boot/vmlinuz-*.$arch*
+     fi
+-    kernel="$(ls -1dvr /boot/vmlinuz-*.$arch* 2>/dev/null | grep -v xen | head -1)"
++    kernel="$(ls -1dvr /lib/modules/*/vmlinuz /boot/vmlinuz-*.$arch* 2>/dev/null | grep -v xen | head -1)"
+     if [ -z "$kernel" ]; then
+         echo "$0: cannot find a Linux kernel in /boot"
+         echo "Choose a kernel to test using --kernel=/path/to/vmlinuz"
+         exit 2
+     fi
++    shopt -u nullglob
+ fi
+ if [ ! -r "$kernel" ]; then
+     echo "$0: kernel $kernel is not readable"
+-- 
+2.43.0
+

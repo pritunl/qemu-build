@@ -1,7 +1,7 @@
 From 8d7e14545801c2341055bda9dfe0239e9279ce10 Mon Sep 17 00:00:00 2001
 From: "Richard W.M. Jones" <rjones@redhat.com>
 Date: Fri, 1 Sep 2023 13:38:53 +0100
-Subject: [PATCH 08/10] Attempt RB_POWER_OFF before reboot.
+Subject: [PATCH 08/13] Attempt RB_POWER_OFF before reboot.
 
 Try a clean power off before using reboot.
 
@@ -50,5 +50,5 @@ index ef7011c..7836158 100644
    fprintf (stderr, "expect to see a kernel panic below, that is normal\n");
    fprintf (stderr, "\n");
 -- 
-2.41.0
+2.43.0
 

@@ -1,15 +1,14 @@
 Name:		virglrenderer
-Version:	1.0.1
+Version:	1.1.0
 Release:	1%{?dist}
 
 Summary:	Virgl Rendering library.
 License:	MIT
 
-Source0: https://gitlab.freedesktop.org/virgl/virglrenderer/-/archive/%{version}/virglrenderer-%{version}.tar.bz2
+Source:         https://gitlab.freedesktop.org/virgl/virglrenderer/-/archive/%{version}/virglrenderer-%{version}.tar.bz2
 
 BuildRequires:  meson
 BuildRequires:  gcc
-BuildRequires:	xorg-x11-util-macros
 BuildRequires:	libepoxy-devel
 BuildRequires:	mesa-libgbm-devel
 BuildRequires:	mesa-libEGL-devel
@@ -42,7 +41,8 @@ that can be used along with the mesa virgl
 driver to test virgl rendering without GL.
 
 %prep
-%setup
+%autosetup -p1
+
 %build
 %meson -Dvideo=true -Dvenus=true
 %meson_build
@@ -50,23 +50,36 @@ driver to test virgl rendering without GL.
 %install
 %meson_install
 
-%ldconfig_scriptlets
-
 %files
 %license COPYING
-%{_libdir}/lib*.so.*
+%{_libdir}/libvirglrenderer.so.1{,.*}
 %{_libexecdir}/virgl_render_server
 
 %files devel
 %dir %{_includedir}/virgl/
 %{_includedir}/virgl/*
-%{_libdir}/lib*.so
-%{_libdir}/pkgconfig/*.pc
+%{_libdir}/libvirglrenderer.so
+%{_libdir}/pkgconfig/virglrenderer.pc
 
 %files test-server
 %{_bindir}/virgl_test_server
 
 %changelog
+* Tue Sep 10 2024 Marc-André Lureau <marcandre.lureau@redhat.com> - 1.1.0-1
+- new version
+
+* Sun Sep 01 2024 Davide Cavalca <dcavalca@fedoraproject.org> - 1.0.1-5
+- Update spec to the latest guidelines
+
+* Tue Aug 06 2024 Sandro Bonazzola <sbonazzo@redhat.com> - 1.0.1-4
+- Drop xorg-x11-util-macros dependency as it's not needed anymore
+
+* Sat Jul 20 2024 Fedora Release Engineering <releng@fedoraproject.org> - 1.0.1-3
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_41_Mass_Rebuild
+
+* Sat Jan 27 2024 Fedora Release Engineering <releng@fedoraproject.org> - 1.0.1-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_40_Mass_Rebuild
+
 * Wed Jan 10 2024 Fedora Release Monitoring <release-monitoring@fedoraproject.org> - 1.0.1-1
 - Update to 1.0.1 (#2257772)
 

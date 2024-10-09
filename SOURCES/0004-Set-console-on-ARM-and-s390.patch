@@ -1,7 +1,7 @@
 From 897c61498660017e91b16acc6817f99fc09cf39e Mon Sep 17 00:00:00 2001
 From: "Richard W.M. Jones" <rjones@redhat.com>
 Date: Fri, 25 Sep 2020 10:01:33 +0100
-Subject: [PATCH 04/10] Set console on ARM and s390.
+Subject: [PATCH 04/13] Set console on ARM and s390.
 
 ---
  qemu-sanity-check.in | 7 ++++++-
@@ -44,5 +44,5 @@ index 5066ebc..79372ed 100644
  if [ "$verbose" = "yes" ]; then
      echo "${argv[@]}"
 -- 
-2.41.0
+2.43.0
 

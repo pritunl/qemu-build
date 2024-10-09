@@ -1,7 +1,7 @@
 From 6331d12bc4814a27579b96acc299314d278be4dc Mon Sep 17 00:00:00 2001
 From: "Richard W.M. Jones" <rjones@redhat.com>
 Date: Fri, 25 Sep 2020 10:00:23 +0100
-Subject: [PATCH 03/10] Set RAM to something larger than qemu default.
+Subject: [PATCH 03/13] Set RAM to something larger than qemu default.
 
 The qemu default is quite small - 128MB - so may be unsuitable on many
 architectures even though we are only booting a kernel and trivial
@@ -33,5 +33,5 @@ index 5a3594a..5066ebc 100644
  argv[$((i++))]="-serial"
  argv[$((i++))]="file:$test_output"
 -- 
-2.41.0
+2.43.0
 

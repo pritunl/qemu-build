@@ -1,7 +1,7 @@
 From e7fcb0e3e50797315086c40bc2daf43a82641337 Mon Sep 17 00:00:00 2001
 From: "Richard W.M. Jones" <rjones@redhat.com>
 Date: Fri, 1 Sep 2023 13:42:37 +0100
-Subject: [PATCH 06/10] Move the tests into a subdirectory
+Subject: [PATCH 06/13] Move the tests into a subdirectory
 
 ---
  Makefile.am                                   | 15 ++-------
@@ -227,5 +227,5 @@ index fd2b5ca..704b0f1 100755
  if [ $r -ne 1 ]; then
      echo "$0: unexpected exit code $r (expecting 1)"
 -- 
-2.41.0
+2.43.0
 

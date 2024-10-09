@@ -1,0 +1,52 @@
+From e1fe3cabd5892ea49ed08333306c50d61aca38ca Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Mon, 29 Jan 2024 19:36:50 +0000
+Subject: [PATCH 12/13] docs: Use F<> around file references in the manual
+
+---
+ qemu-sanity-check.pod.in | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/qemu-sanity-check.pod.in b/qemu-sanity-check.pod.in
+index 7ef3200..7c870ac 100644
+--- a/qemu-sanity-check.pod.in
++++ b/qemu-sanity-check.pod.in
+@@ -19,7 +19,7 @@ You can use the command on its own:
+  qemu-sanity-check
+ 
+ In this case, the script will look for a suitable qemu binary on the
+-C<$PATH> and the latest Linux kernel in C</boot> and try to boot that
++C<$PATH> and the latest Linux kernel in F</boot> and try to boot that
+ kernel on that qemu.
+ 
+ You can also specify a qemu binary or a Linux kernel (either or both
+@@ -88,14 +88,14 @@ You can also use I<--cpu=> to let qemu pick the default.
+ 
+ =item B<--initrd>=INITRD
+ 
+-Use the initramfs image named C<INITRD> instead of the default.
++Use the initramfs image named F<INITRD> instead of the default.
+ 
+ =item B<-k> VMLINUZ
+ 
+ =item B<--kernel>=VMLINUZ
+ 
+-Use the kernel image C<VMLINUZ> instead of searching for the latest
+-kernel installed in C</boot>.
++Use the kernel image F<VMLINUZ> instead of searching for the latest
++kernel installed in F</boot>.
+ 
+ =item B<-m> MACHINE
+ 
+@@ -109,7 +109,7 @@ I<--machine=> to let qemu pick the default.
+ 
+ =item B<--qemu>=QEMU
+ 
+-Use the qemu (or KVM) binary C<QEMU> instead of searching C<$PATH> for
++Use the qemu (or KVM) binary F<QEMU> instead of searching C<$PATH> for
+ a suitable binary.
+ 
+ =item B<-t> TIMEOUT
+-- 
+2.43.0
+

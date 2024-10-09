@@ -1,0 +1,48 @@
+From 0377e9ef5c5aad13a2b4481863b9af3b55719114 Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Mon, 29 Jan 2024 19:08:44 +0000
+Subject: [PATCH 11/13] src: Add more information about kernel and qemu search
+ to --verbose
+
+---
+ src/qemu-sanity-check.in | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu-sanity-check.in b/src/qemu-sanity-check.in
+index ec6e24f..719261a 100644
+--- a/src/qemu-sanity-check.in
++++ b/src/qemu-sanity-check.in
+@@ -1,7 +1,8 @@
+ #!/bin/bash
+ # -*- shell-script -*-
+ # qemu-sanity-check
+-# Copyright (C) 2013-2023 Red Hat Inc.
++# Copyright (C) 2013-2024 Red Hat Inc.
++# @configure_input@
+ #
+ # This program is free software; you can redistribute it and/or modify
+ # it under the terms of the GNU General Public License as published by
+@@ -151,6 +152,10 @@ fi
+ 
+ # Locate kernel if not specified.
+ if [ -z "$kernel" ]; then
++    if [ "$verbose" = "yes" ]; then
++        echo "all kernels:"
++        ls -1dvr /boot/vmlinuz-*.$arch*
++    fi
+     kernel="$(ls -1dvr /boot/vmlinuz-*.$arch* 2>/dev/null | grep -v xen | head -1)"
+     if [ -z "$kernel" ]; then
+         echo "$0: cannot find a Linux kernel in /boot"
+@@ -165,6 +170,9 @@ fi
+ 
+ # Locate qemu if not specified.
+ if [ -z "$qemu" ]; then
++    if [ "$verbose" = "yes" ]; then
++        echo "all qemus:" @QEMU_LIST@
++    fi
+     for q in @QEMU_LIST@; do
+         if "$q" --help >/dev/null 2>&1; then
+             qemu="$q"
+-- 
+2.43.0
+

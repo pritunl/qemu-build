@@ -1,3 +1,0 @@
-#!ipxe
-imgexec file:rhcert-script.ipxe
-
