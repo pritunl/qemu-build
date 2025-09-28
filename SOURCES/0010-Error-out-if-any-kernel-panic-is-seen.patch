@@ -1,7 +1,7 @@
 From 0ee9b4a35b979b219528b2a9694bd8e19e2d5f95 Mon Sep 17 00:00:00 2001
 From: "Richard W.M. Jones" <rjones@redhat.com>
 Date: Fri, 1 Sep 2023 14:23:54 +0100
-Subject: [PATCH 10/13] Error out if any kernel panic is seen
+Subject: [PATCH 10/14] Error out if any kernel panic is seen
 
 If, even after reaching userspace, we see a kernel panic, report an
 error.  (I might revert this change if it causes problems.)
@@ -32,5 +32,5 @@ index 56e93c2..ec6e24f 100644
  if ! grep -sq "initrd started up OK" "$test_output"; then
      cat "$test_output"
 -- 
-2.43.0
+2.46.0
 

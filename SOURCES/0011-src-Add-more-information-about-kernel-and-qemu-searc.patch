@@ -1,7 +1,7 @@
 From 0377e9ef5c5aad13a2b4481863b9af3b55719114 Mon Sep 17 00:00:00 2001
 From: "Richard W.M. Jones" <rjones@redhat.com>
 Date: Mon, 29 Jan 2024 19:08:44 +0000
-Subject: [PATCH 11/13] src: Add more information about kernel and qemu search
+Subject: [PATCH 11/14] src: Add more information about kernel and qemu search
  to --verbose
 
 ---
@@ -44,5 +44,5 @@ index ec6e24f..719261a 100644
          if "$q" --help >/dev/null 2>&1; then
              qemu="$q"
 -- 
-2.43.0
+2.46.0
 

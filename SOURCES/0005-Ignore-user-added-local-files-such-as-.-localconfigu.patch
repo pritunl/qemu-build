@@ -1,7 +1,7 @@
 From dadf21727ffb9af20dcfc1858e5a3bef2795b917 Mon Sep 17 00:00:00 2001
 From: "Richard W.M. Jones" <rjones@redhat.com>
 Date: Thu, 18 May 2023 13:36:31 +0100
-Subject: [PATCH 05/13] Ignore user-added local files such as ./localconfigure
+Subject: [PATCH 05/14] Ignore user-added local files such as ./localconfigure
 
 ---
  .gitignore | 1 +
@@ -20,5 +20,5 @@ index c2f3c39..edcd1ac 100644
  /initrd
  /install-sh
 -- 
-2.43.0
+2.46.0
 

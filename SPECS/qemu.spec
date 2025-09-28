@@ -9,6 +9,18 @@
 %global have_opengl 1
 %global have_virgl 1
 %global have_rutabaga 0
+%global have_clang 1
+%global have_safe_stack 0
+
+%if %{have_clang}
+%global toolchain clang
+%ifarch x86_64
+%global have_safe_stack 1
+%endif
+%else
+%global toolchain gcc
+%global cc_suffix .gcc
+%endif
 
 %global target_list x86_64-softmmu
 %global firmwaredirs "%{_datadir}/qemu-firmware:%{_datadir}/ipxe/qemu:%{_datadir}/seavgabios:%{_datadir}/seabios"
@@ -16,8 +28,8 @@
 
 %define evr %{epoch}:%{version}-%{release}
 %define requires_block_blkio Requires: %{name}-block-blkio = %{evr}
-%define requires_block_iscsi Requires: %{name}-block-iscsi = %{evr}
 %define requires_audio_pa Requires: %{name}-audio-pa = %{evr}
+%define requires_device_uefi_vars Requires: %{name}-device-uefi-vars = %{evr}
 %define requires_device_usb_host Requires: %{name}-device-usb-host = %{evr}
 %define requires_device_usb_redirect Requires: %{name}-device-usb-redirect = %{evr}
 %if %{have_gtk}
@@ -61,7 +73,6 @@
 
 %global requires_all_modules \
 %{requires_block_blkio} \
-%{requires_block_iscsi} \
 %{requires_audio_dbus} \
 %{requires_audio_pa} \
 %{requires_ui_gtk} \
@@ -78,6 +89,7 @@
 %{requires_device_display_virtio_vga} \
 %{requires_device_display_virtio_vga_gl} \
 %{requires_device_display_virtio_vga_rutabaga} \
+%{requires_device_uefi_vars} \
 %{requires_device_usb_host} \
 %{requires_device_usb_redirect} \
 %{requires_package_qemu_pr_helper} \
@@ -92,7 +104,7 @@
 
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu
-Version: 9.1.0
+Version: 10.1.0
 Release: 12%{?rcrel}%{?dist}
 Epoch: 18
 License: GPLv2 and GPLv2+ and CC-BY
@@ -105,6 +117,14 @@ Source2: gpgkey-CEACC9E15534EBABB82D3FA03353C9CEF108B584.gpg
 Source3: vhost.conf
 Source4: kvm-x86.conf
 
+%if %{have_clang}
+BuildRequires: clang
+%if %{have_safe_stack}
+BuildRequires: compiler-rt
+%endif
+%else
+BuildRequires: gcc
+%endif
 BuildRequires: gnupg2
 BuildRequires: meson >= %{meson_version}
 BuildRequires: bison
@@ -116,7 +136,6 @@ BuildRequires: libselinux-devel
 BuildRequires: cyrus-sasl-devel
 BuildRequires: libaio-devel
 BuildRequires: python3-devel
-BuildRequires: libiscsi-devel
 BuildRequires: libattr-devel
 BuildRequires: libusbx-devel >= %{libusbx_version}
 BuildRequires: usbredir-devel >= %{usbredir_version}
@@ -138,7 +157,6 @@ BuildRequires: numactl-devel
 # qemu-pr-helper multipath support (requires libudev too)
 BuildRequires: device-mapper-multipath-devel
 BuildRequires: systemd-devel
-BuildRequires: libpmem-devel
 # qemu-keymap
 BuildRequires: pkgconfig(xkbcommon)
 %if %{have_opengl}
@@ -204,7 +222,6 @@ BuildRequires: libxdp-devel
 %if %{have_rutabaga}
 BuildRequires: rutabaga-gfx-ffi-devel
 %endif
-BuildRequires: python-tomli
 
 # Requires for the qemu metapackage
 Requires: %{name}-system-x86 = %{epoch}:%{version}-%{release}
@@ -282,15 +299,6 @@ This package provides the additional blkio block driver for QEMU.
 
 Install this package if you want to access disks over vhost-user-blk, vdpa-blk,
 and other transports using the libblkio library.
-
-
-%package block-iscsi
-Summary: QEMU iSCSI block driver
-Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
-%description block-iscsi
-This package provides the additional iSCSI block driver for QEMU.
-
-Install this package if you want to access iSCSI volumes.
 
 
 %package audio-dbus
@@ -427,6 +435,13 @@ This package provides the virtio-vga-rutabaga display device for QEMU.
 %endif
 
 
+%package device-uefi-vars
+Summary: QEMU UEFI variable service
+Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
+%description device-uefi-vars
+This package provides the UEFI variable service for QEMU.
+
+
 %package device-usb-host
 Summary: QEMU usb host device
 Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
@@ -503,10 +518,9 @@ mkdir -p %{qemu_kvm_build}
   --audio-drv-list=                \\\
   --disable-af-xdp                 \\\
   --disable-alsa                   \\\
+  --disable-asan                   \\\
   --disable-attr                   \\\
   --disable-auth-pam               \\\
-  --disable-avx2                   \\\
-  --disable-avx512bw               \\\
   --disable-blkio                  \\\
   --disable-block-drv-whitelist-in-tools \\\
   --disable-bochs                  \\\
@@ -551,9 +565,11 @@ mkdir -p %{qemu_kvm_build}
   --disable-hv-balloon             \\\
   --disable-hvf                    \\\
   --disable-iconv                  \\\
+  --disable-igvm                   \\\
   --disable-jack                   \\\
   --disable-kvm                    \\\
   --disable-l2tpv3                 \\\
+  --disable-libcbor                \\\
   --disable-libdaxctl              \\\
   --disable-libdw                  \\\
   --disable-libkeyutils            \\\
@@ -583,10 +599,12 @@ mkdir -p %{qemu_kvm_build}
   --disable-oss                    \\\
   --disable-pa                     \\\
   --disable-parallels              \\\
+  --disable-passt                  \\\
   --disable-pie                    \\\
   --disable-pipewire               \\\
   --disable-pixman                 \\\
   --disable-plugins                \\\
+  --disable-pvg                    \\\
   --disable-qcow1                  \\\
   --disable-qed                    \\\
   --disable-qom-cast-debug         \\\
@@ -595,10 +613,10 @@ mkdir -p %{qemu_kvm_build}
   --disable-rdma                   \\\
   --disable-relocatable            \\\
   --disable-replication            \\\
+  --disable-rust                   \\\
   --disable-rutabaga-gfx           \\\
   --disable-rng-none               \\\
   --disable-safe-stack             \\\
-  --disable-sanitizers             \\\
   --disable-sdl                    \\\
   --disable-sdl-image              \\\
   --disable-seccomp                \\\
@@ -611,6 +629,7 @@ mkdir -p %{qemu_kvm_build}
   --disable-sparse                 \\\
   --disable-spice                  \\\
   --disable-spice-protocol         \\\
+  --disable-strict-rust-lints      \\\
   --disable-strip                  \\\
   --disable-system                 \\\
   --disable-tcg                    \\\
@@ -619,8 +638,10 @@ mkdir -p %{qemu_kvm_build}
   --disable-tsan                   \\\
   --disable-uadk                   \\\
   --disable-u2f                    \\\
+  --disable-ubsan                  \\\
   --disable-usb-redir              \\\
   --disable-user                   \\\
+  --disable-valgrind               \\\
   --disable-vpc                    \\\
   --disable-vde                    \\\
   --disable-vdi                    \\\
@@ -677,11 +698,6 @@ run_configure() {
     echo "==="
 }
 
-# TODO removed due to errors
-#  --enable-safe-stack \
-# TODO possible issue
-#  --enable-lto \
-
 pushd %{qemu_kvm_build}
 run_configure \
 %if %{defined target_list}
@@ -695,8 +711,6 @@ run_configure \
 %endif
   --enable-af-xdp \
   --enable-attr \
-  --enable-avx2 \
-  --enable-avx512bw \
   --enable-blkio \
   --enable-bpf \
   --enable-cap-ng \
@@ -711,8 +725,6 @@ run_configure \
   --enable-iconv \
   --enable-kvm \
   --enable-l2tpv3 \
-  --enable-libiscsi \
-  --enable-libpmem \
   --enable-libusb \
   --enable-libudev \
   --enable-linux-aio \
@@ -751,6 +763,9 @@ run_configure \
   --enable-vnc-sasl \
   --enable-xkbcommon \
   --enable-zstd \
+%if %{have_safe_stack}
+  --enable-safe-stack \
+%endif
   \
   \
   --with-default-devices \
@@ -768,7 +783,6 @@ run_configure \
   --enable-virglrenderer \
 %endif
   --enable-virtfs \
-  --enable-virtfs-proxy-helper \
   --enable-vnc-jpeg
 
 
@@ -802,14 +816,9 @@ mkdir -p %{buildroot}%{_datadir}/qemu/vhost-user
 # Create new directories and put them all under tests-src
 mkdir -p %{buildroot}%{testsdir}/python
 mkdir -p %{buildroot}%{testsdir}/tests
-mkdir -p %{buildroot}%{testsdir}/tests/avocado
 mkdir -p %{buildroot}%{testsdir}/tests/qemu-iotests
 mkdir -p %{buildroot}%{testsdir}/scripts/qmp
 
-# Install avocado_qemu tests
-cp -R %{qemu_kvm_build}/tests/avocado/* %{buildroot}%{testsdir}/tests/avocado/
-
-# Install qemu.py and qmp/ scripts required to run avocado_qemu tests
 cp -R %{qemu_kvm_build}/python/qemu %{buildroot}%{testsdir}/python
 cp -R %{qemu_kvm_build}/scripts/qmp/* %{buildroot}%{testsdir}/scripts/qmp
 install -p -m 0755 tests/Makefile.include %{buildroot}%{testsdir}/tests/
@@ -852,18 +861,20 @@ rm -rf %{buildroot}%{_datadir}/qemu/firmware
 rm -f %{buildroot}%{_datadir}/qemu/QEMU,tcx.bin
 rm -f %{buildroot}%{_datadir}/qemu/QEMU,cgthree.bin
 # Remove ppc files
-rm -f %{buildroot}%{_datadir}/qemu/bamboo.dtb
-rm -f %{buildroot}%{_datadir}/qemu/canyonlands.dtb
+rm -rf %{buildroot}%{_datadir}/qemu/dtb
 rm -f %{buildroot}%{_datadir}/qemu/qemu_vga.ndrv
 rm -f %{buildroot}%{_datadir}/qemu/skiboot.lid
 rm -f %{buildroot}%{_datadir}/qemu/u-boot.e500
 rm -f %{buildroot}%{_datadir}/qemu/u-boot-sam460-20100605.bin
 rm -f %{buildroot}%{_datadir}/qemu/vof*.bin
+rm -f %{buildroot}%{_datadir}/qemu/pnv-pnor.bin
 # Remove hppa files
 rm -f %{buildroot}%{_datadir}/qemu/hppa-firmware.img
 rm -f %{buildroot}%{_datadir}/qemu/hppa-firmware64.img
 # Remove arm files
+rm -f %{buildroot}%{_datadir}/qemu/ast27x0_bootrom.bin
 rm -f %{buildroot}%{_datadir}/qemu/npcm7xx_bootrom.bin
+rm -f %{buildroot}%{_datadir}/qemu/npcm8xx_bootrom.bin
 # Remove riscv files
 rm -f %{buildroot}%{_datadir}/qemu/opensbi-riscv*.bin
 # Remove alpha files
@@ -959,8 +970,6 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 %{_datadir}/applications/qemu.desktop
 %exclude %{_datadir}/qemu/qemu-nsis.bmp
-%{_libexecdir}/virtfs-proxy-helper
-%{_mandir}/man1/virtfs-proxy-helper.1*
 
 
 %files tests
@@ -970,10 +979,6 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 %files block-blkio
 %{_libdir}/qemu/block-blkio.so
-
-
-%files block-iscsi
-%{_libdir}/qemu/block-iscsi.so
 
 
 %if %{have_opengl}
@@ -1044,6 +1049,10 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %endif
 
 
+%files device-uefi-vars
+%{_libdir}/qemu/hw-uefi-vars.so
+
+
 %files device-usb-host
 %{_libdir}/qemu/hw-usb-host.so
 
@@ -1069,7 +1078,6 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %files system-x86
 %files system-x86-core
 %{_bindir}/qemu-system-x86_64
-%{_libdir}/qemu/accel-tcg-x86_64.so
 %{_mandir}/man1/qemu-system-x86_64.1*
 %{_datadir}/qemu/kvmvapic.bin
 %{_datadir}/qemu/linuxboot.bin
@@ -1085,5 +1093,8 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 
 %changelog
+* Sun Sep 28 2025 Zachary Huff <zach@pritunl.com> - 10.1.0-1
+- Rebase to qemu 10.1.0
+
 * Wed Oct 9 2024 Zachary Huff <zach@pritunl.com> - 9.1.0-1
 - Rebase to qemu 9.1.0

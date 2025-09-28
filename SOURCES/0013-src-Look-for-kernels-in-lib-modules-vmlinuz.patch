@@ -1,7 +1,7 @@
 From e0cd93ad3979388db733852df6d1cdb60f3f931a Mon Sep 17 00:00:00 2001
 From: "Richard W.M. Jones" <rjones@redhat.com>
 Date: Mon, 29 Jan 2024 19:40:19 +0000
-Subject: [PATCH 13/13] src: Look for kernels in /lib/modules/*/vmlinuz
+Subject: [PATCH 13/14] src: Look for kernels in /lib/modules/*/vmlinuz
 
 On Fedora 40 and above when using systemd-boot, there are no more
 kernels in /boot.
@@ -65,5 +65,5 @@ index 719261a..0c96485 100644
  if [ ! -r "$kernel" ]; then
      echo "$0: kernel $kernel is not readable"
 -- 
-2.43.0
+2.46.0
 

@@ -8,9 +8,9 @@
 
 Name:           qemu-sanity-check
 Version:        1.1.6
-Release:        14%{?dist}
+Release:        18%{?dist}
 Summary:        Simple qemu and Linux kernel sanity checker
-License:        GPLv2+
+License:        GPL-2.0-or-later
 
 ExclusiveArch:  %{kernel_arches}
 
@@ -39,6 +39,7 @@ Patch:          0010-Error-out-if-any-kernel-panic-is-seen.patch
 Patch:          0011-src-Add-more-information-about-kernel-and-qemu-searc.patch
 Patch:          0012-docs-Use-F-around-file-references-in-the-manual.patch
 Patch:          0013-src-Look-for-kernels-in-lib-modules-vmlinuz.patch
+Patch:          0014-Choose-cpu-max-by-default.patch
 
 # To verify the tarball signature.
 BuildRequires:  gnupg2
@@ -111,7 +112,8 @@ to avoid a circular dependency on qemu or kernel, you should use
 
 %package nodeps
 Summary:         Simple qemu and Linux kernel sanity checker (no dependencies)
-License:         GPLv2+
+# Automatically converted from old format: GPLv2+ - review is highly recommended.
+License:         GPL-2.0-or-later
 
 
 %description nodeps
@@ -157,6 +159,18 @@ make DESTDIR=$RPM_BUILD_ROOT install
 
 
 %changelog
+* Sat Jan 18 2025 Fedora Release Engineering <releng@fedoraproject.org> - 1.1.6-18
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_42_Mass_Rebuild
+
+* Thu Jan 09 2025 Richard W.M. Jones <rjones@redhat.com> - 1.1.6-17
+- Use -cpu max by default
+
+* Fri Jul 26 2024 Miroslav Suchý <msuchy@redhat.com> - 1.1.6-16
+- convert license to SPDX
+
+* Fri Jul 19 2024 Fedora Release Engineering <releng@fedoraproject.org> - 1.1.6-15
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_41_Mass_Rebuild
+
 * Mon Jan 29 2024 Richard W.M. Jones <rjones@redhat.com> - 1.1.6-14
 - Look for kernels in /lib/modules/*/vmlinuz
 - Display the correct test-suite.log if %%check fails

@@ -1,0 +1,63 @@
+From 1d48b90c2119ac59fdc04e16200b9502b8d835f5 Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Thu, 9 Jan 2025 09:39:34 -0500
+Subject: [PATCH 14/14] Choose -cpu max by default
+
+You must set -cpu to something on RHEL 10 with TCG since the kernel on
+that platform now requires x86_64-v3.  Choosing a good default is
+difficult.  Use -cpu max as that was supposed to fix this, although in
+practice it doesn't work very reliably.
+
+This is likely a temporary solution.  More reliable/permanent
+solutions include:
+
+ - Allowing the user to set the default CPU at configure time.
+
+ - A large case statement that tries to get it right for every
+   possible combination of platform/architecture/KVM/...
+
+ - Fixing -cpu max in qemu
+---
+ src/qemu-sanity-check.in | 15 ++++++---------
+ 1 file changed, 6 insertions(+), 9 deletions(-)
+
+diff --git a/src/qemu-sanity-check.in b/src/qemu-sanity-check.in
+index 0c96485..d8962d4 100644
+--- a/src/qemu-sanity-check.in
++++ b/src/qemu-sanity-check.in
+@@ -28,18 +28,16 @@ canonical_arch="$(uname -m | sed 's/i[456]86/i386/')"
+ verbose=no
+ timeout=10m
+ accel=kvm:tcg
+-cpu=
+ memory=768
+ console=ttyS0
+ machine=
+ 
+-# Both libguestfs and virt-manager choose cpu=host when we think that
+-# KVM is available, and default otherwise.  Although testing for KVM
+-# is hairy, I found that on aarch64 it can fail unless we choose
+-# cpu=host for KVM.
+-if test -r /dev/kvm; then
+-    cpu=host
+-fi
++# Choosing a good CPU default is a minefield.  Ideally '-cpu max' is
++# supposed to choose the best CPU type, but it notably fails on RISC-V
++# (not supported) and x86_64+TCG (enables LA57 which TCG does not
++# emulate).  Default minimum CPU will not work on RHEL 10, since that
++# requires at least x86_64-v3.
++cpu=max
+ 
+ # Default machine and CPU type depends on arch.  You can override this
+ # using -m|--machine and --cpu options.
+@@ -49,7 +47,6 @@ case "$canonical_arch" in
+ 	machine=virt ;;
+     aarch*)
+ 	console=ttyAMA0
+-	if [ "$cpu" = "" ]; then cpu=cortex-a57; fi
+ 	machine=virt ;;
+     s390*)
+ 	console=ttysclp0 ;;
+-- 
+2.46.0
+

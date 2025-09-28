@@ -1,7 +1,7 @@
 From 0460bb87b6fba08fb5df8056cc3fb67ffa8e8080 Mon Sep 17 00:00:00 2001
 From: "Richard W.M. Jones" <rjones@redhat.com>
 Date: Fri, 25 Sep 2020 09:45:30 +0100
-Subject: [PATCH 02/13] Add --cpu option.
+Subject: [PATCH 02/14] Add --cpu option.
 
 If not set, then pick a more suitable default for aarch64.
 ---
@@ -100,5 +100,5 @@ index 8bf1d4b..7ef3200 100644
  
  =item B<--initrd>=INITRD
 -- 
-2.43.0
+2.46.0
 

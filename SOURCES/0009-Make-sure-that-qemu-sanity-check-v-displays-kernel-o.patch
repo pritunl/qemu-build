@@ -1,7 +1,7 @@
 From 2492fbbf626e0b2a8c1e22b6e926382fcd343666 Mon Sep 17 00:00:00 2001
 From: "Richard W.M. Jones" <rjones@redhat.com>
 Date: Fri, 1 Sep 2023 13:56:35 +0100
-Subject: [PATCH 09/13] Make sure that qemu-sanity-check -v displays kernel
+Subject: [PATCH 09/14] Make sure that qemu-sanity-check -v displays kernel
  output
 
 Even in the case when the test doesn't fail, if the -v option was used
@@ -35,5 +35,5 @@ index 79372ed..56e93c2 100644
  if ! grep -sq "initrd started up OK" "$test_output"; then
      cat "$test_output"
 -- 
-2.43.0
+2.46.0
 
