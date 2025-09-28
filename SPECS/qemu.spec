@@ -244,6 +244,7 @@ Requires(post): systemd-units
 Requires(preun): systemd-units
 Requires(postun): systemd-units
 Requires: ipxe-roms-qemu
+Provides: qemu-kvm-common = %{epoch}:%{version}-%{release}
 %description common
 QEMU is an open source virtualizer that provides hardware emulation for
 the KVM hypervisor.
@@ -722,6 +723,9 @@ run_configure \
   --enable-fdt=system \
   --enable-gio \
   --enable-gnutls \
+%if %{have_gtk}
+  --enable-gtk \
+%endif
   --enable-iconv \
   --enable-kvm \
   --enable-l2tpv3 \
@@ -997,6 +1001,12 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 %files ui-dbus
 %{_libdir}/qemu/ui-dbus.so
+
+
+%if %{have_gtk}
+%files ui-gtk
+%{_libdir}/%{name}/ui-gtk.so
+%endif
 
 
 %files ui-egl-headless
