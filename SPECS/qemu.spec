@@ -104,7 +104,7 @@
 
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu
-Version: 10.1.0
+Version: 10.1.2
 Release: 12%{?rcrel}%{?dist}
 Epoch: 18
 License: GPLv2 and GPLv2+ and CC-BY

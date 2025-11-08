@@ -1,5 +1,9 @@
+%ifarch aarch64
+%global drm_renderers asahi,msm
+%endif
+
 Name:		virglrenderer
-Version:	1.1.0
+Version:	1.2.0
 Release:	2%{?dist}
 
 Summary:	Virgl Rendering library.
@@ -16,6 +20,7 @@ BuildRequires:	python3
 BuildRequires:	libdrm-devel
 BuildRequires:  libva-devel
 BuildRequires:  vulkan-loader-devel
+BuildRequires:  python3-pyyaml
 
 %description
 The virgil3d rendering library is a library used by
@@ -44,7 +49,10 @@ driver to test virgl rendering without GL.
 %autosetup -p1
 
 %build
-%meson -Dvideo=true -Dvenus=true
+%meson \
+  %{?drm_renderers:-Ddrm-renderers=%drm_renderers} \
+  -Dvideo=true \
+  -Dvenus=true
 %meson_build
 
 %install
@@ -65,6 +73,18 @@ driver to test virgl rendering without GL.
 %{_bindir}/virgl_test_server
 
 %changelog
+* Wed Sep 17 2025 Janne Grunau >janne-fdr@jannau.net> - 1.2.0-2
+- Enable asahi,msm DRM native context support on aarch64
+
+* Tue Sep 09 2025 Marc-André Lureau <marcandre.lureau@redhat.com> - 1.2.0-1
+- Update to v1.2.0, fixes rhbz#2393984
+
+* Fri Jul 25 2025 Fedora Release Engineering <releng@fedoraproject.org> - 1.1.1-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_43_Mass_Rebuild
+
+* Wed Apr 02 2025 Marc-André Lureau <marcandre.lureau@redhat.com> - 1.1.1-1
+- new version, fixes rhbz#2357013
+
 * Sun Jan 19 2025 Fedora Release Engineering <releng@fedoraproject.org> - 1.1.0-2
 - Rebuilt for https://fedoraproject.org/wiki/Fedora_42_Mass_Rebuild
 

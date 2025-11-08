@@ -58,11 +58,11 @@ sudo dnf config-manager --enable ol10_codeready_builder
 ## upgrade spec
 
 ```bash
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/42/Everything/source/tree/Packages/v/virglrenderer-1.1.0-2.fc42.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/42/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-18.fc42.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/43/Everything/source/tree/Packages/v/virglrenderer-1.2.0-2.fc43.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/43/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-20.fc43.src.rpm
 
-sudo rpm -i virglrenderer-1.1.0-2.fc42.src.rpm
-sudo rpm -i qemu-sanity-check-1.1.6-18.fc42.src.rpm
+sudo rpm -i virglrenderer-1.2.0-2.fc43.src.rpm
+sudo rpm -i qemu-sanity-check-1.1.6-20.fc43.src.rpm
 
 sudo mv /root/rpmbuild ~/rpmbuild
 sudo chown -R 1000:1000 ~/rpmbuild
@@ -88,8 +88,8 @@ rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
     /home/cloud/git/qemu-build/ cloud@$BUILD_SERVER:/home/cloud/rpmbuild/
 
 cd ~/rpmbuild/SOURCES/
-wget https://download.qemu.org/qemu-10.1.0.tar.xz
-wget https://download.qemu.org/qemu-10.1.0.tar.xz.sig
+wget https://download.qemu.org/qemu-10.1.2.tar.xz
+wget https://download.qemu.org/qemu-10.1.2.tar.xz.sig
 
 cd ~/rpmbuild/SPECS/
 
@@ -132,20 +132,30 @@ tee ~/.rpmmacros << EOF
 %_gpg_name kvm@pritunl.com
 EOF
 
-rm -rf ~/mirror
+# kvm mirror
 mkdir -p ~/mirror/yum/oraclelinux/10
+rpm --resign rpmbuild/RPMS/noarch/*.rpm
+rpm --resign rpmbuild/RPMS/x86_64/*.rpm
 cp rpmbuild/RPMS/noarch/* ~/mirror/yum/oraclelinux/10
 cp rpmbuild/RPMS/x86_64/* ~/mirror/yum/oraclelinux/10
 rm ~/mirror/yum/oraclelinux/10/*debuginfo*
 rm ~/mirror/yum/oraclelinux/10/*debugsource*
-
-rpm --resign ~/mirror/yum/oraclelinux/10/*.rpm
 createrepo ~/mirror/yum/oraclelinux/10
+
+# kvm gui mirror
+mkdir -p ~/mirror-gui/yum/oraclelinux/10
+rpm --resign rpmbuild/RPMS/noarch/*.rpm
+rpm --resign rpmbuild/RPMS/x86_64/*.rpm
+cp rpmbuild/RPMS/noarch/* ~/mirror-gui/yum/oraclelinux/10
+cp rpmbuild/RPMS/x86_64/* ~/mirror-gui/yum/oraclelinux/10
+rm ~/mirror-gui/yum/oraclelinux/10/*debuginfo*
+rm ~/mirror-gui/yum/oraclelinux/10/*debugsource*
+createrepo ~/mirror-gui/yum/oraclelinux/10
 
 ## kvm upload
 
 ```bash
-python3 ~/rpmbuild/TOOLS/autoindex.py kvm-unstable
+python3 ~/rpmbuild/TOOLS/autoindex.py mirror kvm-unstable
 sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force vultr-east/repo.pritunl.com/kvm-unstable
 sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force r2/pritunl-repo-east/kvm-unstable
 sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force r2/pritunl-repo-west/kvm-unstable
@@ -153,7 +163,7 @@ sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror:/mirro
 sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror r2/pritunl-repo-east/kvm-unstable
 sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror r2/pritunl-repo-west/kvm-unstable
 
-python3 ~/rpmbuild/TOOLS/autoindex.py kvm-stable
+python3 ~/rpmbuild/TOOLS/autoindex.py mirror kvm-stable
 sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force vultr-east/repo.pritunl.com/kvm-stable
 sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force r2/pritunl-repo-east/kvm-stable
 sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force r2/pritunl-repo-west/kvm-stable
@@ -165,36 +175,36 @@ sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror:/mirro
 ## kvm gui upload
 
 ```bash
-python3 ~/rpmbuild/TOOLS/autoindex.py kvm-gui-unstable
+python3 ~/rpmbuild/TOOLS/autoindex.py mirror-gui kvm-gui-unstable
 sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force vultr-east/repo.pritunl.com/kvm-gui-unstable
 sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force r2/pritunl-repo-east/kvm-gui-unstable
 sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force r2/pritunl-repo-west/kvm-gui-unstable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror vultr-east/repo.pritunl.com/kvm-gui-unstable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror r2/pritunl-repo-east/kvm-gui-unstable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror r2/pritunl-repo-west/kvm-gui-unstable
+sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror-gui:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror vultr-east/repo.pritunl.com/kvm-gui-unstable
+sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror-gui:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror r2/pritunl-repo-east/kvm-gui-unstable
+sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror-gui:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror r2/pritunl-repo-west/kvm-gui-unstable
 
-python3 ~/rpmbuild/TOOLS/autoindex.py kvm-gui-stable
+python3 ~/rpmbuild/TOOLS/autoindex.py mirror-gui kvm-gui-stable
 sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force vultr-east/repo.pritunl.com/kvm-gui-stable
 sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force r2/pritunl-repo-east/kvm-gui-stable
 sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force r2/pritunl-repo-west/kvm-gui-stable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror vultr-east/repo.pritunl.com/kvm-gui-stable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror r2/pritunl-repo-east/kvm-gui-stable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror r2/pritunl-repo-west/kvm-gui-stable
+sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror-gui:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror vultr-east/repo.pritunl.com/kvm-gui-stable
+sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror-gui:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror r2/pritunl-repo-east/kvm-gui-stable
+sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror-gui:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror r2/pritunl-repo-west/kvm-gui-stable
 ```
 
 # qemu features
 
 ```
-qemu 10.1.0
+qemu 10.1.2
 
   Build environment
-    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.1.0/qemu_kvm_build
-    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.1.0
+    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.1.2/qemu_kvm_build
+    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.1.2
     Download dependencies           : NO
 
   Directories
-    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.1.0/qemu_kvm_build
-    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.1.0
+    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.1.2/qemu_kvm_build
+    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.1.2
     Download dependencies           : NO
     Install prefix                  : /usr
     BIOS directory                  : share/qemu
@@ -210,8 +220,8 @@ qemu 10.1.0
     Doc directory                   : /usr/share/doc
 
   Host binaries
-    python                          : /home/cloud/rpmbuild/BUILD/qemu-10.1.0/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
-    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-10.1.0/qemu_kvm_build/pyvenv/bin/sphinx-build
+    python                          : /home/cloud/rpmbuild/BUILD/qemu-10.1.2/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
+    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-10.1.2/qemu_kvm_build/pyvenv/bin/sphinx-build
     gdb                             : /usr/bin/gdb
     iasl                            : NO
     genisoimage                     :
@@ -267,6 +277,9 @@ qemu 10.1.0
     strip binaries                  : NO
     sparse                          : NO
     mingw32 support                 : NO
+
+  Cross compilers
+    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-10.1.2/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-10.1.2/tests/docker/docker.py --engine podman cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-10.1.2 --
 
   Targets and accelerators
     KVM support                     : YES
@@ -337,7 +350,7 @@ qemu 10.1.0
     brlapi support                  : NO
 
   Graphics backends
-    VirGL support                   : YES 1.1.0
+    VirGL support                   : YES 1.2.0
     Rutabaga support                : NO
 
   Audio backends
@@ -504,7 +517,7 @@ qemu 10.1.0
     passt                           : disabled
     pipewire                        : disabled
     pixman                          : enabled
-    pkgversion                      : qemu-10.1.0-12.el10
+    pkgversion                      : qemu-10.1.2-12.el10
     png                             : enabled
     prefix                          : /usr
     pvg                             : disabled
@@ -575,16 +588,16 @@ qemu 10.1.0
 # qemu gui features
 
 ```
-qemu 10.1.0
+qemu 10.1.2
 
   Build environment
-    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.1.0/qemu_kvm_build
-    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.1.0
+    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.1.2/qemu_kvm_build
+    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.1.2
     Download dependencies           : NO
 
   Directories
-    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.1.0/qemu_kvm_build
-    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.1.0
+    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.1.2/qemu_kvm_build
+    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.1.2
     Download dependencies           : NO
     Install prefix                  : /usr
     BIOS directory                  : share/qemu
@@ -600,8 +613,8 @@ qemu 10.1.0
     Doc directory                   : /usr/share/doc
 
   Host binaries
-    python                          : /home/cloud/rpmbuild/BUILD/qemu-10.1.0/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
-    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-10.1.0/qemu_kvm_build/pyvenv/bin/sphinx-build
+    python                          : /home/cloud/rpmbuild/BUILD/qemu-10.1.2/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
+    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-10.1.2/qemu_kvm_build/pyvenv/bin/sphinx-build
     gdb                             : /usr/bin/gdb
     iasl                            : NO
     genisoimage                     :
@@ -657,6 +670,9 @@ qemu 10.1.0
     strip binaries                  : NO
     sparse                          : NO
     mingw32 support                 : NO
+
+  Cross compilers
+    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-10.1.2/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-10.1.2/tests/docker/docker.py --engine podman cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-10.1.2 --
 
   Targets and accelerators
     KVM support                     : YES
@@ -727,7 +743,7 @@ qemu 10.1.0
     brlapi support                  : NO
 
   Graphics backends
-    VirGL support                   : YES 1.1.0
+    VirGL support                   : YES 1.2.0
     Rutabaga support                : NO
 
   Audio backends
@@ -894,7 +910,7 @@ qemu 10.1.0
     passt                           : disabled
     pipewire                        : disabled
     pixman                          : enabled
-    pkgversion                      : qemu-10.1.0-12.el10
+    pkgversion                      : qemu-10.1.2-12.el10
     png                             : enabled
     prefix                          : /usr
     pvg                             : disabled

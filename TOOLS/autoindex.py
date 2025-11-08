@@ -2,10 +2,10 @@ import os
 import sys
 from datetime import datetime, timezone
 
-ROOT_DIR = "mirror"
+ROOT_DIR = sys.argv[1]
 PREFIX = ""
-if len(sys.argv) > 1:
-    PREFIX = sys.argv[1] + "/"
+if len(sys.argv) > 2:
+    PREFIX = sys.argv[2] + "/"
 HTML_HEADER = """<html><head><title>Index of /{relative_path}</title></head>
 <body bgcolor="white">
 <h1>Index of /{relative_path}</h1><hr><pre><a href="../">../</a>
