@@ -151,6 +151,7 @@ cp rpmbuild/RPMS/x86_64/* ~/mirror-gui/yum/oraclelinux/10
 rm ~/mirror-gui/yum/oraclelinux/10/*debuginfo*
 rm ~/mirror-gui/yum/oraclelinux/10/*debugsource*
 createrepo ~/mirror-gui/yum/oraclelinux/10
+```
 
 ## kvm upload
 
