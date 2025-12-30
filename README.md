@@ -58,6 +58,8 @@ sudo dnf config-manager --enable ol10_codeready_builder
 ## upgrade spec
 
 ```bash
+# https://src.fedoraproject.org/rpms/qemu
+
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/43/Everything/source/tree/Packages/v/virglrenderer-1.2.0-2.fc43.src.rpm
 wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/43/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-20.fc43.src.rpm
 
@@ -88,8 +90,8 @@ rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
     /home/cloud/git/qemu-build/ cloud@$BUILD_SERVER:/home/cloud/rpmbuild/
 
 cd ~/rpmbuild/SOURCES/
-wget https://download.qemu.org/qemu-10.1.3.tar.xz
-wget https://download.qemu.org/qemu-10.1.3.tar.xz.sig
+wget https://download.qemu.org/qemu-10.2.0.tar.xz
+wget https://download.qemu.org/qemu-10.2.0.tar.xz.sig
 
 cd ~/rpmbuild/SPECS/
 
@@ -196,16 +198,16 @@ sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror-gui:/m
 # qemu features
 
 ```
-qemu 10.1.3
+qemu 10.2.0
 
   Build environment
-    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.1.3/qemu_kvm_build
-    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.1.3
+    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build
+    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.2.0
     Download dependencies           : NO
 
   Directories
-    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.1.3/qemu_kvm_build
-    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.1.3
+    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build
+    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.2.0
     Download dependencies           : NO
     Install prefix                  : /usr
     BIOS directory                  : share/qemu
@@ -221,8 +223,8 @@ qemu 10.1.3
     Doc directory                   : /usr/share/doc
 
   Host binaries
-    python                          : /home/cloud/rpmbuild/BUILD/qemu-10.1.3/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
-    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-10.1.3/qemu_kvm_build/pyvenv/bin/sphinx-build
+    python                          : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
+    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build/pyvenv/bin/sphinx-build
     gdb                             : /usr/bin/gdb
     iasl                            : NO
     genisoimage                     :
@@ -280,13 +282,14 @@ qemu 10.1.3
     mingw32 support                 : NO
 
   Cross compilers
-    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-10.1.3/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-10.1.3/tests/docker/docker.py --engine podman cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-10.1.3 --
+    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-10.2.0/tests/docker/docker.py --engine podman cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-10.2.0 --
 
   Targets and accelerators
     KVM support                     : YES
     HVF support                     : NO
     WHPX support                    : NO
     NVMM support                    : NO
+    MSHV support                    : NO
     Xen support                     : NO
     Xen emulation                   : YES
     TCG support                     : YES
@@ -323,7 +326,6 @@ qemu 10.1.3
   Crypto
     TLS priority                    : @QEMU,SYSTEM
     GNUTLS support                  : YES 3.8.10
-      GNUTLS crypto                 : YES
       GNUTLS bug 1717 workaround    : NO
     libgcrypt                       : NO
     nettle                          : NO
@@ -468,6 +470,7 @@ qemu 10.1.3
     fuse                            : disabled
     fuse_lseek                      : disabled
     gcrypt                          : disabled
+    gdb                             : /usr/bin/gdb
     gettext                         : disabled
     gio                             : enabled
     glusterfs                       : disabled
@@ -506,6 +509,7 @@ qemu 10.1.3
     module_upgrades                 : false
     modules                         : enabled
     mpath                           : enabled
+    mshv                            : disabled
     multiprocess                    : enabled
     netmap                          : disabled
     nettle                          : disabled
@@ -518,7 +522,7 @@ qemu 10.1.3
     passt                           : disabled
     pipewire                        : disabled
     pixman                          : enabled
-    pkgversion                      : qemu-10.1.3-1.el10
+    pkgversion                      : qemu-10.2.0-1.el10
     png                             : enabled
     prefix                          : /usr
     pvg                             : disabled
@@ -589,16 +593,16 @@ qemu 10.1.3
 # qemu gui features
 
 ```
-qemu 10.1.3
+qemu 10.2.0
 
   Build environment
-    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.1.3/qemu_kvm_build
-    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.1.3
+    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build
+    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.2.0
     Download dependencies           : NO
 
   Directories
-    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.1.3/qemu_kvm_build
-    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.1.3
+    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build
+    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.2.0
     Download dependencies           : NO
     Install prefix                  : /usr
     BIOS directory                  : share/qemu
@@ -614,8 +618,8 @@ qemu 10.1.3
     Doc directory                   : /usr/share/doc
 
   Host binaries
-    python                          : /home/cloud/rpmbuild/BUILD/qemu-10.1.3/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
-    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-10.1.3/qemu_kvm_build/pyvenv/bin/sphinx-build
+    python                          : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
+    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build/pyvenv/bin/sphinx-build
     gdb                             : /usr/bin/gdb
     iasl                            : NO
     genisoimage                     :
@@ -673,13 +677,14 @@ qemu 10.1.3
     mingw32 support                 : NO
 
   Cross compilers
-    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-10.1.3/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-10.1.3/tests/docker/docker.py --engine podman cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-10.1.3 --
+    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-10.2.0/tests/docker/docker.py --engine podman cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-10.2.0 --
 
   Targets and accelerators
     KVM support                     : YES
     HVF support                     : NO
     WHPX support                    : NO
     NVMM support                    : NO
+    MSHV support                    : NO
     Xen support                     : NO
     Xen emulation                   : YES
     TCG support                     : YES
@@ -716,7 +721,6 @@ qemu 10.1.3
   Crypto
     TLS priority                    : @QEMU,SYSTEM
     GNUTLS support                  : YES 3.8.10
-      GNUTLS crypto                 : YES
       GNUTLS bug 1717 workaround    : NO
     libgcrypt                       : NO
     nettle                          : NO
@@ -861,6 +865,7 @@ qemu 10.1.3
     fuse                            : disabled
     fuse_lseek                      : disabled
     gcrypt                          : disabled
+    gdb                             : /usr/bin/gdb
     gettext                         : disabled
     gio                             : enabled
     glusterfs                       : disabled
@@ -899,6 +904,7 @@ qemu 10.1.3
     module_upgrades                 : false
     modules                         : enabled
     mpath                           : enabled
+    mshv                            : disabled
     multiprocess                    : enabled
     netmap                          : disabled
     nettle                          : disabled
@@ -911,7 +917,7 @@ qemu 10.1.3
     passt                           : disabled
     pipewire                        : disabled
     pixman                          : enabled
-    pkgversion                      : qemu-10.1.3-1.el10
+    pkgversion                      : qemu-10.2.0-1.el10
     png                             : enabled
     prefix                          : /usr
     pvg                             : disabled

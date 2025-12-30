@@ -104,7 +104,7 @@
 
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu
-Version: 10.1.3
+Version: 10.2.0
 Release: 1%{?rcrel}%{?dist}
 Epoch: 18
 License: GPLv2 and GPLv2+ and CC-BY
@@ -591,6 +591,7 @@ mkdir -p %{qemu_kvm_build}
   --disable-modules                \\\
   --disable-module-upgrades        \\\
   --disable-mpath                  \\\
+  --disable-mshv                   \\\
   --disable-multiprocess           \\\
   --disable-netmap                 \\\
   --disable-nettle                 \\\
@@ -869,7 +870,7 @@ rm -rf %{buildroot}%{_datadir}/qemu/dtb
 rm -f %{buildroot}%{_datadir}/qemu/qemu_vga.ndrv
 rm -f %{buildroot}%{_datadir}/qemu/skiboot.lid
 rm -f %{buildroot}%{_datadir}/qemu/u-boot.e500
-rm -f %{buildroot}%{_datadir}/qemu/u-boot-sam460-20100605.bin
+rm -f %{buildroot}%{_datadir}/qemu/u-boot-sam460.bin
 rm -f %{buildroot}%{_datadir}/qemu/vof*.bin
 rm -f %{buildroot}%{_datadir}/qemu/pnv-pnor.bin
 # Remove hppa files
