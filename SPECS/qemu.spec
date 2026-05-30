@@ -104,7 +104,7 @@
 
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu
-Version: 10.2.0
+Version: 11.0.1
 Release: 1%{?rcrel}%{?dist}
 Epoch: 18
 License: GPLv2 and GPLv2+ and CC-BY
@@ -136,6 +136,9 @@ BuildRequires: libselinux-devel
 BuildRequires: cyrus-sasl-devel
 BuildRequires: libaio-devel
 BuildRequires: python3-devel
+BuildRequires: python3-setuptools
+BuildRequires: python3-pip
+BuildRequires: python3-wheel
 BuildRequires: libattr-devel
 BuildRequires: libusbx-devel >= %{libusbx_version}
 BuildRequires: usbredir-devel >= %{usbredir_version}
@@ -593,6 +596,7 @@ mkdir -p %{qemu_kvm_build}
   --disable-mpath                  \\\
   --disable-mshv                   \\\
   --disable-multiprocess           \\\
+  --disable-nitro                  \\\
   --disable-netmap                 \\\
   --disable-nettle                 \\\
   --disable-numa                   \\\
@@ -979,8 +983,7 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 %files tests
 %{testsdir}
-%{_libdir}/qemu/accel-qtest-*.so
-
+%{_libdir}/qemu/accel-qtest.so
 
 %files block-blkio
 %{_libdir}/qemu/block-blkio.so
@@ -1091,8 +1094,7 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %{_bindir}/qemu-system-x86_64
 %{_mandir}/man1/qemu-system-x86_64.1*
 %{_datadir}/qemu/kvmvapic.bin
-%{_datadir}/qemu/linuxboot.bin
-%{_datadir}/qemu/multiboot.bin
+%{_datadir}/qemu/linuxboot_dma.bin
 %{_datadir}/qemu/multiboot_dma.bin
 %{_datadir}/qemu/pvh.bin
 %{_datadir}/qemu/qboot.rom
@@ -1104,6 +1106,12 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 
 %changelog
+* Sat May 30 2026 Zachary Huff <zach@pritunl.com> - 11.0.1-1
+- Rebase to qemu 11.0.1
+
+* Tue Dec 30 2025 Zachary Huff <zach@pritunl.com> - 10.2.0-1
+- Rebase to qemu 10.2.0
+
 * Sun Sep 28 2025 Zachary Huff <zach@pritunl.com> - 10.1.0-1
 - Rebase to qemu 10.1.0
 

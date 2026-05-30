@@ -10,7 +10,7 @@
 
 Name:           qemu-sanity-check
 Version:        1.1.6
-Release:        20%{?dist}
+Release:        21%{?dist}
 Summary:        Simple qemu and Linux kernel sanity checker
 License:        GPL-2.0-or-later
 
@@ -161,6 +161,9 @@ make DESTDIR=$RPM_BUILD_ROOT install
 
 
 %changelog
+* Sat Jan 17 2026 Fedora Release Engineering <releng@fedoraproject.org> - 1.1.6-21
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_44_Mass_Rebuild
+
 * Thu Jul 31 2025 Richard W.M. Jones <rjones@redhat.com> - 1.1.6-20
 - Disable tests on arm (RHBZ#2385561)
 

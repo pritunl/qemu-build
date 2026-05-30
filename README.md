@@ -60,11 +60,11 @@ sudo dnf config-manager --enable ol10_codeready_builder
 ```bash
 # https://src.fedoraproject.org/rpms/qemu
 
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/43/Everything/source/tree/Packages/v/virglrenderer-1.2.0-2.fc43.src.rpm
-wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/43/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-20.fc43.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/44/Everything/source/tree/Packages/v/virglrenderer-1.3.0-1.fc44.src.rpm
+wget https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/44/Everything/source/tree/Packages/q/qemu-sanity-check-1.1.6-21.fc44.src.rpm
 
-sudo rpm -i virglrenderer-1.2.0-2.fc43.src.rpm
-sudo rpm -i qemu-sanity-check-1.1.6-20.fc43.src.rpm
+sudo rpm -i virglrenderer-1.3.0-1.fc44.src.rpm
+sudo rpm -i qemu-sanity-check-1.1.6-21.fc44.src.rpm
 
 sudo mv /root/rpmbuild ~/rpmbuild
 sudo chown -R 1000:1000 ~/rpmbuild
@@ -90,8 +90,8 @@ rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
     /home/cloud/git/qemu-build/ cloud@$BUILD_SERVER:/home/cloud/rpmbuild/
 
 cd ~/rpmbuild/SOURCES/
-wget https://download.qemu.org/qemu-10.2.0.tar.xz
-wget https://download.qemu.org/qemu-10.2.0.tar.xz.sig
+wget https://download.qemu.org/qemu-11.0.1.tar.xz
+wget https://download.qemu.org/qemu-11.0.1.tar.xz.sig
 
 cd ~/rpmbuild/SPECS/
 
@@ -143,6 +143,10 @@ cp rpmbuild/RPMS/x86_64/* ~/mirror/yum/oraclelinux/10
 rm ~/mirror/yum/oraclelinux/10/*debuginfo*
 rm ~/mirror/yum/oraclelinux/10/*debugsource*
 createrepo ~/mirror/yum/oraclelinux/10
+
+rm -f rpmbuild/RPMS/noarch/qemu-*11.0.1*
+rm -f rpmbuild/RPMS/x86_64/qemu-*11.0.1*
+rm -f rpmbuild/SRPMS/qemu-*11.0.1*
 
 # kvm gui mirror
 mkdir -p ~/mirror-gui/yum/oraclelinux/10
@@ -198,17 +202,14 @@ sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror-gui:/m
 # qemu features
 
 ```
-qemu 10.2.0
+qemu 11.0.1
 
   Build environment
-    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build
-    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.2.0
+    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-11.0.1/qemu_kvm_build
+    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-11.0.1
     Download dependencies           : NO
 
   Directories
-    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build
-    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.2.0
-    Download dependencies           : NO
     Install prefix                  : /usr
     BIOS directory                  : share/qemu
     firmware path                   : /usr/share/qemu-firmware:/usr/share/ipxe/qemu:/usr/share/seavgabios:/usr/share/seabios
@@ -223,8 +224,8 @@ qemu 10.2.0
     Doc directory                   : /usr/share/doc
 
   Host binaries
-    python                          : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
-    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build/pyvenv/bin/sphinx-build
+    python                          : /home/cloud/rpmbuild/BUILD/qemu-11.0.1/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
+    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-11.0.1/qemu_kvm_build/pyvenv/bin/sphinx-build
     gdb                             : /usr/bin/gdb
     iasl                            : NO
     genisoimage                     :
@@ -261,7 +262,7 @@ qemu 10.2.0
     Rust support                    : NO
     CFLAGS                          : -O2 -flto=thin -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS --config=/usr/lib/rpm/redhat/redhat-hardened-clang.cfg -fstack-protector-strong -m64 -march=x86-64-v3 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -O2 -flto=thin -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS --config=/usr/lib/rpm/redhat/redhat-hardened-clang.cfg -fstack-protector-strong -m64 -march=x86-64-v3 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -g -O2
     LDFLAGS                         : -O2 -flto=thin -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS --config=/usr/lib/rpm/redhat/redhat-hardened-clang.cfg -fstack-protector-strong -m64 -march=x86-64-v3 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -Wl,-z,relro -Wl,--as-needed -Wl,-z,pack-relative-relocs -Wl,-z,now --config=/usr/lib/rpm/redhat/redhat-hardened-clang-ld.cfg -flto=thin -ffat-lto-objects -Wl,--build-id=sha1 -O2 -flto=thin -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS --config=/usr/lib/rpm/redhat/redhat-hardened-clang.cfg -fstack-protector-strong -m64 -march=x86-64-v3 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -Wl,-z,relro -Wl,--as-needed -Wl,-z,pack-relative-relocs -Wl,-z,now --config=/usr/lib/rpm/redhat/redhat-hardened-clang-ld.cfg -flto=thin -ffat-lto-objects -Wl,--build-id=sha1
-    QEMU_CFLAGS                     : -mcx16 -msse2 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -fno-strict-aliasing -fno-common -fwrapv -ftrivial-auto-var-init=zero -fzero-call-used-regs=used-gpr -fstack-protector-strong -fsanitize=safe-stack
+    QEMU_CFLAGS                     : -mcx16 -msse2 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -fno-strict-aliasing -fno-common -fwrapv -ftrivial-auto-var-init=zero -fzero-init-padding-bits=all -fzero-call-used-regs=used-gpr -fstack-protector-strong -fsanitize=safe-stack
     QEMU_LDFLAGS                    : -fstack-protector-strong -fsanitize=safe-stack -Wl,-z,relro -Wl,-z,now
     link-time optimization (LTO)    : YES
     PIE                             : YES
@@ -282,10 +283,11 @@ qemu 10.2.0
     mingw32 support                 : NO
 
   Cross compilers
-    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-10.2.0/tests/docker/docker.py --engine podman cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-10.2.0 --
+    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-11.0.1/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-11.0.1/tests/docker/docker.py --engine auto cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-11.0.1 --
 
   Targets and accelerators
     KVM support                     : YES
+    Nitro support                   : NO
     HVF support                     : NO
     WHPX support                    : NO
     NVMM support                    : NO
@@ -353,7 +355,7 @@ qemu 10.2.0
     brlapi support                  : NO
 
   Graphics backends
-    VirGL support                   : YES 1.2.0
+    VirGL support                   : YES 1.3.0
     Rutabaga support                : NO
 
   Audio backends
@@ -513,6 +515,7 @@ qemu 10.2.0
     multiprocess                    : enabled
     netmap                          : disabled
     nettle                          : disabled
+    nitro                           : disabled
     numa                            : enabled
     nvmm                            : disabled
     opengl                          : enabled
@@ -522,7 +525,7 @@ qemu 10.2.0
     passt                           : disabled
     pipewire                        : disabled
     pixman                          : enabled
-    pkgversion                      : qemu-10.2.0-1.el10
+    pkgversion                      : qemu-11.0.1-1.el10
     png                             : enabled
     prefix                          : /usr
     pvg                             : disabled
@@ -593,17 +596,14 @@ qemu 10.2.0
 # qemu gui features
 
 ```
-qemu 10.2.0
+qemu 11.0.1
 
   Build environment
-    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build
-    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.2.0
+    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-11.0.1/qemu_kvm_build
+    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-11.0.1
     Download dependencies           : NO
 
   Directories
-    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build
-    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-10.2.0
-    Download dependencies           : NO
     Install prefix                  : /usr
     BIOS directory                  : share/qemu
     firmware path                   : /usr/share/qemu-firmware:/usr/share/ipxe/qemu:/usr/share/seavgabios:/usr/share/seabios
@@ -618,8 +618,8 @@ qemu 10.2.0
     Doc directory                   : /usr/share/doc
 
   Host binaries
-    python                          : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
-    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build/pyvenv/bin/sphinx-build
+    python                          : /home/cloud/rpmbuild/BUILD/qemu-11.0.1/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
+    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-11.0.1/qemu_kvm_build/pyvenv/bin/sphinx-build
     gdb                             : /usr/bin/gdb
     iasl                            : NO
     genisoimage                     :
@@ -656,7 +656,7 @@ qemu 10.2.0
     Rust support                    : NO
     CFLAGS                          : -O2 -flto=thin -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS --config=/usr/lib/rpm/redhat/redhat-hardened-clang.cfg -fstack-protector-strong -m64 -march=x86-64-v3 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -O2 -flto=thin -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS --config=/usr/lib/rpm/redhat/redhat-hardened-clang.cfg -fstack-protector-strong -m64 -march=x86-64-v3 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -g -O2
     LDFLAGS                         : -O2 -flto=thin -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS --config=/usr/lib/rpm/redhat/redhat-hardened-clang.cfg -fstack-protector-strong -m64 -march=x86-64-v3 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -Wl,-z,relro -Wl,--as-needed -Wl,-z,pack-relative-relocs -Wl,-z,now --config=/usr/lib/rpm/redhat/redhat-hardened-clang-ld.cfg -flto=thin -ffat-lto-objects -Wl,--build-id=sha1 -O2 -flto=thin -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS --config=/usr/lib/rpm/redhat/redhat-hardened-clang.cfg -fstack-protector-strong -m64 -march=x86-64-v3 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -Wl,-z,relro -Wl,--as-needed -Wl,-z,pack-relative-relocs -Wl,-z,now --config=/usr/lib/rpm/redhat/redhat-hardened-clang-ld.cfg -flto=thin -ffat-lto-objects -Wl,--build-id=sha1
-    QEMU_CFLAGS                     : -mcx16 -msse2 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -fno-strict-aliasing -fno-common -fwrapv -ftrivial-auto-var-init=zero -fzero-call-used-regs=used-gpr -fstack-protector-strong -fsanitize=safe-stack
+    QEMU_CFLAGS                     : -mcx16 -msse2 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -fno-strict-aliasing -fno-common -fwrapv -ftrivial-auto-var-init=zero -fzero-init-padding-bits=all -fzero-call-used-regs=used-gpr -fstack-protector-strong -fsanitize=safe-stack
     QEMU_LDFLAGS                    : -fstack-protector-strong -fsanitize=safe-stack -Wl,-z,relro -Wl,-z,now
     link-time optimization (LTO)    : YES
     PIE                             : YES
@@ -677,10 +677,11 @@ qemu 10.2.0
     mingw32 support                 : NO
 
   Cross compilers
-    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-10.2.0/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-10.2.0/tests/docker/docker.py --engine podman cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-10.2.0 --
+    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-11.0.1/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-11.0.1/tests/docker/docker.py --engine auto cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-11.0.1 --
 
   Targets and accelerators
     KVM support                     : YES
+    Nitro support                   : NO
     HVF support                     : NO
     WHPX support                    : NO
     NVMM support                    : NO
@@ -748,7 +749,7 @@ qemu 10.2.0
     brlapi support                  : NO
 
   Graphics backends
-    VirGL support                   : YES 1.2.0
+    VirGL support                   : YES 1.3.0
     Rutabaga support                : NO
 
   Audio backends
@@ -908,6 +909,7 @@ qemu 10.2.0
     multiprocess                    : enabled
     netmap                          : disabled
     nettle                          : disabled
+    nitro                           : disabled
     numa                            : enabled
     nvmm                            : disabled
     opengl                          : enabled
@@ -917,7 +919,7 @@ qemu 10.2.0
     passt                           : disabled
     pipewire                        : disabled
     pixman                          : enabled
-    pkgversion                      : qemu-10.2.0-1.el10
+    pkgversion                      : qemu-11.0.1-1.el10
     png                             : enabled
     prefix                          : /usr
     pvg                             : disabled
