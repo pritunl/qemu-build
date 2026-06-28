@@ -104,7 +104,7 @@
 
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu
-Version: 11.0.1
+Version: 11.0.2
 Release: 1%{?rcrel}%{?dist}
 Epoch: 18
 License: GPLv2 and GPLv2+ and CC-BY
@@ -1106,6 +1106,9 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 
 %changelog
+* Sun Jun 28 2026 Zachary Huff <zach@pritunl.com> - 11.0.2-1
+- Rebase to qemu 11.0.2
+
 * Sat May 30 2026 Zachary Huff <zach@pritunl.com> - 11.0.1-1
 - Rebase to qemu 11.0.1
 

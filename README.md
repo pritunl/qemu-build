@@ -90,8 +90,8 @@ rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
     /home/cloud/git/qemu-build/ cloud@$BUILD_SERVER:/home/cloud/rpmbuild/
 
 cd ~/rpmbuild/SOURCES/
-wget https://download.qemu.org/qemu-11.0.1.tar.xz
-wget https://download.qemu.org/qemu-11.0.1.tar.xz.sig
+wget https://download.qemu.org/qemu-11.0.2.tar.xz
+wget https://download.qemu.org/qemu-11.0.2.tar.xz.sig
 
 cd ~/rpmbuild/SPECS/
 
@@ -190,11 +190,11 @@ s3c index r2-west:/kvm-gui-stable/
 # qemu features
 
 ```
-qemu 11.0.1
+qemu 11.0.2
 
   Build environment
-    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-11.0.1/qemu_kvm_build
-    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-11.0.1
+    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-11.0.2/qemu_kvm_build
+    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-11.0.2
     Download dependencies           : NO
 
   Directories
@@ -212,8 +212,8 @@ qemu 11.0.1
     Doc directory                   : /usr/share/doc
 
   Host binaries
-    python                          : /home/cloud/rpmbuild/BUILD/qemu-11.0.1/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
-    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-11.0.1/qemu_kvm_build/pyvenv/bin/sphinx-build
+    python                          : /home/cloud/rpmbuild/BUILD/qemu-11.0.2/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
+    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-11.0.2/qemu_kvm_build/pyvenv/bin/sphinx-build
     gdb                             : /usr/bin/gdb
     iasl                            : NO
     genisoimage                     :
@@ -271,7 +271,7 @@ qemu 11.0.1
     mingw32 support                 : NO
 
   Cross compilers
-    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-11.0.1/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-11.0.1/tests/docker/docker.py --engine auto cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-11.0.1 --
+    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-11.0.2/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-11.0.2/tests/docker/docker.py --engine auto cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-11.0.2 --
 
   Targets and accelerators
     KVM support                     : YES
@@ -513,7 +513,7 @@ qemu 11.0.1
     passt                           : disabled
     pipewire                        : disabled
     pixman                          : enabled
-    pkgversion                      : qemu-11.0.1-1.el10
+    pkgversion                      : qemu-11.0.2-1.el10
     png                             : enabled
     prefix                          : /usr
     pvg                             : disabled
@@ -584,11 +584,11 @@ qemu 11.0.1
 # qemu gui features
 
 ```
-qemu 11.0.1
+qemu 11.0.2
 
   Build environment
-    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-11.0.1/qemu_kvm_build
-    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-11.0.1
+    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-11.0.2/qemu_kvm_build
+    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-11.0.2
     Download dependencies           : NO
 
   Directories
@@ -606,8 +606,8 @@ qemu 11.0.1
     Doc directory                   : /usr/share/doc
 
   Host binaries
-    python                          : /home/cloud/rpmbuild/BUILD/qemu-11.0.1/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
-    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-11.0.1/qemu_kvm_build/pyvenv/bin/sphinx-build
+    python                          : /home/cloud/rpmbuild/BUILD/qemu-11.0.2/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
+    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-11.0.2/qemu_kvm_build/pyvenv/bin/sphinx-build
     gdb                             : /usr/bin/gdb
     iasl                            : NO
     genisoimage                     :
@@ -665,7 +665,7 @@ qemu 11.0.1
     mingw32 support                 : NO
 
   Cross compilers
-    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-11.0.1/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-11.0.1/tests/docker/docker.py --engine auto cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-11.0.1 --
+    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-11.0.2/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-11.0.2/tests/docker/docker.py --engine auto cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-11.0.2 --
 
   Targets and accelerators
     KVM support                     : YES
@@ -907,7 +907,7 @@ qemu 11.0.1
     passt                           : disabled
     pipewire                        : disabled
     pixman                          : enabled
-    pkgversion                      : qemu-11.0.1-1.el10
+    pkgversion                      : qemu-11.0.2-1.el10
     png                             : enabled
     prefix                          : /usr
     pvg                             : disabled
