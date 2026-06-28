@@ -103,6 +103,9 @@ sudo dnf builddep ~/rpmbuild/SPECS/virglrenderer.spec
 rpmbuild -ba virglrenderer.spec
 sudo dnf install ~/rpmbuild/RPMS/x86_64/virglrenderer-1*.el10.x86_64.rpm ~/rpmbuild/RPMS/x86_64/virglrenderer-devel-*.el10.x86_64.rpm
 
+find ~/rpmbuild/RPMS -type f -name 'qemu-*11.0.1*.rpm' -delete
+find ~/rpmbuild/SRPMS -type f -name 'qemu-*11.0.1*.rpm' -delete
+
 sed -i 's/%global have_gtk 0/%global have_gtk 1/' ./qemu.spec
 sudo dnf builddep ~/rpmbuild/SPECS/qemu.spec
 rpmbuild -ba qemu.spec
@@ -111,9 +114,10 @@ rpmbuild -ba qemu.spec
 ## create repo
 
 ```bash
-cd ~/rpmbuild/TOOLS
-sudo podman build --rm -t tools .
-cd
+sudo wget -P /tmp https://raw.githubusercontent.com/pritunl/toolbox/eae247b569672382df53d8d42ee843c219342097/s3c/s3c.py
+echo "fc7680352667822e3aa3cffa7678a6f8352a340daf1b72c356aa3c95e8ba9729  /tmp/s3c.py" | sha256sum -c - && sudo cp /tmp/s3c.py /usr/local/bin/s3c && sudo chmod +x /usr/local/bin/s3c
+sudo rm /tmp/s3c.py
+
 gpg --batch --allow-secret-key-import --import kvm_sign.key
 rm kvm_sign.key
 
@@ -144,10 +148,6 @@ rm ~/mirror/yum/oraclelinux/10/*debuginfo*
 rm ~/mirror/yum/oraclelinux/10/*debugsource*
 createrepo ~/mirror/yum/oraclelinux/10
 
-rm -f rpmbuild/RPMS/noarch/qemu-*11.0.1*
-rm -f rpmbuild/RPMS/x86_64/qemu-*11.0.1*
-rm -f rpmbuild/SRPMS/qemu-*11.0.1*
-
 # kvm gui mirror
 mkdir -p ~/mirror-gui/yum/oraclelinux/10
 rpm --resign rpmbuild/RPMS/noarch/*.rpm
@@ -162,41 +162,29 @@ createrepo ~/mirror-gui/yum/oraclelinux/10
 ## kvm upload
 
 ```bash
-python3 ~/rpmbuild/TOOLS/autoindex.py mirror kvm-unstable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force vultr-east/repo.pritunl.com/kvm-unstable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force r2/pritunl-repo-east/kvm-unstable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force r2/pritunl-repo-west/kvm-unstable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror vultr-east/repo.pritunl.com/kvm-unstable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror r2/pritunl-repo-east/kvm-unstable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror r2/pritunl-repo-west/kvm-unstable
+s3c mirror /home/cloud/mirror/ r2-east:/kvm-unstable/
+s3c index r2-east:/kvm-unstable/
+s3c mirror /home/cloud/mirror/ r2-west:/kvm-unstable/
+s3c index r2-west:/kvm-unstable/
 
-python3 ~/rpmbuild/TOOLS/autoindex.py mirror kvm-stable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force vultr-east/repo.pritunl.com/kvm-stable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force r2/pritunl-repo-east/kvm-stable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force r2/pritunl-repo-west/kvm-stable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror vultr-east/repo.pritunl.com/kvm-stable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror r2/pritunl-repo-east/kvm-stable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror r2/pritunl-repo-west/kvm-stable
+s3c mirror /home/cloud/mirror/ r2-east:/kvm-stable/
+s3c index r2-east:/kvm-stable/
+s3c mirror /home/cloud/mirror/ r2-west:/kvm-stable/
+s3c index r2-west:/kvm-stable/
 ```
 
 ## kvm gui upload
 
 ```bash
-python3 ~/rpmbuild/TOOLS/autoindex.py mirror-gui kvm-gui-unstable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force vultr-east/repo.pritunl.com/kvm-gui-unstable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force r2/pritunl-repo-east/kvm-gui-unstable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force r2/pritunl-repo-west/kvm-gui-unstable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror-gui:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror vultr-east/repo.pritunl.com/kvm-gui-unstable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror-gui:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror r2/pritunl-repo-east/kvm-gui-unstable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror-gui:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror r2/pritunl-repo-west/kvm-gui-unstable
+s3c mirror /home/cloud/mirror-gui/ r2-east:/kvm-gui-unstable/
+s3c index r2-east:/kvm-gui-unstable/
+s3c mirror /home/cloud/mirror-gui/ r2-west:/kvm-gui-unstable/
+s3c index r2-west:/kvm-gui-unstable/
 
-python3 ~/rpmbuild/TOOLS/autoindex.py mirror-gui kvm-gui-stable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force vultr-east/repo.pritunl.com/kvm-gui-stable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force r2/pritunl-repo-east/kvm-gui-stable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z localhost/tools rm -r --force r2/pritunl-repo-west/kvm-gui-stable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror-gui:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror vultr-east/repo.pritunl.com/kvm-gui-stable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror-gui:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror r2/pritunl-repo-east/kvm-gui-stable
-sudo podman run --rm -v /home/cloud/.mc:/root/.mc:Z -v /home/cloud/mirror-gui:/mirror:Z localhost/tools mirror --summary --remove --overwrite --md5 --retry --checksum=MD5 --disable-multipart /mirror r2/pritunl-repo-west/kvm-gui-stable
+s3c mirror /home/cloud/mirror-gui/ r2-east:/kvm-gui-stable/
+s3c index r2-east:/kvm-gui-stable/
+s3c mirror /home/cloud/mirror-gui/ r2-west:/kvm-gui-stable/
+s3c index r2-west:/kvm-gui-stable/
 ```
 
 # qemu features
