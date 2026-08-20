@@ -90,8 +90,8 @@ rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
     /home/cloud/git/qemu-build/ cloud@$BUILD_SERVER:/home/cloud/rpmbuild/
 
 cd ~/rpmbuild/SOURCES/
-wget https://download.qemu.org/qemu-11.0.2.tar.xz
-wget https://download.qemu.org/qemu-11.0.2.tar.xz.sig
+wget https://download.qemu.org/qemu-11.1.0.tar.xz
+wget https://download.qemu.org/qemu-11.1.0.tar.xz.sig
 
 cd ~/rpmbuild/SPECS/
 
@@ -103,9 +103,10 @@ sudo dnf builddep ~/rpmbuild/SPECS/virglrenderer.spec
 rpmbuild -ba virglrenderer.spec
 sudo dnf install ~/rpmbuild/RPMS/x86_64/virglrenderer-1*.el10.x86_64.rpm ~/rpmbuild/RPMS/x86_64/virglrenderer-devel-*.el10.x86_64.rpm
 
-find ~/rpmbuild/RPMS -type f -name 'qemu-*11.0.1*.rpm' -delete
-find ~/rpmbuild/SRPMS -type f -name 'qemu-*11.0.1*.rpm' -delete
+find ~/rpmbuild/RPMS -type f -name 'qemu-*11.1.0*.rpm' -delete
+find ~/rpmbuild/SRPMS -type f -name 'qemu-*11.1.0*.rpm' -delete
 
+rpmbuild --clean qemu.spec
 sed -i 's/%global have_gtk 0/%global have_gtk 1/' ./qemu.spec
 sudo dnf builddep ~/rpmbuild/SPECS/qemu.spec
 rpmbuild -ba qemu.spec
@@ -190,11 +191,11 @@ s3c index r2-west:/kvm-gui-stable/
 # qemu features
 
 ```
-qemu 11.0.2
+qemu 11.1.0
 
   Build environment
-    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-11.0.2/qemu_kvm_build
-    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-11.0.2
+    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-11.1.0/qemu_kvm_build
+    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-11.1.0
     Download dependencies           : NO
 
   Directories
@@ -212,8 +213,8 @@ qemu 11.0.2
     Doc directory                   : /usr/share/doc
 
   Host binaries
-    python                          : /home/cloud/rpmbuild/BUILD/qemu-11.0.2/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
-    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-11.0.2/qemu_kvm_build/pyvenv/bin/sphinx-build
+    python                          : /home/cloud/rpmbuild/BUILD/qemu-11.1.0/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
+    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-11.1.0/qemu_kvm_build/pyvenv/bin/sphinx-build
     gdb                             : /usr/bin/gdb
     iasl                            : NO
     genisoimage                     :
@@ -230,7 +231,7 @@ qemu 11.0.2
     fuzzing support                 : NO
     Audio drivers                   :
     Trace backends                  : log
-    QOM debugging                   : NO
+    QOM debugging                   : YES
     Relocatable install             : NO
     vhost-kernel support            : YES
     vhost-net support               : YES
@@ -271,7 +272,7 @@ qemu 11.0.2
     mingw32 support                 : NO
 
   Cross compilers
-    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-11.0.2/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-11.0.2/tests/docker/docker.py --engine auto cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-11.0.2 --
+    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-11.1.0/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-11.1.0/tests/docker/docker.py --command podman cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-11.1.0 --
 
   Targets and accelerators
     KVM support                     : YES
@@ -316,6 +317,7 @@ qemu 11.0.2
   Crypto
     TLS priority                    : @QEMU,SYSTEM
     GNUTLS support                  : YES 3.8.10
+      GNUTLS crypto                 : YES
       GNUTLS bug 1717 workaround    : NO
     libgcrypt                       : NO
     nettle                          : NO
@@ -337,6 +339,7 @@ qemu 11.0.2
     VNC support                     : YES
     VNC SASL support                : YES
     VNC JPEG support                : YES 3.0.2
+    VNC D-Bus server (qemu-vnc)     : YES
     spice protocol support          : YES 0.14.4
       spice server support          : NO
     curses support                  : NO
@@ -355,7 +358,7 @@ qemu 11.0.2
     JACK support                    : NO
 
   Network backends
-    AF_XDP support                  : YES 1.5.5
+    AF_XDP support                  : YES 1.6.2
     passt support                   : NO
     slirp support                   : YES 4.7.0
     vde support                     : NO
@@ -370,23 +373,22 @@ qemu 11.0.2
     curl support                    : NO
     Multipath support               : YES
     Linux AIO support               : YES
-    Linux io_uring support          : YES 2.5
+    Linux io_uring support          : YES 2.12
     ATTR/XATTR support              : YES
     RDMA support                    : YES
     fdt support                     : YES
     libcap-ng support               : YES
-    bpf support                     : YES 1.6.0
+    bpf support                     : YES 1.7.0
     rbd support                     : NO
     smartcard support               : NO
     U2F support                     : NO
-    libusb                          : YES 1.0.28
+    libusb                          : YES 1.0.30
     usb net redir                   : YES 0.13.0
     OpenGL support (epoxy)          : YES 1.5.10
-    GBM                             : YES 25.0.7
+    GBM                             : YES 25.2.7
     libiscsi support                : NO
     libnfs support                  : NO
     seccomp support                 : YES 2.5.6
-    GlusterFS support               : NO
     hv-balloon support              : NO
     TPM support                     : YES
     IGVM support                    : NO
@@ -402,11 +404,11 @@ qemu 11.0.2
     NUMA host support               : YES
     capstone                        : YES 5.0.1
     libpmem support                 : NO
-    libdaxctl support               : YES 80
+    libdaxctl support               : YES 82
     libcbor support                 : NO
     libudev                         : YES 257
     FUSE lseek                      : NO
-    selinux                         : YES 3.9
+    selinux                         : YES 3.10
     libdw                           : NO
     valgrind                        : NO
 
@@ -463,10 +465,8 @@ qemu 11.0.2
     gdb                             : /usr/bin/gdb
     gettext                         : disabled
     gio                             : enabled
-    glusterfs                       : disabled
     gnutls                          : enabled
     gtk                             : disabled
-    gtk_clipboard                   : disabled
     guest_agent                     : disabled
     guest_agent_msi                 : disabled
     hv_balloon                      : disabled
@@ -513,7 +513,7 @@ qemu 11.0.2
     passt                           : disabled
     pipewire                        : disabled
     pixman                          : enabled
-    pkgversion                      : qemu-11.0.2-1.el10
+    pkgversion                      : qemu-11.1.0-1.el10
     png                             : enabled
     prefix                          : /usr
     pvg                             : disabled
@@ -521,7 +521,8 @@ qemu 11.0.2
     qed                             : disabled
     qemu_firmwarepath               : ["""/usr/share/qemu-firmware""","""/usr/share/ipxe/qemu""","""/usr/share/seavgabios""","""/usr/share/seabios""",]
     qemu_suffix                     : qemu
-    qom_cast_debug                  : false
+    qemu_vnc                        : enabled
+    qom_cast_debug                  : true
     qpl                             : disabled
     rbd                             : disabled
     rdma                            : enabled
@@ -584,11 +585,11 @@ qemu 11.0.2
 # qemu gui features
 
 ```
-qemu 11.0.2
+qemu 11.1.0
 
   Build environment
-    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-11.0.2/qemu_kvm_build
-    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-11.0.2
+    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-11.1.0/qemu_kvm_build
+    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-11.1.0
     Download dependencies           : NO
 
   Directories
@@ -606,8 +607,8 @@ qemu 11.0.2
     Doc directory                   : /usr/share/doc
 
   Host binaries
-    python                          : /home/cloud/rpmbuild/BUILD/qemu-11.0.2/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
-    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-11.0.2/qemu_kvm_build/pyvenv/bin/sphinx-build
+    python                          : /home/cloud/rpmbuild/BUILD/qemu-11.1.0/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
+    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-11.1.0/qemu_kvm_build/pyvenv/bin/sphinx-build
     gdb                             : /usr/bin/gdb
     iasl                            : NO
     genisoimage                     :
@@ -624,7 +625,7 @@ qemu 11.0.2
     fuzzing support                 : NO
     Audio drivers                   :
     Trace backends                  : log
-    QOM debugging                   : NO
+    QOM debugging                   : YES
     Relocatable install             : NO
     vhost-kernel support            : YES
     vhost-net support               : YES
@@ -665,7 +666,7 @@ qemu 11.0.2
     mingw32 support                 : NO
 
   Cross compilers
-    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-11.0.2/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-11.0.2/tests/docker/docker.py --engine auto cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-11.0.2 --
+    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-11.1.0/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-11.1.0/tests/docker/docker.py --command podman cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-11.1.0 --
 
   Targets and accelerators
     KVM support                     : YES
@@ -710,6 +711,7 @@ qemu 11.0.2
   Crypto
     TLS priority                    : @QEMU,SYSTEM
     GNUTLS support                  : YES 3.8.10
+      GNUTLS crypto                 : YES
       GNUTLS bug 1717 workaround    : NO
     libgcrypt                       : NO
     nettle                          : NO
@@ -731,6 +733,7 @@ qemu 11.0.2
     VNC support                     : YES
     VNC SASL support                : YES
     VNC JPEG support                : YES 3.0.2
+    VNC D-Bus server (qemu-vnc)     : YES
     spice protocol support          : YES 0.14.4
       spice server support          : NO
     curses support                  : NO
@@ -749,7 +752,7 @@ qemu 11.0.2
     JACK support                    : NO
 
   Network backends
-    AF_XDP support                  : YES 1.5.5
+    AF_XDP support                  : YES 1.6.2
     passt support                   : NO
     slirp support                   : YES 4.7.0
     vde support                     : NO
@@ -764,23 +767,22 @@ qemu 11.0.2
     curl support                    : NO
     Multipath support               : YES
     Linux AIO support               : YES
-    Linux io_uring support          : YES 2.5
+    Linux io_uring support          : YES 2.12
     ATTR/XATTR support              : YES
     RDMA support                    : YES
     fdt support                     : YES
     libcap-ng support               : YES
-    bpf support                     : YES 1.6.0
+    bpf support                     : YES 1.7.0
     rbd support                     : NO
     smartcard support               : NO
     U2F support                     : NO
-    libusb                          : YES 1.0.28
+    libusb                          : YES 1.0.30
     usb net redir                   : YES 0.13.0
     OpenGL support (epoxy)          : YES 1.5.10
-    GBM                             : YES 25.0.7
+    GBM                             : YES 25.2.7
     libiscsi support                : NO
     libnfs support                  : NO
     seccomp support                 : YES 2.5.6
-    GlusterFS support               : NO
     hv-balloon support              : NO
     TPM support                     : YES
     IGVM support                    : NO
@@ -796,11 +798,11 @@ qemu 11.0.2
     NUMA host support               : YES
     capstone                        : YES 5.0.1
     libpmem support                 : NO
-    libdaxctl support               : YES 80
+    libdaxctl support               : YES 82
     libcbor support                 : NO
     libudev                         : YES 257
     FUSE lseek                      : NO
-    selinux                         : YES 3.9
+    selinux                         : YES 3.10
     libdw                           : NO
     valgrind                        : NO
 
@@ -857,10 +859,8 @@ qemu 11.0.2
     gdb                             : /usr/bin/gdb
     gettext                         : disabled
     gio                             : enabled
-    glusterfs                       : disabled
     gnutls                          : enabled
     gtk                             : enabled
-    gtk_clipboard                   : disabled
     guest_agent                     : disabled
     guest_agent_msi                 : disabled
     hv_balloon                      : disabled
@@ -907,7 +907,7 @@ qemu 11.0.2
     passt                           : disabled
     pipewire                        : disabled
     pixman                          : enabled
-    pkgversion                      : qemu-11.0.2-1.el10
+    pkgversion                      : qemu-11.1.0-1.el10
     png                             : enabled
     prefix                          : /usr
     pvg                             : disabled
@@ -915,7 +915,8 @@ qemu 11.0.2
     qed                             : disabled
     qemu_firmwarepath               : ["""/usr/share/qemu-firmware""","""/usr/share/ipxe/qemu""","""/usr/share/seavgabios""","""/usr/share/seabios""",]
     qemu_suffix                     : qemu
-    qom_cast_debug                  : false
+    qemu_vnc                        : enabled
+    qom_cast_debug                  : true
     qpl                             : disabled
     rbd                             : disabled
     rdma                            : enabled

@@ -104,7 +104,7 @@
 
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu
-Version: 11.0.2
+Version: 11.1.0
 Release: 1%{?rcrel}%{?dist}
 Epoch: 18
 License: GPLv2 and GPLv2+ and CC-BY
@@ -560,10 +560,8 @@ mkdir -p %{qemu_kvm_build}
   --disable-gcrypt                 \\\
   --disable-gettext                \\\
   --disable-gio                    \\\
-  --disable-glusterfs              \\\
   --disable-gnutls                 \\\
   --disable-gtk                    \\\
-  --disable-gtk-clipboard          \\\
   --disable-guest-agent            \\\
   --disable-guest-agent-msi        \\\
   --disable-hv-balloon             \\\
@@ -613,6 +611,7 @@ mkdir -p %{qemu_kvm_build}
   --disable-pvg                    \\\
   --disable-qcow1                  \\\
   --disable-qed                    \\\
+  --disable-qemu-vnc               \\\
   --disable-qom-cast-debug         \\\
   --disable-qpl                    \\\
   --disable-rbd                    \\\
@@ -782,6 +781,8 @@ run_configure \
   --enable-libdaxctl \
   --enable-libkeyutils \
   --enable-multiprocess \
+  --enable-qemu-vnc \
+  --enable-qom-cast-debug \
   --enable-replication \
 %if %{have_rutabaga}
   --enable-rutabaga-gfx \
@@ -840,6 +841,9 @@ cp -ur %{qemu_kvm_build}/tests/qemu-iotests/* %{buildroot}%{testsdir}/tests/qemu
 pushd %{qemu_kvm_build}
 %make_install
 popd
+
+# qemu-vnc not installed by make install
+install -D -p -m 0755 %{qemu_kvm_build}/tools/qemu-vnc/qemu-vnc %{buildroot}%{_bindir}/qemu-vnc
 
 # We need to make the block device modules and other qemu SO files executable
 # otherwise RPM won't pick up their dependencies.
@@ -953,8 +957,10 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 %files tools
 %{_bindir}/qemu-keymap
 %{_bindir}/qemu-edid
+%{_bindir}/qemu-vnc
 %{_datadir}/qemu/dump-guest-memory.py*
 %{_datadir}/qemu/trace-events-all
+%{_mandir}/man1/qemu-vnc.1*
 
 
 %files docs
@@ -1106,6 +1112,9 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 
 %changelog
+* Wed Aug 19 2026 Zachary Huff <zach@pritunl.com> - 11.1.0-1
+- Rebase to qemu 11.1.0
+
 * Sun Jun 28 2026 Zachary Huff <zach@pritunl.com> - 11.0.2-1
 - Rebase to qemu 11.0.2
 
