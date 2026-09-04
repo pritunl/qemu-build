@@ -104,7 +104,7 @@
 
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu
-Version: 11.1.0
+Version: 11.1.1
 Release: 1%{?rcrel}%{?dist}
 Epoch: 18
 License: GPLv2 and GPLv2+ and CC-BY
@@ -247,7 +247,10 @@ Requires(post): systemd-units
 Requires(preun): systemd-units
 Requires(postun): systemd-units
 Requires: ipxe-roms-qemu
-Provides: qemu-kvm-common = %{epoch}:%{version}-%{release}
+Provides: qemu-kvm-common = %{evr}
+Obsoletes: qemu-kvm-common < %{evr}
+Obsoletes: qemu-kvm-block-curl < %{evr}
+Obsoletes: qemu-kvm-block-rbd < %{evr}
 %description common
 QEMU is an open source virtualizer that provides hardware emulation for
 the KVM hypervisor.
@@ -258,6 +261,8 @@ This package provides documentation and auxiliary programs used with QEMU.
 %package docs
 Summary: %{name} documentation
 BuildArch: noarch
+Provides: qemu-kvm-docs = %{evr}
+Obsoletes: qemu-kvm-docs < %{evr}
 %description docs
 %{name}-docs provides documentation files regarding %{name}.
 
@@ -270,6 +275,8 @@ This package provides a command line tool for manipulating disk images.
 
 %package tools
 Summary: %{name} support tools
+Provides: qemu-kvm-tools = %{evr}
+Obsoletes: qemu-kvm-tools < %{evr}
 %description tools
 %{name}-tools provides various tools related to %{name} usage.
 
@@ -298,6 +305,8 @@ tests, or qemu-iotests.
 %package block-blkio
 Summary: QEMU blkio block driver
 Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
+Provides: qemu-kvm-block-blkio = %{evr}
+Obsoletes: qemu-kvm-block-blkio < %{evr}
 %description block-blkio
 This package provides the additional blkio block driver for QEMU.
 
@@ -315,6 +324,8 @@ This package provides the additional D-Bus audio driver for QEMU.
 %package audio-pa
 Summary: QEMU PulseAudio audio driver
 Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
+Provides: qemu-kvm-audio-pa = %{evr}
+Obsoletes: qemu-kvm-audio-pa < %{evr}
 %description audio-pa
 This package provides the additional PulseAudio audio driver for QEMU.
 
@@ -326,6 +337,8 @@ Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
 Requires: mesa-libGL
 Requires: mesa-libEGL
 Requires: mesa-dri-drivers
+Provides: qemu-kvm-ui-opengl = %{evr}
+Obsoletes: qemu-kvm-ui-opengl < %{evr}
 %description ui-opengl
 This package provides opengl support.
 %endif
@@ -362,6 +375,8 @@ This package provides the additional SDL UI for QEMU.
 Summary: QEMU EGL headless driver
 Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
 Requires: %{name}-ui-opengl%{?_isa} = %{epoch}:%{version}-%{release}
+Provides: qemu-kvm-ui-egl-headless = %{evr}
+Obsoletes: qemu-kvm-ui-egl-headless < %{evr}
 %description ui-egl-headless
 This package provides the additional egl-headless UI for QEMU.
 
@@ -369,6 +384,8 @@ This package provides the additional egl-headless UI for QEMU.
 %package device-display-virtio-gpu
 Summary: QEMU virtio-gpu display device
 Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
+Provides: qemu-kvm-device-display-virtio-gpu = %{evr}
+Obsoletes: qemu-kvm-device-display-virtio-gpu < %{evr}
 %description device-display-virtio-gpu
 This package provides the virtio-gpu display device for QEMU.
 
@@ -394,6 +411,8 @@ This package provides the virtio-gpu-rutabaga display device for QEMU.
 %package device-display-virtio-gpu-pci
 Summary: QEMU virtio-gpu-pci display device
 Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
+Provides: qemu-kvm-device-display-virtio-gpu-pci = %{evr}
+Obsoletes: qemu-kvm-device-display-virtio-gpu-pci < %{evr}
 %description device-display-virtio-gpu-pci
 This package provides the virtio-gpu-pci display device for QEMU.
 
@@ -419,6 +438,8 @@ This package provides the virtio-gpu-pci-rutabaga display device for QEMU.
 %package device-display-virtio-vga
 Summary: QEMU virtio-vga display device
 Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
+Provides: qemu-kvm-device-display-virtio-vga = %{evr}
+Obsoletes: qemu-kvm-device-display-virtio-vga < %{evr}
 %description device-display-virtio-vga
 This package provides the virtio-vga display device for QEMU.
 
@@ -449,6 +470,8 @@ This package provides the UEFI variable service for QEMU.
 %package device-usb-host
 Summary: QEMU usb host device
 Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
+Provides: qemu-kvm-device-usb-host = %{evr}
+Obsoletes: qemu-kvm-device-usb-host < %{evr}
 %description device-usb-host
 This package provides the USB pass through driver for QEMU.
 
@@ -456,6 +479,8 @@ This package provides the USB pass through driver for QEMU.
 %package device-usb-redirect
 Summary: QEMU usbredir device
 Requires: %{name}-common%{?_isa} = %{epoch}:%{version}-%{release}
+Provides: qemu-kvm-device-usb-redirect = %{evr}
+Obsoletes: qemu-kvm-device-usb-redirect < %{evr}
 %description device-usb-redirect
 This package provides the usbredir device for QEMU.
 
@@ -481,6 +506,8 @@ will install qemu-system-x86
 %package kvm-core
 Summary: QEMU metapackage for KVM support
 Requires: %{name}-system-x86-core = %{epoch}:%{version}-%{release}
+Provides: qemu-kvm-core = %{evr}
+Obsoletes: qemu-kvm-core < %{evr}
 %description kvm-core
 This is a meta-package that provides a qemu-system-<arch>-core package
 for native architectures where kvm can be enabled. For example, in an
@@ -1112,6 +1139,9 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 
 %changelog
+* Fri Sep 4 2026 Zachary Huff <zach@pritunl.com> - 11.1.1-1
+- Rebase to qemu 11.1.1
+
 * Wed Aug 19 2026 Zachary Huff <zach@pritunl.com> - 11.1.0-1
 - Rebase to qemu 11.1.0
 
