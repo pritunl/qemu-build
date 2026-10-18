@@ -104,7 +104,7 @@
 
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu
-Version: 11.1.1
+Version: 11.1.2
 Release: 1%{?rcrel}%{?dist}
 Epoch: 18
 License: GPLv2 and GPLv2+ and CC-BY
@@ -167,7 +167,6 @@ BuildRequires: pkgconfig(epoxy)
 BuildRequires: pkgconfig(libdrm)
 BuildRequires: pkgconfig(gbm)
 %endif
-BuildRequires: perl-Test-Harness
 BuildRequires: libslirp-devel
 BuildRequires: libbpf-devel
 BuildRequires: libblkio-devel
@@ -1139,6 +1138,9 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 
 %changelog
+* Sun Oct 18 2026 Zachary Huff <zach@pritunl.com> - 11.1.2-1
+- Rebase to qemu 11.1.2
+
 * Fri Sep 4 2026 Zachary Huff <zach@pritunl.com> - 11.1.1-1
 - Rebase to qemu 11.1.1
 

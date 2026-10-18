@@ -93,10 +93,9 @@ rsync --human-readable --archive --xattrs --progress --delete --exclude=.git \
     /home/cloud/git/qemu-build/ cloud@$BUILD_SERVER:/home/cloud/rpmbuild/
 
 cd ~/rpmbuild/SOURCES/
-wget https://download.qemu.org/qemu-11.1.1.tar.xz
-wget https://download.qemu.org/qemu-11.1.1.tar.xz.sig
-echo "f30b36800b44ac0370e63341a8c5591019648a78d5929e18b0177873c0b6e4a0cbbddc069337cb06a3b5d20d15779c9b9786d0a92073c421fb07ae14a67d4646  qemu-11.1.1.tar.xz" | sha512sum -c -
-echo "b9809aba18d6f0ee9b98a40b8d70b2df0c1cb3b9cbc3a59f3ffd4c61685e4e8fcbf6982f7271ff96fd8b087dfdc941587d46abf0dba589107f20a78a86e52646  qemu-11.1.1.tar.xz.sig" | sha512sum -c -
+wget https://download.qemu.org/qemu-11.1.2.tar.xz
+wget https://download.qemu.org/qemu-11.1.2.tar.xz.sig
+echo "6e32ebc1adfb5223488fa760a32f900a24a121b3b0637de561f55e3852f3f6fb47ba6e4776320924990d9cebd33d2908f520f017703c4f438dfa528dcb714600  qemu-11.1.2.tar.xz" | sha512sum -c -
 
 cd ~/rpmbuild/SPECS/
 
@@ -108,9 +107,8 @@ sudo dnf builddep ~/rpmbuild/SPECS/virglrenderer.spec
 rpmbuild -ba virglrenderer.spec
 sudo dnf install ~/rpmbuild/RPMS/x86_64/virglrenderer-1*.el10.x86_64.rpm ~/rpmbuild/RPMS/x86_64/virglrenderer-devel-*.el10.x86_64.rpm
 
-find ~/rpmbuild/RPMS -type f -name 'qemu-*11.1.1*.rpm' -delete
-find ~/rpmbuild/SRPMS -type f -name 'qemu-*11.1.1*.rpm' -delete
-
+find ~/rpmbuild/RPMS -type f -name 'qemu-*11.1.2*.rpm' -delete
+find ~/rpmbuild/SRPMS -type f -name 'qemu-*11.1.2*.rpm' -delete
 rpmbuild --clean qemu.spec
 sed -i 's/%global have_gtk 0/%global have_gtk 1/' ./qemu.spec
 sudo dnf builddep ~/rpmbuild/SPECS/qemu.spec
@@ -196,11 +194,11 @@ s3c index r2-west:/kvm-gui-stable/
 # qemu features
 
 ```
-qemu 11.1.1
+qemu 11.1.2
 
   Build environment
-    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-11.1.1/qemu_kvm_build
-    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-11.1.1
+    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-11.1.2/qemu_kvm_build
+    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-11.1.2
     Download dependencies           : NO
 
   Directories
@@ -218,8 +216,8 @@ qemu 11.1.1
     Doc directory                   : /usr/share/doc
 
   Host binaries
-    python                          : /home/cloud/rpmbuild/BUILD/qemu-11.1.1/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
-    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-11.1.1/qemu_kvm_build/pyvenv/bin/sphinx-build
+    python                          : /home/cloud/rpmbuild/BUILD/qemu-11.1.2/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
+    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-11.1.2/qemu_kvm_build/pyvenv/bin/sphinx-build
     gdb                             : /usr/bin/gdb
     iasl                            : NO
     genisoimage                     :
@@ -277,7 +275,7 @@ qemu 11.1.1
     mingw32 support                 : NO
 
   Cross compilers
-    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-11.1.1/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-11.1.1/tests/docker/docker.py --command podman cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-11.1.1 --
+    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-11.1.2/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-11.1.2/tests/docker/docker.py --command podman cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-11.1.2 --
 
   Targets and accelerators
     KVM support                     : YES
@@ -518,7 +516,7 @@ qemu 11.1.1
     passt                           : disabled
     pipewire                        : disabled
     pixman                          : enabled
-    pkgversion                      : qemu-11.1.1-1.el10
+    pkgversion                      : qemu-11.1.2-1.el10
     png                             : enabled
     prefix                          : /usr
     pvg                             : disabled
@@ -590,11 +588,11 @@ qemu 11.1.1
 # qemu gui features
 
 ```
-qemu 11.1.1
+qemu 11.1.2
 
   Build environment
-    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-11.1.1/qemu_kvm_build
-    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-11.1.1
+    Build directory                 : /home/cloud/rpmbuild/BUILD/qemu-11.1.2/qemu_kvm_build
+    Source path                     : /home/cloud/rpmbuild/BUILD/qemu-11.1.2
     Download dependencies           : NO
 
   Directories
@@ -612,8 +610,8 @@ qemu 11.1.1
     Doc directory                   : /usr/share/doc
 
   Host binaries
-    python                          : /home/cloud/rpmbuild/BUILD/qemu-11.1.1/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
-    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-11.1.1/qemu_kvm_build/pyvenv/bin/sphinx-build
+    python                          : /home/cloud/rpmbuild/BUILD/qemu-11.1.2/qemu_kvm_build/pyvenv/bin/python3 (version: 3.12)
+    sphinx-build                    : /home/cloud/rpmbuild/BUILD/qemu-11.1.2/qemu_kvm_build/pyvenv/bin/sphinx-build
     gdb                             : /usr/bin/gdb
     iasl                            : NO
     genisoimage                     :
@@ -671,7 +669,7 @@ qemu 11.1.1
     mingw32 support                 : NO
 
   Cross compilers
-    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-11.1.1/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-11.1.1/tests/docker/docker.py --command podman cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-11.1.1 --
+    x86_64                          : /home/cloud/rpmbuild/BUILD/qemu-11.1.2/qemu_kvm_build/pyvenv/bin/python3 -B /home/cloud/rpmbuild/BUILD/qemu-11.1.2/tests/docker/docker.py --command podman cc --cc x86_64-linux-gnu-gcc -i qemu/debian-amd64-cross -s /home/cloud/rpmbuild/BUILD/qemu-11.1.2 --
 
   Targets and accelerators
     KVM support                     : YES
@@ -912,7 +910,7 @@ qemu 11.1.1
     passt                           : disabled
     pipewire                        : disabled
     pixman                          : enabled
-    pkgversion                      : qemu-11.1.1-1.el10
+    pkgversion                      : qemu-11.1.2-1.el10
     png                             : enabled
     prefix                          : /usr
     pvg                             : disabled
