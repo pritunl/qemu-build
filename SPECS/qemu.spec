@@ -104,7 +104,7 @@
 
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu
-Version: 11.1.2
+Version: 11.1.3
 Release: 1%{?rcrel}%{?dist}
 Epoch: 18
 License: GPLv2 and GPLv2+ and CC-BY
@@ -544,6 +544,8 @@ mkdir -p %{qemu_kvm_build}
 
 
 %build
+export MESON_RSP_THRESHOLD=126976
+
 %define disable_everything         \\\
   --audio-drv-list=                \\\
   --disable-af-xdp                 \\\
@@ -1138,6 +1140,9 @@ useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
 
 
 %changelog
+* Sun Nov 01 2026 Zachary Huff <zach@pritunl.com> - 11.1.3-1
+- Rebase to qemu 11.1.3
+
 * Sun Oct 18 2026 Zachary Huff <zach@pritunl.com> - 11.1.2-1
 - Rebase to qemu 11.1.2
 

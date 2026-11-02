@@ -2,14 +2,19 @@
 %global drm_renderers asahi,msm
 %endif
 
+%global commit e0a1caf3b147bb26dfe524dbb85ded1177e7e49e
+%global shortcommit %(c=%{commit}; echo ${c:0:8})
+%global venus_protocol_version 1.1.3
+
 Name:		virglrenderer
-Version:	1.3.0
+Version:	1.3.0^261022.gite0a1caf3
 Release:	1%{?dist}
 
 Summary:	Virgl Rendering library.
 License:	MIT
 
-Source:         https://gitlab.freedesktop.org/virgl/virglrenderer/-/archive/%{version}/virglrenderer-%{version}.tar.bz2
+Source0:        https://gitlab.freedesktop.org/virgl/virglrenderer/-/archive/%{commit}/virglrenderer-%{shortcommit}.tar.gz
+Source1:        https://gitlab.freedesktop.org/virgl/venus-protocol/-/archive/v%{venus_protocol_version}/venus-protocol-v%{venus_protocol_version}.tar.gz
 
 BuildRequires:  meson
 BuildRequires:  gcc
@@ -21,6 +26,7 @@ BuildRequires:	libdrm-devel
 BuildRequires:  libva-devel
 BuildRequires:  vulkan-loader-devel
 BuildRequires:  python3-pyyaml
+BuildRequires:  python3-mako
 
 %description
 The virgil3d rendering library is a library used by
@@ -46,7 +52,9 @@ that can be used along with the mesa virgl
 driver to test virgl rendering without GL.
 
 %prep
-%autosetup -p1
+%autosetup -p1 -n virglrenderer-%{commit}
+mkdir -p subprojects/venus-protocol-%{venus_protocol_version}
+tar -xf %{SOURCE1} --strip-components=1 -C subprojects/venus-protocol-%{venus_protocol_version}
 
 %build
 %meson \
@@ -73,6 +81,10 @@ driver to test virgl rendering without GL.
 %{_bindir}/virgl_test_server
 
 %changelog
+* Sun Nov 01 2026 Zachary Huff <zach@pritunl.com> - 1.3.0^261022.gite0a1caf3-1
+- Update to git snapshot e0a1caf3
+- Vendor venus-protocol 1.1.3 as a meson subproject
+
 * Wed Feb 11 2026 Marc-André Lureau <marcandre.lureau@redhat.com> - 1.3.0-1
 - new version v1.3.0, fixes rhbz#2438458
 
